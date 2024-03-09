@@ -1,5 +1,3 @@
-'use strict'
-
 (function () {
     const mongoose = require('mongoose')
 	const Schema = mongoose.Schema;
@@ -14,8 +12,8 @@
 		createdAt: { type: Date, default: Date.now }
 	});
 
-	const Role = mongoose.model('Role', roleSchema);
-	root.Role = Role;
+	const Role = mongoose.model('Role', roleSchema)
+	root.Role = Role
 
 
 	const userSchema = new Schema({
@@ -92,7 +90,7 @@
 	})
 
     const EventType = mongoose.model('EventType', eventTypeSchema)
-	root.FoodType = ErrorEventType
+	root.EventType = EventType
 
     /********************** Events ************************/
 	const eventSchema = new mongoose.Schema({
@@ -108,5 +106,58 @@
 
 	const Event = mongoose.model('Event', eventSchema)
 	root.Event = Event
+    
+    //token
+	const TokenSchema = new mongoose.Schema({
+		token:{ type: String, required: true },
+		userId:{type: String, required: true},
+		isValid:{ type: Boolean, default: true },
+		createdAt: { type: Date, default: Date.now }
+	})
+	const JWTToken = mongoose.model('JWTToken', TokenSchema)
+	root.JWTToken = JWTToken
 
+    //Notification for customer eg. sudden changes in the schedule
+	var notificationSchema = new mongoose.Schema({
+		notification: { type: String, required: true },
+		startDate: { type: Date },
+		endDate: { type: Date },
+		publish: { type: Boolean, default: true },
+		lang: { type:String, default:'en'},
+		notificationType: { type: mongoose.Schema.Types.ObjectId, ref: 'NotificationType', required:true },
+		createdAt: { type: Date, default: Date.now }
+		
+	})
+
+	const Notification = mongoose.model('Notification', notificationSchema);
+	root.Notification = Notification
+    
+	//notification Type
+	const NotificationTypeSchema = new mongoose.Schema({
+		name: {type:String, unique:true, required:true},
+		publish:{ type: Boolean, default: true },
+		createdAt: { type: Date, default: Date.now }
+	}) 
+	const NotificationType = mongoose.model('NotificationType', NotificationTypeSchema)
+	root.NotificationType = NotificationType
+
+    /* use of photo */
+	const photoTypeSchema = new Schema({
+		name: { type: String, unique:true, required: true },
+		publish:{ type: Boolean, default: true },
+		createdAt: { type: Date, default: Date.now }
+	})
+	const PhotoType = mongoose.model('PhotoType', photoTypeSchema);
+	root.PhotoType = PhotoType;
+
+	const photoSchema = new mongoose.Schema({
+		createdAt: { type: Date, default: Date.now },
+		photoLink: String,
+		position: Number,
+		publish:{ type:Boolean, default:true}, 
+		photoType:[{type: mongoose.Schema.Types.ObjectId, ref: 'PhotoType', required:true}]
+	})
+
+	const Photo = mongoose.model('Photo', photoSchema)
+	root.Photo = Photo
 }).call(this)
