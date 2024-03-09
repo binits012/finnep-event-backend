@@ -1,0 +1,41 @@
+{
+  "name": "yellowbridge",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node ./bin/www"
+  },
+  "dependencies": {
+    "cookie-parser": "~1.4.4",
+    "debug": "~2.6.9",
+    "express": "^4.18.3",
+    "morgan": "~1.9.1"
+  },
+  "devDependencies": {
+    "@babel/cli": "^7.22.6",
+    "@babel/core": "^7.22.8",
+    "@babel/node": "^7.22.6",
+    "@babel/plugin-proposal-class-properties": "^7.18.6",
+    "@babel/plugin-proposal-object-rest-spread": "^7.20.7",
+    "@babel/polyfill": "^7.12.1",
+    "@babel/preset-env": "^7.22.7",
+    "ajv": "^6.10.2",
+    "ajv-errors": "^1.0.1",
+    "babel-loader": "^9.1.3",
+    "bcrypt": "^5.1.1",
+    "bullmq": "^5.1.4",
+    "copy-webpack-plugin": "^11.0.0",
+    "dotenv": "^16.3.1",
+    "jsonwebtoken": "^9.0.1",
+    "mongoose": "^7.3.2",
+    "nodemailer": "^6.9.8",
+    "nodemailer-smtp-transport": "^2.4.2",
+    "nodemon": "^3.0.1",
+    "qrcode": "^1.5.3",
+    "redis": "^4.6.12",
+    "webpack": "^5.88.2",
+    "webpack-cli": "^5.1.4",
+    "winston": "^3.10.0",
+    "winston-daily-rotate-file": "^4.7.1"
+  }
+}
