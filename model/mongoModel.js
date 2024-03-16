@@ -98,7 +98,7 @@
 		eventDescription: { type: String, required: true, unique: true },
 		eventTime: { type: Number, required: true }, 
 		eventDate: { type: Date, required: true },
-		eventPrice: { type: mongoose.Types.Decimal128, required: true },
+		eventPrice: { type: mongoose.Decimal128, required: true },
 		lang:{type:String, default:'en'},
 		position:{type:Number},
 		createdAt: { type: Date, default: Date.now }

@@ -1,0 +1,12 @@
+error: MongoServerError: E11000 duplicate key error collection: yellowbridge.users index: name_1 dup key: { name: "binit" }
+    at /home/binit/doc/nodejs/yellowbridge/node_modules/mongodb/src/operations/insert.ts:85:25
+    at /home/binit/doc/nodejs/yellowbridge/node_modules/mongodb/src/operations/command.ts:173:14
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+error: MongoServerError: E11000 duplicate key error collection: yellowbridge.users index: name_1 dup key: { name: "staff1" }
+    at /home/binit/doc/nodejs/yellowbridge/node_modules/mongodb/src/operations/insert.ts:85:25
+    at /home/binit/doc/nodejs/yellowbridge/node_modules/mongodb/src/operations/command.ts:173:14
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
+error: MongoServerError: E11000 duplicate key error collection: yellowbridge.users index: name_1 dup key: { name: "staff1" }
+    at /home/binit/doc/nodejs/yellowbridge/node_modules/mongodb/src/operations/insert.ts:85:25
+    at /home/binit/doc/nodejs/yellowbridge/node_modules/mongodb/src/operations/command.ts:173:14
+    at processTicksAndRejections (node:internal/process/task_queues:95:5)
