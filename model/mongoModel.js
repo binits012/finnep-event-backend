@@ -80,6 +80,27 @@
 	const Contact = mongoose.model('Contact', contactSchema);
 	root.Contact = Contact
 
+	/**************** Social Media Schema ****************** */
+	const socialMediaSchema = new mongoose.Schema({
+		name:{type:String, required:true, unique:true},
+		active:{ type: Boolean, default: true },
+		createdAt: { type: Date, default: Date.now }
+	})
+
+	const SocialMedia = mongoose.model('SocialMedia', socialMediaSchema )
+	root.SocialMedia = SocialMedia
+
+
+	const eventOnSocialMediaSchema =  new mongoose.Schema({
+		socialMedia:{type: mongoose.Schema.Types.ObjectId, ref: 'SocialMedia'}, 
+		link: {type:String},
+		active:{ type: Boolean, default: true },
+		createdAt: { type: Date, default: Date.now }
+	})
+
+	const EventOnSocialMedia = mongoose.model('EventOnSocialMedia',eventOnSocialMediaSchema)
+	root.EventOnSocialMedia = EventOnSocialMedia
+
     /**************** Event Type schema ******************** */
 	const eventTypeSchema = new mongoose.Schema({
 
@@ -92,14 +113,29 @@
     const EventType = mongoose.model('EventType', eventTypeSchema)
 	root.EventType = EventType
 
+	// Voulume and date based pricing
+	const volumeBasedPriceSchema = new mongoose.Schema({
+		quantity:{ type: Number, required: true },
+		title:{ type: String },
+		price:{ type:Number, required: true },
+		eventItem:{ type: mongoose.Schema.Types.ObjectId, ref: 'Event' },
+		active:{type:Boolean, default:true},
+		activeUntil: { type: Date, required:true },
+		createdAt: { type: Date, default: Date.now }
+	})
+	const VolumeBasedPrice = mongoose.model('VolumeBasedPrice', volumeBasedPriceSchema)
+	root.VolumeBasedPrice = VolumeBasedPrice
+
     /********************** Events ************************/
 	const eventSchema = new mongoose.Schema({
-		eventTitle: { type: String, required: true },
-		eventDescription: { type: String, required: true, unique: true },
+		eventTitle: { type: String, required: true, unique: true },
+		eventDescription: { type: String, required: true },
 		eventTime: { type: Number, required: true }, 
 		eventDate: { type: Date, required: true },
 		eventPrice: { type: mongoose.Decimal128, required: true },
+		occupancy: {type: Number, required:true},
 		lang:{type:String, default:'en'},
+		socialMedia:[{type: mongoose.Schema.Types.ObjectId, ref: 'EventOnSocialMedia'}],
 		position:{type:Number},
 		createdAt: { type: Date, default: Date.now }
 	})

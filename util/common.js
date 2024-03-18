@@ -3,6 +3,9 @@ require('dotenv')
 const moment = require('moment')
 
 const manipulatePhoneNumber = async (phoneNumber) =>{
+    if(/[aA-zZ].*/.test(phoneNumber)){
+        return null
+    }
     let sanitaizedPhoneNumber = phoneNumber.replaceAll("-","").replaceAll("(","").replaceAll(")","")
     if(sanitaizedPhoneNumber.startsWith('+358')) {
          //probably this is ok 

@@ -4,6 +4,7 @@ const logger = require('../model/logger')
 const User = require('../model/users')
 const Contact = require('../model/contact')
 const appText = require('../applicationTexts.js')
+const commonUtil = require('../util/common')
 require('dotenv').config()
 const consts = require('../const')
 
@@ -14,6 +15,12 @@ const createContact = async (req, res, next) => {
     const phone = req.body.phoneNumber
     const email = req.body.emailAddress
     const userId = req.params.id 
+    const manipulatedNumber = await commonUtil.manipulatePhoneNumber(phone) 
+    if(manipulatedNumber === null){
+        res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ message: 'bad phone number.', error: "you provided bad phone number "});
+        logger.log('error',"reservation create failed."+token)
+        return
+    }
     await jwtToken.verifyJWT(token, async (err, data) => {
         if (err || data === null) { 
             res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
@@ -21,6 +28,14 @@ const createContact = async (req, res, next) => {
             })
             return
         } else {
+            //check user
+            const user = await User.getUserById(userId)
+            if(user === null){
+                return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json(
+                {
+                    message: 'Given user not found.', error: appText.RESOURCE_NOT_FOUND
+                })
+            }
             const userFromToken = data.username
             const userRoleFromToken = data.role
             const getUserFromToken = await User.getUserByName(userFromToken)
@@ -48,7 +63,7 @@ const createContact = async (req, res, next) => {
             }
             const userContact = await Contact.getContactById(getUserFromPayload.id)
             if (userContact === null) {
-                await Contact.createContact(streetName, phone, email, getUserFromPayload).then(data => {
+                await Contact.createContact(streetName, manipulatedNumber, email, getUserFromPayload).then(data => {
                     delete data.crypto[0]
                     delete data.crypto[1]
                     data.user.pwd = ""

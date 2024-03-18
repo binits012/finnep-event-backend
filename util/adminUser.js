@@ -3,6 +3,7 @@ const Role = require('../model/role')
 const User = require('../model/users')
 const PhotoType = require('../model/photoType')
 const NotificationType = require('../model/notificationType')
+const SocialMedia = require('../model/socialMedia')
 const consts = require('../const')
 require('dotenv').config()
 const logger = require('../model/logger')
@@ -74,9 +75,27 @@ const notificationTypes = async () =>{
         }
     }
 }
+
+const socialMedia = async () =>{
+    const socialMedia = await SocialMedia.getAllSocialMedia()
+    if(socialMedia.length === 0){
+        try{
+            await SocialMedia.createSocialMedia("Facebook")
+            await SocialMedia.createSocialMedia("Twitter")
+            await SocialMedia.createSocialMedia("Instagram")
+            await SocialMedia.createSocialMedia("Whatsapp")
+            await SocialMedia.createSocialMedia("Viber")
+            await SocialMedia.createSocialMedia("Tiktok")
+
+        }catch(err){
+            logger.log('error',err)
+        }
+    }
+}
 module.exports = {
     createAdmin,
     createRoles, 
     photoTypes,
-    notificationTypes
+    notificationTypes,
+    socialMedia
 }

@@ -2,7 +2,6 @@
 const express = require('express')
 const router = express.Router()
 const api = require('../controllers/api.controller')
-const user = require('../controllers/user.controller')
 const contact = require('../controllers/contact.controller')
 
 router.route('/auth/user/login').post(api.login)
@@ -15,9 +14,9 @@ router.route('/user/staff')
     .get(api.getStaffUsers)
 
 router.route('/user/:id')
-    .get(user.getUserById)
-    .delete(user.deleteUserById)
-    .patch(user.updateUserById) 
+    .get(api.getUserById)
+    .delete(api.deleteUserById)
+    .patch(api.updateUserById) 
 
 router.route('/user/:id/contact')
     .get(contact.getContact)

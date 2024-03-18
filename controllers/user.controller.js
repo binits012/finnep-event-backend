@@ -83,10 +83,6 @@ const createStaffUser = async (req, res, next) => {
     const username = req.body.username
     const password = req.body.password
     const token = req.headers.authorization
-    const userObj = {
-        'username': username,
-        'password': password
-    } 
     //verify token
     await jwtToken.verifyJWT(token, async (err, data) => {
         if (err || data === null) { 
@@ -257,14 +253,12 @@ const getUserById = async (req, res, next) => {
     const token = req.headers.authorization
     if (userId === null || userId === "" || userId === undefined
         || token === null || token === "" || token === undefined) {
-        UserActivity.createUserActivity(token !== undefined ? token : "NOT PROVIDED", Action.READ, "get user failed.")
         res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({ message: 'given user not found. Check inputs.' });
         return
     }
 
     await jwtToken.verifyJWT(token, async (err, data) => {
         if (err || data === null) {
-            UserActivity.createUserActivity(token, Action.READ, "get user failed.")
             return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
                 message: 'Please, provide valid token', error: appText.TOKEN_NOT_VALID
             })
@@ -278,14 +272,12 @@ const getUserById = async (req, res, next) => {
                 })
             }
             if (consts.ROLE_SUPER_ADMIN === getUserFromId.role.roleType ) {
-                UserActivity.createUserActivity(token, Action.READ, "trying to access Super Admin.")
                 return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
                     message: 'Stop, you are not allowed to do so', error: appText.STOP_RIGHT_THERE
                 })
             }
             if (consts.ROLE_STAFF === getUserFromToken.role.roleType &&
                 (consts.ROLE_ADMIN === getUserFromId.role.roleType)) {
-                UserActivity.createUserActivity(token, Action.READ, "trying to access Admin.")
                 return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
                     message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
                 })
@@ -300,13 +292,11 @@ const deleteUserById = async (req, res, next) => {
     const token = req.headers.authorization
     if (userId === null || userId === "" || userId === undefined
         || token === null || token === "" || token === undefined) {
-        UserActivity.createUserActivity(token !== undefined ? token : "NOT PROVIDED", Action.DELETE, "delete user failed.")
         res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({ message: 'given user not found. Check inputs.' });
         return
     }
     await jwtToken.verifyJWT(token, async (err, data) => {
         if (err || data === null) {
-            UserActivity.createUserActivity(token, Action.DELETE, "delete user failed.")
             return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
                 message: 'Please, provide valid token', error: appText.TOKEN_NOT_VALID
             })
@@ -314,22 +304,25 @@ const deleteUserById = async (req, res, next) => {
             const userFromToken = data.username
             const userRoleFromToken = data.role
             let getUserFromId = await User.getUserById(userId)
-            
+            if(getUserFromId === null){
+                return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json(
+                    {
+                        message: 'Given user not found.', error: appText.RESOURCE_NOT_FOUND
+                    })
+            }
             if (consts.ROLE_SUPER_ADMIN === getUserFromId.role.roleType) {
-                UserActivity.createUserActivity(token, Action.DELETE, "trying to access Super Admin.")
                 return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
                     message: 'Stop, you are not allowed to do so', error: appText.STOP_RIGHT_THERE
                 })
             }
             if (consts.ROLE_STAFF === userRoleFromToken &&
                 (consts.ROLE_ADMIN === getUserFromId.role.roleType)) {
-                UserActivity.createUserActivity(token, Action.DELETE, "trying to access Admin.")
                 return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
                     message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
                 })
             }
 
-            if (consts.ROLE_STAFF === userRoleFromToken || consts.ROLE_CUSTOMER ===getUserFromId.role.roleType) {
+            if (consts.ROLE_STAFF === userRoleFromToken || consts.ROLE_MEMBER ===getUserFromId.role.roleType) {
                 if (userFromToken !== getUserFromId.name) {
                     return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
                         message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
@@ -362,7 +355,6 @@ const updateUserById = async (req, res, next) => {
     }
     await jwtToken.verifyJWT(token, async (err, data) => {
         if (err || data === null) {
-            UserActivity.createUserActivity(token, Action.UPDATE, "update user failed.")
             return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
                 message: 'Please, provide valid token', error: appText.TOKEN_NOT_VALID
             })
@@ -370,21 +362,25 @@ const updateUserById = async (req, res, next) => {
             const userFromToken = data.username
             const userRoleFromToken = data.role
             let getUserFromId = await User.getUserById(userId)
+            if(getUserFromId === null){
+                return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json(
+                    {
+                        message: 'Given user not found.', error: appText.RESOURCE_NOT_FOUND
+                    })
+            }
             if (consts.ROLE_SUPER_ADMIN === getUserFromId.role.roleType) {
-                UserActivity.createUserActivity(token, Action.UPDATE, "trying to access Super Admin.")
                 return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
                     message: 'Stop, you are not allowed to do so', error: appText.STOP_RIGHT_THERE
                 })
             }
             if (consts.ROLE_STAFF === userRoleFromToken &&
                 (consts.ROLE_ADMIN === getUserFromId.role.roleType)) {
-                UserActivity.createUserActivity(token, Action.UPDATE, "trying to access Admin.")
                 return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
                     message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
                 })
             }
 
-            if (consts.ROLE_STAFF === userRoleFromToken || consts.ROLE_CUSTOMER ===getUserFromId.role.roleType) {
+            if (consts.ROLE_STAFF === userRoleFromToken || consts.ROLE_MEMBER ===getUserFromId.role.roleType) {
                 if (userFromToken !== getUserFromId.name) {
                     return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
                         message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
@@ -394,7 +390,6 @@ const updateUserById = async (req, res, next) => {
             getUserFromId.active =  active !== null ? active : true
             getUserFromId.notificationAllowed = notificationAllowed === null ? false: notificationAllowed 
             await User.updateUser(userId, getUserFromId).then(data => {
-                UserActivity.createUserActivity(token, Action.UPDATE, "update user succeed")
                 return res.status(consts.HTTP_STATUS_OK).json({ data: data })
             }).catch(err => {
                 logger.log('error',err.stack)
@@ -418,7 +413,6 @@ const createUserWithContact = async(req,res, next) =>{
     const streetName = req.body.streetName
 
     if(password !== verifyPassword){
-        UserActivity.createUserActivity(token !== undefined ? token : username, Action.CREATE, "new  user creation failed.")
         res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ message: 'Failed to create new user. Check inputs.' });
         return
     }
@@ -429,14 +423,12 @@ const createUserWithContact = async(req,res, next) =>{
     }
     const userPayloadCheck = await PayloadCheck.userCreatePayloadCheck(userObj, token)
     if (!userPayloadCheck) {
-        UserActivity.createUserActivity(token !== undefined ? token : username, Action.CREATE, "new  user creation failed.")
         res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ message: 'Failed to create new user. Check inputs.' });
         return
     }
     //verify token
     await jwtToken.verifyJWT(token, async (err, data) => {
         if (err || data === null) {
-            UserActivity.createUserActivity(token, Action.CREATE, "new admin user creation failed.")
             return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
                 message: 'Please, provide valid token', error: appText.TOKEN_NOT_VALID
             })
@@ -487,10 +479,6 @@ const createUserWithContact = async(req,res, next) =>{
         }
     })
 }
-//backoffice apis
-const getAllUsers = async (req, res, next) => {
-    return await User.getAllUsers()
-}
 
 module.exports = {
     login,
@@ -502,6 +490,5 @@ module.exports = {
     getUserById,
     deleteUserById,
     updateUserById,
-    getAllUsers,
     createUserWithContact
 }
