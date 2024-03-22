@@ -1,9 +1,12 @@
 'use strict'
 const jwtToken = require('../util/jwtToken')
-require('dotenv').config() 
+
 const user = require('../controllers/user.controller')
 const contact = require('../controllers/contact.controller')
+const photo = require('../controllers/photo.controller')
+const notification = require('../controllers/notification.controller')
 
+/** USER STUFF BEGINGS */
 const login = async (req, res, next) => {
     await user.login(req,res,next)
 }
@@ -48,6 +51,9 @@ const updateContact = async(req, res, next) =>{
     await contact.updateContact(req, res, next) 
 }
 
+const deleteContact = async(req, res,next)=>{
+    await contact.deleteContact(req,res,next)
+}
 
 const logout = async (req, res, next) => {
 	
@@ -58,9 +64,54 @@ const logout = async (req, res, next) => {
         })
     }
 	
-};
+}
 
 
+/** USER STUFF ENDS */
+
+/** PHOTO BEGINS */
+const createPhoto = async (req, res, next) => {
+    await photo.createPhoto(req, res, next)
+}
+
+const getPhoto = async (req, res, next) => {
+    await photo.getAllPhotos(req,res,next)
+}
+
+const getPhotoById = async (req,res,next) =>{
+    await photo.getPhotoById(req,res,next)
+}
+
+const updatePhotoById = async(req,res,next) =>{
+    await photo.updatePhotoById(req,res,next)
+}
+
+const deletePhotoById = async(req,res,next) =>{
+    await photo.deletePhotoById(req,res, next)
+}
+
+/** PHOTO ENDS */
+
+/** NOTIFICATION BEGINS */
+const getAllNotification = async(req, res, next) =>{
+    await notification.getAllNotification(req,res,next)
+}
+
+const createNotification = async(req, res, next) =>{
+    await notification.createNotification(req,res,next)
+}
+
+const getNotificationById = async(req,res,next) =>{
+    await notification.getNotificationById(req,res,next)
+}
+
+const updateNotificationById = async(req,res,next) =>{
+    await notification.updateNotificationById(req,res,next)
+}
+
+const deleteNotificationById = async(req,res,next) =>{
+    await notification.deleteNotificationById(req,res,next)
+}
 
 module.exports = {
     login,
@@ -75,5 +126,20 @@ module.exports = {
     getContact,
     createContact,
     updateContact,
-    logout
+    deleteContact,
+    logout,
+
+    //photo
+    createPhoto,
+    getPhoto,
+    getPhotoById,
+    updatePhotoById,
+    deletePhotoById,
+    
+    //notification
+    getAllNotification,
+    createNotification,
+    getNotificationById,
+    updateNotificationById,
+    deleteNotificationById
 }

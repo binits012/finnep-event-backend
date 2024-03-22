@@ -1,6 +1,7 @@
 'use strict'
 const express = require('express')
 const path = require('path')
+require('dotenv').config() 
 require('./model/dbConnect')
 var cookieParser = require('cookie-parser');
 const adminRole = require('./util/adminUser')

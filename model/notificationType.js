@@ -23,8 +23,13 @@
     const getNotificationTypes = async () =>{
         return await model.NotificationType.find({}).exec().catch(err=>{return {error:err.stack}})
     }
+
+    const getNotificationTypeById = async (id) =>{
+        return await model.NotificationType.find({_id:id}).exec().catch(err=>{return {error:err.stack}})
+    }
     let root = typeof exports !== "undefined" && exports !== null ? exports : window;
     root.NotificationType = NotificationType
     root.getNotificationTypes = getNotificationTypes
     root.createNotificationType = createNotificationType
+    root.getNotificationTypeById = getNotificationTypeById
 }).call(this)

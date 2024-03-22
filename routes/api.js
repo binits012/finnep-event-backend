@@ -1,8 +1,7 @@
 "use strict"
 const express = require('express')
 const router = express.Router()
-const api = require('../controllers/api.controller')
-const contact = require('../controllers/contact.controller')
+const api = require('../controllers/api.controller') 
 
 router.route('/auth/user/login').post(api.login)
 router.route('/auth/user/changePassword').post(api.changePassword)
@@ -19,9 +18,24 @@ router.route('/user/:id')
     .patch(api.updateUserById) 
 
 router.route('/user/:id/contact')
-    .get(contact.getContact)
-    .post(contact.createContact)
-    .patch(contact.updateContact)
-    .delete(contact.deleteContact)
+    .get(api.getContact)
+    .post(api.createContact)
+    .patch(api.updateContact)
+    .delete(api.deleteContact)
 
-    module.exports = router
+router.route('/photo')
+    .post(api.createPhoto)
+    .get(api.getPhoto)
+    .patch(api.updatePhotoById)
+    .delete(api.deletePhotoById)
+
+ 
+router.route('/notification')
+    .get(api.getAllNotification)
+    .post(api.createNotification)
+
+router.route('/notification/:id')
+    .get(api.getNotificationById)
+    .patch(api.updateNotificationById)
+    .delete(api.deleteNotificationById)
+module.exports = router

@@ -53,7 +53,6 @@ const photoTypes = async () => {
         
         try{
             await PhotoType.createPhotoType("Gallery")
-            await PhotoType.createPhotoType("Event")
             await PhotoType.createPhotoType("Other")
         }catch (err){
             console.log(err)

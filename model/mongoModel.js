@@ -114,7 +114,7 @@
 	root.EventType = EventType
 
 	// Voulume and date based pricing
-	const volumeBasedPriceSchema = new mongoose.Schema({
+	const timeBasedPriceSchema = new mongoose.Schema({
 		quantity:{ type: Number, required: true },
 		title:{ type: String },
 		price:{ type:Number, required: true },
@@ -123,9 +123,9 @@
 		activeUntil: { type: Date, required:true },
 		createdAt: { type: Date, default: Date.now }
 	})
-	const VolumeBasedPrice = mongoose.model('VolumeBasedPrice', volumeBasedPriceSchema)
-	root.VolumeBasedPrice = VolumeBasedPrice
-
+	const TimeBasedPrice = mongoose.model('TimeBasedPrice', timeBasedPriceSchema)
+	root.TimeBasedPrice = TimeBasedPrice
+ 
     /********************** Events ************************/
 	const eventSchema = new mongoose.Schema({
 		eventTitle: { type: String, required: true, unique: true },
@@ -137,6 +137,12 @@
 		lang:{type:String, default:'en'},
 		socialMedia:[{type: mongoose.Schema.Types.ObjectId, ref: 'EventOnSocialMedia'}],
 		position:{type:Number},
+		eventLocationAddress:{type:String},
+		eventLocationGeoCode: [Number],
+		eventPromotionPhoto:[{type:String}],
+		eventPhoto:[{type:String}],
+		transportLink:{type:String},
+		active:{type:Boolean, default:true},
 		createdAt: { type: Date, default: Date.now }
 	})
 
@@ -161,8 +167,7 @@
 		publish: { type: Boolean, default: true },
 		lang: { type:String, default:'en'},
 		notificationType: { type: mongoose.Schema.Types.ObjectId, ref: 'NotificationType', required:true },
-		createdAt: { type: Date, default: Date.now }
-		
+		createdAt: { type: Date, default: Date.now }	
 	})
 
 	const Notification = mongoose.model('Notification', notificationSchema);
