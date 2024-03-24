@@ -1,7 +1,8 @@
 'use strict'
 require('dotenv')
 const moment = require('moment')
-
+const {ObjectId} = require('mongodb')
+const { validationResult } = require('express-validator')
 const manipulatePhoneNumber = async (phoneNumber) =>{
     if(/[aA-zZ].*/.test(phoneNumber)){
         return null
@@ -95,6 +96,22 @@ const sanitizeLanguage = (lang) =>{
 const sortByDate = (a, b) =>{ 
     return Date.parse(b.reservationDate) - Date.parse(a.reservationDate)
 }
+
+
+const validateParam = async (id) =>{
+    return ObjectId.isValid(id) 
+}
+
+const validate = async (validations, req) => { 
+    
+    for (let validation of validations) {
+        const result = await validation.run(req)
+        
+        if (result.errors.length)  break
+    }
+    console.log(validationResult(req)  )
+    return validationResult(req)    
+  }
 module.exports = {
     manipulatePhoneNumber,
     formatDate,
@@ -105,5 +122,7 @@ module.exports = {
     formateDateWithHash,
     timeInMinutes,
     sanitizeLanguage,
-    sortByDate
+    sortByDate,
+    validateParam,
+    validate
 }

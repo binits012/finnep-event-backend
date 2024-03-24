@@ -5,6 +5,11 @@ const user = require('../controllers/user.controller')
 const contact = require('../controllers/contact.controller')
 const photo = require('../controllers/photo.controller')
 const notification = require('../controllers/notification.controller')
+const event = require('../controllers/event.controller')
+const { param, body } = require('express-validator')
+const common = require('../util/common')
+const consts = require('../const')
+const appText = require('../applicationTexts.js')
 
 /** USER STUFF BEGINGS */
 const login = async (req, res, next) => {
@@ -29,14 +34,32 @@ const changePassword = async (req, res, next) => {
 }
 
 const getUserById = async (req, res, next) => {
-    await user.getUserById(req,res,next)
+    const id = req.params.id 
+    param(id).custom(common.validateParam(id).then(async data=>{
+        if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            message: 'Invalid Id.', error: appText.INVALID_ID
+        })
+        await user.getUserById(req,res,next)
+    }))   
 }
 
 const updateUserById = async(req, res, next) =>{
-    await user.updateUserById(req,res,next)
+    const id = req.params.id 
+    param(id).custom(common.validateParam(id).then(async data=>{
+        if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            message: 'Invalid Id.', error: appText.INVALID_ID
+        })
+        await user.updateUserById(req,res,next)
+    })) 
 }
 const deleteUserById = async (req, res, next) => {
-    await user.deleteUserById(req, res, next)
+    const id = req.params.id 
+    param(id).custom(common.validateParam(id).then(async data=>{
+        if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            message: 'Invalid Id.', error: appText.INVALID_ID
+        })
+        await user.deleteUserById(req, res, next)
+    }))
 }
 
 const getContact = async(req,res, next) => {
@@ -79,15 +102,33 @@ const getPhoto = async (req, res, next) => {
 }
 
 const getPhotoById = async (req,res,next) =>{
-    await photo.getPhotoById(req,res,next)
+    const id = req.params.id 
+    param(id).custom(common.validateParam(id).then(async data=>{
+        if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            message: 'Invalid Id.', error: appText.INVALID_ID
+        })
+        await photo.getPhotoById(req,res,next)
+    })) 
 }
 
 const updatePhotoById = async(req,res,next) =>{
-    await photo.updatePhotoById(req,res,next)
+    const id = req.params.id 
+    param(id).custom(common.validateParam(id).then(async data=>{
+        if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            message: 'Invalid Id.', error: appText.INVALID_ID
+        })
+        await photo.updatePhotoById(req,res,next)
+    }))  
 }
 
 const deletePhotoById = async(req,res,next) =>{
-    await photo.deletePhotoById(req,res, next)
+    const id = req.params.id 
+    param(id).custom(common.validateParam(id).then(async data=>{
+        if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            message: 'Invalid Id.', error: appText.INVALID_ID
+        })
+        await photo.deletePhotoById(req,res, next)
+    }))
 }
 
 /** PHOTO ENDS */
@@ -102,17 +143,107 @@ const createNotification = async(req, res, next) =>{
 }
 
 const getNotificationById = async(req,res,next) =>{
-    await notification.getNotificationById(req,res,next)
+    const id = req.params.id 
+    param(id).custom(common.validateParam(id).then(async data=>{
+        if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            message: 'Invalid Id.', error: appText.INVALID_ID
+        })
+        await notification.getNotificationById(req,res,next)
+    }))
+    
 }
 
 const updateNotificationById = async(req,res,next) =>{
-    await notification.updateNotificationById(req,res,next)
+    const id = req.params.id 
+    param(id).custom(common.validateParam(id).then(async data=>{
+        if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            message: 'Invalid Id.', error: appText.INVALID_ID
+        })
+        await notification.updateNotificationById(req,res,next)
+    }))
+    
 }
 
 const deleteNotificationById = async(req,res,next) =>{
-    await notification.deleteNotificationById(req,res,next)
+    const id = req.params.id 
+    param(id).custom(common.validateParam(id).then(async data=>{
+        if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            message: 'Invalid Id.', error: appText.INVALID_ID
+        })
+        await notification.deleteNotificationById(req,res,next)
+    }))
+}
+/** NOTIFICATION ENDS */
+
+/** EVENT BEGINS */
+
+const createEvent = async(req,res, next) =>{
+    
+    await common.validate([
+        body('eventTitle').notEmpty(),
+        body('eventDescription').notEmpty(),
+        body('eventDate').notEmpty(),
+        body('eventTime').notEmpty(),
+        body('eventPrice').notEmpty(),
+        body('occupancy').notEmpty().isNumeric(),
+        body('eventPromotionPhoto').notEmpty(),
+        body('eventLocationAddress').notEmpty(),
+        body('eventLocationGeoCode').notEmpty(),
+        body('transportLink').notEmpty(),
+        body('position').notEmpty(),
+        body('active').notEmpty(),
+
+    ], req).then(async data =>{ 
+        if(data.errors.length === 0){
+            await event.createEvent(req, res, next)
+        } else {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            message: 'Please check the payload.', error: data.errors })
+        }
+    })
+    
 }
 
+const getEvents = async(req,res,next) =>{
+    await event.getEvents(req,res,next)
+}
+
+const getEventById = async(req,res,next) =>{
+    const id = req.params.id 
+    param(id).custom(common.validateParam(id).then(async data=>{
+        if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            message: 'Invalid Id.', error: appText.INVALID_ID
+        })
+        await event.getEventById(req,res,next)
+    }))
+}
+
+const updateEventById = async(req,res,next) =>{
+    await common.validate([
+        body('eventTitle').notEmpty(),
+        body('eventDescription').notEmpty(),
+        body('eventDate').notEmpty(),
+        body('eventTime').notEmpty(),
+        body('eventPrice').notEmpty(),
+        body('occupancy').notEmpty().isNumeric(),
+        body('eventPromotionPhoto').notEmpty(),
+        body('eventLocationAddress').notEmpty(),
+        body('eventLocationGeoCode').notEmpty(),
+        body('transportLink').notEmpty(),
+        body('position').notEmpty(),
+        body('active').notEmpty(),
+
+    ], req).then(async data =>{ 
+        if(data.errors.length === 0){
+            await event.updateEventById(req, res, next)
+        } else {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            message: 'Please check the payload.', error: data.errors })
+        }
+    })
+}
+ 
+/** EVENT ENDS */
 module.exports = {
     login,
     createAdminUser,
@@ -141,5 +272,11 @@ module.exports = {
     createNotification,
     getNotificationById,
     updateNotificationById,
-    deleteNotificationById
+    deleteNotificationById,
+
+    //event
+    createEvent,
+    getEvents,
+    getEventById,
+    updateEventById
 }

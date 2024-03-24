@@ -6,15 +6,15 @@ require('./model/dbConnect')
 var cookieParser = require('cookie-parser');
 const adminRole = require('./util/adminUser')
 const api = require('./routes/api')
+const front = require('./routes/front')
 var app = express();
 
 //app.use(logger('dev'));
 app.use(express.json())
 app.use(express.urlencoded({ extended: false }))
-app.use(cookieParser());
-app.use(express.static(path.join(__dirname, 'public')))
+app.use(cookieParser())
 app.use('/api', api)
-
+app.use('/front',front)
 app.set('port', process.env.PORT || process.env.PORT);
 
 var server = app.listen(app.get('port'), function () {

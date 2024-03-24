@@ -135,11 +135,14 @@
 		eventPrice: { type: mongoose.Decimal128, required: true },
 		occupancy: {type: Number, required:true},
 		lang:{type:String, default:'en'},
-		socialMedia:[{type: mongoose.Schema.Types.ObjectId, ref: 'EventOnSocialMedia'}],
+		socialMedia:{
+			type: Map,
+			of: String
+		  },
 		position:{type:Number},
 		eventLocationAddress:{type:String},
-		eventLocationGeoCode: [Number],
-		eventPromotionPhoto:[{type:String}],
+		eventLocationGeoCode: {type:String},
+		eventPromotionPhoto:{type:String},
 		eventPhoto:[{type:String}],
 		transportLink:{type:String},
 		active:{type:Boolean, default:true},

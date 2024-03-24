@@ -28,6 +28,10 @@ module.exports = {
   
 
     //
-    BAD_REQUEST: 'Bad Request, check the payload.'
+    BAD_REQUEST: 'Bad Request, check the payload.',
+    INVALID_ID: 'Invalid Id.',
+
+    //Event
+    EVENT_CREATE_FAILED:'Event creation failed.',
 
 }

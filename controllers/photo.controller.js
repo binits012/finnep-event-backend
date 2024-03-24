@@ -177,7 +177,6 @@ const deletePhotoById = async (req, res, next) => {
         }
     })
 }
-
  
 module.exports = {
     createPhoto, 

@@ -38,4 +38,13 @@ router.route('/notification/:id')
     .get(api.getNotificationById)
     .patch(api.updateNotificationById)
     .delete(api.deleteNotificationById)
+
+
+router.route('/event')
+    .post(api.createEvent)
+    .get(api.getEvents)
+
+router.route('/event/:id')
+    .get(api.getEventById)
+    .put(api.updateEventById) 
 module.exports = router
