@@ -1,12 +1,10 @@
-var mongoose = require('mongoose'),
-        bcrypt = require('bcrypt'),
-        SALT_WORK_FACTOR = 10,
-        dbURI = 'mongodb://binit:bajrayoginidevi1312@0.0.0.0:27017/yellowbridge';
+var mongoose = require('mongoose'), 
+        dbURI = `mongodb://${encodeURIComponent(process.env.MONGODB_USER)}:${encodeURIComponent(process.env.MONGODB_PWD)}@${process.env.MONGODB_HOST}:${process.env.MONGODB_PORT}/${process.env.MONGODB_NAME}?authSource=admin&useNewUrlParser=true`;
 
 //mongoose.connect(dbURI,{auth:{authdb:"admin"}});
-mongoose.connect(`mongodb://${encodeURIComponent('binit')}:${encodeURIComponent('bajrayoginidevi1312')}@0.0.0.0:27017/yellowbridge?authSource=admin&useNewUrlParser=true`);
+mongoose.connect(dbURI);
 mongoose.connection.on('connected', function () {
-        console.log('Mongoose connected to' + dbURI);
+        console.log('Mongoose connected to ' + dbURI);
 });
 
 mongoose.connection.on('error', function (err) {

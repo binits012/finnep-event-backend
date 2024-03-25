@@ -60,7 +60,7 @@ const createEvent = async (req, res, next) =>{
 const getEvents = async(req,res,next)=>{
     const token = req.headers.authorization
     await jwtToken.verifyJWT(token, async (err, data) => {
-        if (err || data === null) { 
+        if ( err || data === null) { 
             return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({
                 message: 'Please, provide valid token', error: appText.TOKEN_NOT_VALID
             })

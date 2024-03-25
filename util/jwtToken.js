@@ -49,7 +49,7 @@ const generateReservationBasedJWT = async (userData, cb) =>{
 }
 
 const verifyJWT = async (token, cb) => {
-    if (!token) return false
+    if (!token) return cb(null, null)
     try {
         const myToken = token.replace("Bearer ", "")
         jwt.verify(myToken, process.env.JWT_TOKEN_SECRET, async(err, data) => { 
