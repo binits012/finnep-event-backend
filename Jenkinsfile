@@ -1,8 +1,5 @@
 pipeline {
-    agent {
-        // Define agent details here
-        node 
-    }
+    agent node
     node {
         //checkout repo 
         checkout scm
