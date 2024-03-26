@@ -223,10 +223,14 @@ const deleteNotificationById = async (req, res, next) => {
 
 }
  
+const getAllNotificationForDashboard = async() =>{
+    return await Notification.getAllNotification()
+}
 module.exports = {
     createNotification,
     getAllNotification,
     getNotificationById,
     updateNotificationById,
-    deleteNotificationById
+    deleteNotificationById,
+    getAllNotificationForDashboard
 }

@@ -47,4 +47,7 @@ router.route('/event')
 router.route('/event/:id')
     .get(api.getEventById)
     .put(api.updateEventById) 
+
+router.route('/dashboard')
+    .get(api.dashboard)
 module.exports = router

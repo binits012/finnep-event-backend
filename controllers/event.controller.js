@@ -206,9 +206,14 @@ const deleteEventById = async (req, res, next) =>{
         }
     })
 }
+
+const getAllEventsForDashboard = async () =>{
+    return await Event.getEvents()
+}
 module.exports = {
     createEvent,
     getEvents,
     getEventById,
-    updateEventById
+    updateEventById,
+    getAllEventsForDashboard
 }

@@ -177,11 +177,15 @@ const deletePhotoById = async (req, res, next) => {
         }
     })
 }
- 
+
+const getAllPhotoForDashboard = async () =>{
+   return await Photo.listPhoto()
+} 
 module.exports = {
     createPhoto, 
     getAllPhotos,
     getPhotoById,
     updatePhotoById,
     deletePhotoById, 
+    getAllPhotoForDashboard
 }

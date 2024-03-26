@@ -244,6 +244,53 @@ const updateEventById = async(req,res,next) =>{
 }
  
 /** EVENT ENDS */
+
+/** dashboard helper */
+const dashboard = async(req, res, next) =>{
+
+    const token = req.headers.authorization 
+    await jwtToken.verifyJWT(token, async (err, data) => {
+        if (err || data === null) { 
+            return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({
+                message: 'Please, provide valid token', error: appText.TOKEN_NOT_VALID
+            })
+        } else { 
+            const userRoleFromToken = data.role
+            if (consts.ROLE_MEMBER ===userRoleFromToken) { 
+                return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
+                    message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
+                })
+            } 
+
+            const eventAll = await event.getAllEventsForDashboard().catch(err=>{
+                logger.log('error',err)
+                return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                    message: 'Sorry, contact creation failed', error: appText.EVENT_CREATE_FAILED
+                })
+            })  
+            const photoAll = await photo.getAllPhotoForDashboard().catch(err=>{
+                logger.log('error',err)
+                return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                    message: 'Sorry, contact creation failed', error: appText.EVENT_CREATE_FAILED
+                })
+            }) 
+            const notificationAll = await notification.getAllNotificationForDashboard().catch(err=>{
+                logger.log('error',err)
+                return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                    message: 'Sorry, contact creation failed', error: appText.EVENT_CREATE_FAILED
+                })
+            }) 
+            const dashboardData = {
+                event:eventAll,
+                photo:photoAll,
+                notification:notificationAll
+            }  
+            return res.status(consts.HTTP_STATUS_OK).json({ data: dashboardData })
+        }
+    })
+    
+    
+}
 module.exports = {
     login,
     createAdminUser,
@@ -278,5 +325,8 @@ module.exports = {
     createEvent,
     getEvents,
     getEventById,
-    updateEventById
+    updateEventById,
+
+    //dashboard
+    dashboard
 }
