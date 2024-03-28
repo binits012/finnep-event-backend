@@ -10,6 +10,7 @@ const { param, body } = require('express-validator')
 const common = require('../util/common')
 const consts = require('../const')
 const appText = require('../applicationTexts.js')
+const photoType = require('../model/photoType')
 
 /** USER STUFF BEGINGS */
 const login = async (req, res, next) => {
@@ -177,8 +178,7 @@ const deleteNotificationById = async(req,res,next) =>{
 
 /** EVENT BEGINS */
 
-const createEvent = async(req,res, next) =>{
-    
+const createEvent = async(req,res, next) =>{ 
     await common.validate([
         body('eventTitle').notEmpty(),
         body('eventDescription').notEmpty(),
@@ -200,7 +200,8 @@ const createEvent = async(req,res, next) =>{
             return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
             message: 'Please check the payload.', error: data.errors })
         }
-    })
+    }) 
+    
     
 }
 
@@ -280,16 +281,22 @@ const dashboard = async(req, res, next) =>{
                     message: 'Sorry, contact creation failed', error: appText.EVENT_CREATE_FAILED
                 })
             }) 
+            const photoTypes = await photoType.getPhotoTypes().catch(err=>{
+                logger.log('error',err)
+                return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                    message: 'Sorry, contact creation failed', error: appText.EVENT_CREATE_FAILED
+                })
+            }) 
             const dashboardData = {
                 event:eventAll,
+                photoType:photoTypes,
                 photo:photoAll,
                 notification:notificationAll
+
             }  
             return res.status(consts.HTTP_STATUS_OK).json({ data: dashboardData })
         }
     })
-    
-    
 }
 module.exports = {
     login,

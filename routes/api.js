@@ -50,4 +50,6 @@ router.route('/event/:id')
 
 router.route('/dashboard')
     .get(api.dashboard)
+router.route('/logout')
+    .get(api.logout)
 module.exports = router

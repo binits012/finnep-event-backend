@@ -6,6 +6,7 @@ const logger = require('../model/logger')
 const appText = require('../applicationTexts')
 const commonUtil = require('../util/common')
 
+
 const createEvent = async (req, res, next) =>{
     const token = req.headers.authorization
     const eventTitle = req.body.eventTitle
@@ -168,34 +169,6 @@ const updateEventById = async (req,res,next) =>{
             } 
              
             await Event.updateEventById(id,eventObj).then(data=>{
-                return res.status(consts.HTTP_STATUS_CREATED).json({ data: data })
-            }).catch(err=>{
-                logger.log('error',err)
-                return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
-                    message: 'Sorry, contact creation failed', error: appText.EVENT_CREATE_FAILED
-                })
-            }) 
-        }
-    })
-}
-
-const deleteEventById = async (req, res, next) =>{
-    const token = req.headers.authorization
-    const id = req.params.id
-    await jwtToken.verifyJWT(token, async (err, data) => {
-        if (err || data === null) { 
-            return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({
-                message: 'Please, provide valid token', error: appText.TOKEN_NOT_VALID
-            })
-        } else { 
-            const userRoleFromToken = data.role
-            if (consts.ROLE_MEMBER ===userRoleFromToken) { 
-                return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
-                    message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
-                })
-            } 
-             
-            await Event.getEventById(id).then(data=>{
                 return res.status(consts.HTTP_STATUS_CREATED).json({ data: data })
             }).catch(err=>{
                 logger.log('error',err)
