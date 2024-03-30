@@ -298,6 +298,18 @@ const dashboard = async(req, res, next) =>{
         }
     })
 }
+
+
+const uploadPhotosForParticularEvent = async(req,res,next) =>{
+    const id = req.params.id 
+    param(id).custom(common.validateParam(id).then(async data=>{
+        if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            message: 'Invalid Id.', error: appText.INVALID_ID
+        })
+        return await event.uploadPhotosForParticularEvent(req,res,next)
+    }))
+    
+}
 module.exports = {
     login,
     createAdminUser,
@@ -333,6 +345,7 @@ module.exports = {
     getEvents,
     getEventById,
     updateEventById,
+    uploadPhotosForParticularEvent,
 
     //dashboard
     dashboard

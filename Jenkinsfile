@@ -6,7 +6,8 @@ pipeline {
                 sh 'npm install' 
                 sh 'npm run dist'
                 sh 'cd /opt/deployment/yellowbridge'
-                sh 'rm -fr *.min.js'
+                sh 'rm -fr *.min.js'        
+                sh 'mkdir tmp'
                 sh 'cp .env /opt/deployment/yellowbridge/'
                 sh 'cp dist/yellowbridge*/*  /opt/deployment/yellowbridge/'
             }

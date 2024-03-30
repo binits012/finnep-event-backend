@@ -1,6 +1,7 @@
 module.exports = {
     HTTP_STATUS_OK: 200,
     HTTP_STATUS_CREATED: 201,
+    HTTP_STATUS_ACCEPTED:202,
     HTTP_STATUS_NO_CONTENT: 204,
     HTTP_STATUS_REDIRECT: 302,
     HTTP_STATUS_BAD_REQUEST: 400,
@@ -26,5 +27,8 @@ module.exports = {
 
     //Communication Types
     CONTACT_TYPE_EMAIL: "email",
-    CONTACT_TYPE_PHONE: "phone"
+    CONTACT_TYPE_PHONE: "phone",
+
+    //Queue
+    PHOTO_ARRIVAL_QUEUE: "PHOTO_ARRIVAL_QUEUE"
 }
