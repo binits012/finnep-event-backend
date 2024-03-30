@@ -26,7 +26,7 @@ const saveFileLocally = async(event, req, callback) =>{
             }
             //storing the uploaded photo
             try{
-                const tempFileName = __dirname.replace('util','') +  'tmp/'+ filename
+                const tempFileName = __dirname.replace('util','') +  '/tmp/'+ filename
                 const tempFileInfo = {
                     fileName: filename,
                     path:tempFileName,

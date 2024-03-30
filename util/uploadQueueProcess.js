@@ -40,7 +40,7 @@ const worker = new Worker(consts.PHOTO_ARRIVAL_QUEUE, async job => {
         await Event.updateEventById(eventId,job.data.event).catch(err=>{
             logger.log('error',err.stack)
         })
-        const directory = __dirname.replace('util','') +  'tmp/'
+        const directory = __dirname.replace('util','') +  '/tmp/'
         for (const file of await fs.readdir(directory)) {
             await fs.unlink(path.join(directory, file));
         }
