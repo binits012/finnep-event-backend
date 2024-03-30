@@ -45,7 +45,7 @@
                 position:this.position, 
                 active:this.active,
                 eventName:this.eventName,
-                videoUrl:videoUrl
+                videoUrl:this.videoUrl
             })
             return  await event.save()
         }
@@ -69,7 +69,6 @@
         return await model.Event.findOne({_id:id}).exec().catch(err => {return  err})
     }
     const updateEventById = async (id, obj) =>{
-        console.log(obj)
         return await model.Event.findByIdAndUpdate(id, {
 			$set: obj
 		}, { new: true }).catch(err=> {return err}) 
