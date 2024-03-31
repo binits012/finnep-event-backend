@@ -3,6 +3,7 @@ const express = require('express')
 const path = require('path')
 require('dotenv').config() 
 require('./model/dbConnect')
+require('./util/uploadQueueProcess')
 var cookieParser = require('cookie-parser');
 const adminRole = require('./util/adminUser')
 const api = require('./routes/api')
@@ -12,7 +13,7 @@ var app = express();
 app.use(cors())
 app.options('*',cors())
 //app.use(logger('dev'));
-app.use(express.json())
+app.use(express.json({limit: '2gb', extended: false}))
 app.use(express.urlencoded({ extended: false }))
 app.use(cookieParser())
 app.use('/api', api)

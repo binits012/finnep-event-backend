@@ -5,7 +5,7 @@
     const Event = (function(){
         const Event = function Event(eventTitle, eventDescription, eventDate, eventTime,  eventPrice, 
             occupancy, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
-            socialMedia, lang, position, active
+            socialMedia, lang, position, active,eventName,videoUrl
             ){
                 this.eventTitle = eventTitle
                 this.eventDescription = eventDescription
@@ -22,6 +22,8 @@
                 this.lang = lang
                 this.position = position
                 this.active =active
+                this.eventName = eventName
+                this.videoUrl = videoUrl
 
         }
 
@@ -41,7 +43,9 @@
                 socialMedia:this.socialMedia, 
                 lang:this.lang, 
                 position:this.position, 
-                active:this.active
+                active:this.active,
+                eventName:this.eventName,
+                videoUrl:this.videoUrl
             })
             return  await event.save()
         }
@@ -50,10 +54,10 @@
 
     const createEvent = async (eventTitle, eventDescription, eventDate, eventTime,  eventPrice, 
         occupancy, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
-        socialMedia, lang, position, active) =>{
+        socialMedia, lang, position, active, eventName, videoUrl) =>{
         const event = new Event(eventTitle, eventDescription, eventDate, eventTime,  eventPrice, 
             occupancy, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
-            socialMedia, lang, position, active)
+            socialMedia, lang, position, active, eventName, videoUrl)
         return  await event.saveToDB().catch(err=>{return err.stack})
     }
 

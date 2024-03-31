@@ -4,7 +4,8 @@ const Event = require('../model/event')
 const consts = require('../const')
 const logger = require('../model/logger')
 const appText = require('../applicationTexts')
-const commonUtil = require('../util/common')
+const commonUtil = require('../util/common') 
+const busboyFileUpload = require('../util/busboyFileUpload')
 
 const createEvent = async (req, res, next) =>{
     const token = req.headers.authorization
@@ -23,6 +24,8 @@ const createEvent = async (req, res, next) =>{
     let lang = req.body.lang
     const position = req.body.position
     const active = req.body.active
+    const eventName=req.body.eventName
+    const videoUrl = req.body.videoUrl
 
     if(lang === 'undefined' || lang === ""){
         lang = "en"
@@ -44,7 +47,7 @@ const createEvent = async (req, res, next) =>{
              
             await Event.createEvent(eventTitle, eventDescription, eventDate, timeInMinutes,  eventPrice, 
                 occupancy, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
-                socialMedia, lang, position, active).then(data=>{
+                socialMedia, lang, position, active, eventName, videoUrl).then(data=>{
                 return res.status(consts.HTTP_STATUS_CREATED).json({ data: data })
             }).catch(err=>{
                 logger.log('error',err)
@@ -131,6 +134,8 @@ const updateEventById = async (req,res,next) =>{
     let lang = req.body.lang
     const position = req.body.position
     const active = req.body.active
+    const eventName = req.body.eventName
+    const videoUrl = req.body.videoUrl
  
     const timeInMinutes =  commonUtil.timeInMinutes(eventTime)
     if(lang === 'undefined' || lang === ""){
@@ -151,7 +156,9 @@ const updateEventById = async (req,res,next) =>{
         socialMedia:socialMedia,
         lang:lang,
         position:position,
-        active:active
+        active:active,
+        eventName:eventName,
+        videoUrl:videoUrl
 
     }
     await jwtToken.verifyJWT(token, async (err, data) => {
@@ -163,7 +170,7 @@ const updateEventById = async (req,res,next) =>{
             const userRoleFromToken = data.role
             if (consts.ROLE_MEMBER ===userRoleFromToken) { 
                 return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
-                    message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
+                    message: 'Sorry, You do not have rights.', error: appText.INSUFFICENT_ROLE
                 })
             } 
              
@@ -172,14 +179,15 @@ const updateEventById = async (req,res,next) =>{
             }).catch(err=>{
                 logger.log('error',err)
                 return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
-                    message: 'Sorry, contact creation failed', error: appText.EVENT_CREATE_FAILED
+                    message: 'Sorry, update event failed.', error: appText.EVENT_UPDATE_FAILED
                 })
             }) 
         }
     })
 }
 
-const deleteEventById = async (req, res, next) =>{
+
+const uploadPhotosForParticularEvent = async (req,res,next) =>{
     const token = req.headers.authorization
     const id = req.params.id
     await jwtToken.verifyJWT(token, async (err, data) => {
@@ -193,19 +201,39 @@ const deleteEventById = async (req, res, next) =>{
                 return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
                     message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
                 })
-            } 
-             
-            await Event.getEventById(id).then(data=>{
-                return res.status(consts.HTTP_STATUS_CREATED).json({ data: data })
-            }).catch(err=>{
+            }
+            //check the event
+            const myEvent = await Event.getEventById(id).catch(err=>{
                 logger.log('error',err)
                 return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
-                    message: 'Sorry, contact creation failed', error: appText.EVENT_CREATE_FAILED
+                    message: 'Sorry, given event not found.', error: appText.RESOURCE_NOT_FOUND
                 })
-            }) 
+            })  
+            if(myEvent === null || myEvent === '' || myEvent === 'undefined'){
+                return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+                    message: 'Sorry, update event failed.', error: appText.EVENT_UPDATE_FAILED
+                })
+            }
+            else{ 
+                await busboyFileUpload.uploadToS3(myEvent, req, (success, err)=>{
+                    if(success){
+                        const data = {
+                            message:"Request accepted, it will take some time to complete the job. Please keep refreshing the page."
+                        }
+                        return res.status(consts.HTTP_STATUS_ACCEPTED).json(data)
+                    }else{
+                        return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
+                            message: 'Sorry, something went wrong.', error: appText.INTERNAL_SERVER_ERROR
+                        })
+                    }
+                })
+                
+            } 
         }
     })
+    
 }
+
 
 const getAllEventsForDashboard = async () =>{
     return await Event.getEvents()
@@ -215,5 +243,6 @@ module.exports = {
     getEvents,
     getEventById,
     updateEventById,
+    uploadPhotosForParticularEvent,
     getAllEventsForDashboard
 }

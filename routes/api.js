@@ -47,7 +47,12 @@ router.route('/event')
 router.route('/event/:id')
     .get(api.getEventById)
     .put(api.updateEventById) 
+    
+router.route('/event/:id/eventPhoto')
+    .post(api.uploadPhotosForParticularEvent)
 
 router.route('/dashboard')
     .get(api.dashboard)
+router.route('/logout')
+    .get(api.logout)
 module.exports = router

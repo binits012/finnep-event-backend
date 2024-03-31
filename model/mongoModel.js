@@ -146,6 +146,8 @@
 		eventPhoto:[{type:String}],
 		transportLink:{type:String},
 		active:{type:Boolean, default:true},
+		eventName:{type:String, required:true, unique:true},
+		videoUrl:{type:String},
 		createdAt: { type: Date, default: Date.now }
 	})
 
