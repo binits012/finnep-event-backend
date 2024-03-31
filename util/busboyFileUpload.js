@@ -9,15 +9,16 @@ const uploadArrivalPhotoQueue = new Queue(consts.PHOTO_ARRIVAL_QUEUE,  {connecti
 password:process.env.REDIS_PWD}})
 
 
-const saveFileLocally = async(event, req, callback) =>{
+const uploadToS3 = async(event, req, callback) =>{
     //lets start parsing the file 
+
     const bb = busboy({headers:req.headers,limits: {
         fileSize: 2*1024*1024*1024  //max 2gb size
     } })
-    logger.log('info', "writing photo locally starts at "+ new Date())
     let fileInfo = []
     bb.on('error', err=>{ console.log(err); callback(false, true)}) 
     bb.on('file', async (name,file,info) =>{
+        logger.log('info', "busboy receiving photo starts at "+ new Date())
         const { filename, encoding, mimeType } = info
         if(filename.length > 0){
             if(mimeType != 'image/png' && mimeType != 'image/jpeg' && mimeType != 'image/jpg'){ 
@@ -25,24 +26,22 @@ const saveFileLocally = async(event, req, callback) =>{
                 file.resume()
             }
             let streamData = []
-            console.log('streaming data starts at ', new Date())
+            console.log('sending image data starts at ', new Date())
             
             file.on('data', (data) => {
                 streamData.push(data)
               }).on('close', () => {
                 //storing the uploaded photo
                 try{
-                    const tempFileName = __dirname.replace('util','') +  '/tmp/'+ filename
+                    const tempFileName = __dirname.replace('util','') +  'tmp/'+ filename
                     const tempFileInfo = {
                         fileName: filename,
                         path:tempFileName,
-                        contentType:mimeType
+                        contentType:mimeType,
+                        content: Buffer.concat(streamData)
                     } 
                     fileInfo.push(tempFileInfo) 
-                    fs.writeFile(tempFileName,Buffer.concat(streamData),async()=>{
-                        console.log('streaming data save to file ends at ', new Date())
-                        streamData = []
-                    }) 
+                    streamData = []
                 }catch(err){
                     console.log(err)
                     logger.log('error', err)
@@ -74,7 +73,7 @@ const saveFileLocally = async(event, req, callback) =>{
                 delay: 1000 //1 second delay
             }
         )
-        logger.log('info', "writing photo locally ends at "+ new Date())
+        logger.log('info', "busboy receiving photo ends at "+ new Date())
         callback(true, null)
     })
     req.pipe(bb)
@@ -82,5 +81,5 @@ const saveFileLocally = async(event, req, callback) =>{
 
 
 module.exports = {
-    saveFileLocally
+     uploadToS3
 }

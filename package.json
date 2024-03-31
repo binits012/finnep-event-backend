@@ -15,6 +15,7 @@
   },
   "devDependencies": {
     "@aws-sdk/client-s3": "^3.537.0",
+    "@aws-sdk/lib-storage": "^3.540.0",
     "@babel/cli": "^7.22.6",
     "@babel/core": "^7.22.8",
     "@babel/node": "^7.22.6",
@@ -33,7 +34,7 @@
     "dotenv": "^16.3.1",
     "express-validator": "^7.0.1",
     "fs-extra": "^11.1.1",
-    "jsonwebtoken": "^9.0.1", 
+    "jsonwebtoken": "^9.0.1",
     "minimist": "^1.2.8",
     "moment": "^2.29.4",
     "moment-timezone": "^0.5.44",

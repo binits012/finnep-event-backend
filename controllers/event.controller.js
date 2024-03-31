@@ -215,7 +215,7 @@ const uploadPhotosForParticularEvent = async (req,res,next) =>{
                 })
             }
             else{ 
-                await busboyFileUpload.saveFileLocally(myEvent, req, (success, err)=>{
+                await busboyFileUpload.uploadToS3(myEvent, req, (success, err)=>{
                     if(success){
                         const data = {
                             message:"Request accepted, it will take some time to complete the job. Please keep refreshing the page."
