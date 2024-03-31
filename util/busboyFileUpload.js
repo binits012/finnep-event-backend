@@ -14,7 +14,7 @@ const saveFileLocally = async(event, req, callback) =>{
     const bb = busboy({headers:req.headers,limits: {
         fileSize: 2*1024*1024*1024  //max 2gb size
     } })
-    logger.log('info', "parsing photo stats at "+ new Date())
+    logger.log('info', "writing photo locally starts at "+ new Date())
     let fileInfo = []
     bb.on('error', err=>{ console.log(err); callback(false, true)}) 
     bb.on('file', async (name,file,info) =>{
@@ -24,21 +24,30 @@ const saveFileLocally = async(event, req, callback) =>{
                 //Ignore the upload, move on to next one
                 file.resume()
             }
-            //storing the uploaded photo
-            try{
-                const tempFileName = __dirname.replace('util','') +  '/tmp/'+ filename
-                const tempFileInfo = {
-                    fileName: filename,
-                    path:tempFileName,
-                    contentType:mimeType
-                } 
-                fileInfo.push(tempFileInfo) 
-                let fstream =  fs.createWriteStream(tempFileName)
-                file.pipe(fstream)
-            }catch(err){
-                console.log(err)
-                logger.log('error', err)
-            }
+            let streamData = null
+            console.log('streaming data starts at ', new Date())
+            file.on('data', (data) => {
+                streamData +=data
+              }).on('close', () => {
+                //storing the uploaded photo
+                try{
+                    const tempFileName = __dirname.replace('util','') +  '/tmp/'+ filename
+                    const tempFileInfo = {
+                        fileName: filename,
+                        path:tempFileName,
+                        contentType:mimeType
+                    } 
+                    fileInfo.push(tempFileInfo) 
+                    fs.writeFile(tempFileName,streamData,async()=>{
+                        console.log('streaming data save ends at ', new Date())
+                        streamData = null
+                    }) 
+                }catch(err){
+                    console.log(err)
+                    logger.log('error', err)
+                }
+              })
+            
             
         }else{
             file.resume()
@@ -64,6 +73,7 @@ const saveFileLocally = async(event, req, callback) =>{
                 delay: 1000 //1 second delay
             }
         )
+        logger.log('info', "writing photo locally ends at "+ new Date())
         callback(true, null)
     })
     req.pipe(bb)

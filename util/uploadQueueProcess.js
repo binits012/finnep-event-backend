@@ -22,12 +22,12 @@ const worker = new Worker(consts.PHOTO_ARRIVAL_QUEUE, async job => {
        const linkToFile = "https://"+process.env.BUCKET_NAME+".s3."+process.env.BUCKET_REGION+".amazonaws.com/" +pathToS3
        const fileContent = await fs.readFile(filePath)
        photoLinkArray.push(linkToFile)
-       
+       logger.log('info', "sending photo to bucket starts at "+ new Date()) 
+         
        await uploadToS3Bucket(ct, fileContent, pathToS3).catch(err=>{
         logger.log('error', err.stack)
         shouldContinue = false
-       })
-       
+       }) 
        
     }
     if(shouldContinue){ 
@@ -45,7 +45,7 @@ const worker = new Worker(consts.PHOTO_ARRIVAL_QUEUE, async job => {
             await fs.unlink(path.join(directory, file));
         }
           
-        logger.log('info', "parsing photo ends at"+ new Date()) 
+        logger.log('info', "the whole job completes at "+ new Date()) 
 
 
     }
