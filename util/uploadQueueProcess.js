@@ -23,11 +23,12 @@ const worker = new Worker(consts.PHOTO_ARRIVAL_QUEUE, async job => {
        const fileContent = await fs.readFile(filePath)
        photoLinkArray.push(linkToFile)
        logger.log('info', "sending photo to bucket starts at "+ new Date()) 
-         
+        
        await uploadToS3Bucket(ct, fileContent, pathToS3).catch(err=>{
         logger.log('error', err.stack)
         shouldContinue = false
        }) 
+       
        
     }
     if(shouldContinue){ 
@@ -41,9 +42,11 @@ const worker = new Worker(consts.PHOTO_ARRIVAL_QUEUE, async job => {
             logger.log('error',err.stack)
         })
         const directory = __dirname.replace('util','') +  '/tmp/'
+        /*
         for (const file of await fs.readdir(directory)) {
             await fs.unlink(path.join(directory, file));
         }
+        */
           
         logger.log('info', "the whole job completes at "+ new Date()) 
 

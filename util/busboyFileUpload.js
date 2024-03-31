@@ -24,10 +24,11 @@ const saveFileLocally = async(event, req, callback) =>{
                 //Ignore the upload, move on to next one
                 file.resume()
             }
-            let streamData = null
+            let streamData = []
             console.log('streaming data starts at ', new Date())
+            
             file.on('data', (data) => {
-                streamData +=data
+                streamData.push(data)
               }).on('close', () => {
                 //storing the uploaded photo
                 try{
@@ -38,9 +39,9 @@ const saveFileLocally = async(event, req, callback) =>{
                         contentType:mimeType
                     } 
                     fileInfo.push(tempFileInfo) 
-                    fs.writeFile(tempFileName,streamData,async()=>{
-                        console.log('streaming data save ends at ', new Date())
-                        streamData = null
+                    fs.writeFile(tempFileName,Buffer.concat(streamData),async()=>{
+                        console.log('streaming data save to file ends at ', new Date())
+                        streamData = []
                     }) 
                 }catch(err){
                     console.log(err)
