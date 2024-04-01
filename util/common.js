@@ -1,6 +1,6 @@
 'use strict'
 require('dotenv')
-const moment = require('moment')
+const moment = require('moment-timezone')
 const {ObjectId} = require('mongodb')
 const { validationResult } = require('express-validator')
 const manipulatePhoneNumber = async (phoneNumber) =>{
@@ -36,6 +36,10 @@ const formatDate = async (dateString) =>{
 
 const formateDateWithHash = async (date) =>{ 
     return  moment(date).format("DD/MM/YYYY")
+}
+
+const convertDateTimeWithTimeZone = async (eventDate) =>{ 
+    return  moment.utc(eventDate).tz(process.env.TIME_ZONE).format('YYYY-MM-DDTHH:mm:ss')
 }
 //redis-client
 const getCacheByKey = async(redisClient, key) =>{ 
@@ -108,8 +112,7 @@ const validate = async (validations, req) => {
         const result = await validation.run(req)
         
         if (result.errors.length)  break
-    }
-    console.log(validationResult(req)  )
+    } 
     return validationResult(req)    
   }
 module.exports = {
@@ -124,5 +127,6 @@ module.exports = {
     sanitizeLanguage,
     sortByDate,
     validateParam,
-    validate
+    validate,
+    convertDateTimeWithTimeZone
 }

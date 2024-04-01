@@ -55,23 +55,24 @@
     const createEvent = async (eventTitle, eventDescription, eventDate, eventTime,  eventPrice, 
         occupancy, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
         socialMedia, lang, position, active, eventName, videoUrl) =>{
+        console.log("=========>",eventDate)    
         const event = new Event(eventTitle, eventDescription, eventDate, eventTime,  eventPrice, 
             occupancy, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
             socialMedia, lang, position, active, eventName, videoUrl)
-        return  await event.saveToDB().catch(err=>{return err.stack})
+        return  await event.saveToDB()
     }
 
     const getEvents = async() =>{
-        return await model.Event.find().exec().catch(err => {return  err})
+        return await model.Event.find().exec() 
     }
 
     const getEventById = async(id) =>{
-        return await model.Event.findOne({_id:id}).exec().catch(err => {return  err})
+        return await model.Event.findOne({_id:id}).exec() 
     }
     const updateEventById = async (id, obj) =>{
         return await model.Event.findByIdAndUpdate(id, {
 			$set: obj
-		}, { new: true }).catch(err=> {return err}) 
+		}, { new: true })  
     }
 
     let root = typeof exports !== 'undefined' && exports !== null ? exports : window
