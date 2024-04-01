@@ -3,6 +3,8 @@
 	const Schema = mongoose.Schema;
 	const bcrypt = require('bcrypt')
 	require('dotenv').config()
+	const {convertDateTimeWithTimeZone} = require("../util/common")
+	const moment = require('moment-timezone')
 
     let root = typeof exports !== "undefined" && exports !== null ? exports : window
 
@@ -76,7 +78,7 @@
 		crypto: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Crypto' }],
 		streetName: { type: String, required: true },
 		createdAt: { type: Date, default: Date.now }
-	});
+	})
 	const Contact = mongoose.model('Contact', contactSchema);
 	root.Contact = Contact
 
@@ -126,11 +128,12 @@
 	const TimeBasedPrice = mongoose.model('TimeBasedPrice', timeBasedPriceSchema)
 	root.TimeBasedPrice = TimeBasedPrice
  
+
     /********************** Events ************************/
 	const eventSchema = new mongoose.Schema({
 		eventTitle: { type: String, required: true, unique: true },
 		eventDescription: { type: String, required: true },
-		eventTime: { type: Number, required: true }, 
+		eventTime: { type: Number }, 
 		eventDate: { type: Date, required: true },
 		eventPrice: { type: mongoose.Decimal128, required: true },
 		occupancy: {type: Number, required:true},
@@ -151,6 +154,29 @@
 		createdAt: { type: Date, default: Date.now }
 	})
 
+	
+	eventSchema.pre('save', function(next){
+		this.eventDate =  moment.utc(this.eventDate)
+  		next()
+	})
+	 
+	eventSchema.post('findOne',  async function(doc, next) {
+		
+		if(doc !== null || doc !== undefined){
+			doc.eventDate =  new Date(await convertDateTimeWithTimeZone(doc.eventDate)+'.000+00:00');  
+		}  
+		next()
+	})
+
+	eventSchema.post('find', async (docs, next) =>{
+		if(docs !== null && docs.length > 0){
+			docs.forEach(async element => {
+				element.eventDate =  new Date(await convertDateTimeWithTimeZone(element.eventDate)+'.000+00:00');
+			});
+		} 
+		next()
+	})
+	
 	const Event = mongoose.model('Event', eventSchema)
 	root.Event = Event
     
@@ -206,4 +232,14 @@
 
 	const Photo = mongoose.model('Photo', photoSchema)
 	root.Photo = Photo
+
+	const messageSchema = new mongoose.Schema({
+		createdAt: { type: Date, default: Date.now },
+		msgFrom:{ type: mongoose.Schema.Types.ObjectId, ref: 'Crypto' },
+		msg:{type:String, required:true},
+		reply:[]
+	})
+	const Message = mongoose.model('Message',messageSchema)
+	root.Message = Message
+
 }).call(this)

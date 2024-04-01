@@ -183,7 +183,6 @@ const createEvent = async(req,res, next) =>{
         body('eventTitle').notEmpty(),
         body('eventDescription').notEmpty(),
         body('eventDate').notEmpty(),
-        body('eventTime').notEmpty(),
         body('eventPrice').notEmpty(),
         body('occupancy').notEmpty().isNumeric(),
         body('eventPromotionPhoto').notEmpty(),

@@ -6,6 +6,7 @@ const logger = require('../model/logger')
 const appText = require('../applicationTexts')
 const commonUtil = require('../util/common') 
 const busboyFileUpload = require('../util/busboyFileUpload')
+const moment = require('moment-timezone')
 
 const createEvent = async (req, res, next) =>{
     const token = req.headers.authorization
@@ -26,7 +27,8 @@ const createEvent = async (req, res, next) =>{
     const active = req.body.active
     const eventName=req.body.eventName
     const videoUrl = req.body.videoUrl
-
+   // const convertDateTime = await commonUtil.convertDateTimeWithTimeZone(eventDate)
+    //console.log(convertDateTime)
     if(lang === 'undefined' || lang === ""){
         lang = "en"
     }  
@@ -52,7 +54,7 @@ const createEvent = async (req, res, next) =>{
             }).catch(err=>{
                 logger.log('error',err)
                 return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
-                    message: 'Sorry, contact creation failed', error: appText.EVENT_CREATE_FAILED
+                    message: 'Sorry, event creation failed', error: err.stack
                 })
             }) 
         }
@@ -80,7 +82,7 @@ const getEvents = async(req,res,next)=>{
             }).catch(err=>{
                 logger.log('error',err)
                 return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
-                    message: 'Sorry, contact creation failed', error: appText.EVENT_CREATE_FAILED
+                    message: 'Sorry, get events failed', error: appText.EVENT_GET_FAILED
                 })
             }) 
         }
@@ -108,7 +110,7 @@ const getEventById = async (req, res, next) => {
             }).catch(err=>{
                 logger.log('error',err)
                 return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
-                    message: 'Sorry, contact creation failed', error: appText.EVENT_CREATE_FAILED
+                    message: 'Sorry, get event by id failed', error: appText.EVENT_GET_FAILED
                 })
             }) 
         }
@@ -136,7 +138,7 @@ const updateEventById = async (req,res,next) =>{
     const active = req.body.active
     const eventName = req.body.eventName
     const videoUrl = req.body.videoUrl
- 
+    const convertDateTime = await commonUtil.convertDateTimeWithTimeZone(eventDate)
     const timeInMinutes =  commonUtil.timeInMinutes(eventTime)
     if(lang === 'undefined' || lang === ""){
         lang = "en"
@@ -144,7 +146,7 @@ const updateEventById = async (req,res,next) =>{
     const eventObj = {
         eventTitle: eventTitle,
         eventDescription:eventDescription,
-        eventDate:eventDate,
+        eventDate:convertDateTime,
         eventTime:timeInMinutes,
         eventPrice:eventPrice,
         occupancy:occupancy,
@@ -179,7 +181,7 @@ const updateEventById = async (req,res,next) =>{
             }).catch(err=>{
                 logger.log('error',err)
                 return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
-                    message: 'Sorry, update event failed.', error: appText.EVENT_UPDATE_FAILED
+                    message: 'Sorry, update event failed.', error: err.stack
                 })
             }) 
         }

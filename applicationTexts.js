@@ -33,6 +33,7 @@ module.exports = {
     INVALID_ID: 'Invalid Id.',
 
     //Event
+    EVENT_GET_FAILED:'Event get failed.',
     EVENT_CREATE_FAILED:'Event creation failed.',
     EVENT_UPDATE_FAILED:'Event update failed.',
     EVENT_PHOTO_UPLOAD_FAILED: 'Event photo upload failed.',
