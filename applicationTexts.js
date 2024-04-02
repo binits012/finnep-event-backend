@@ -38,4 +38,7 @@ module.exports = {
     EVENT_UPDATE_FAILED:'Event update failed.',
     EVENT_PHOTO_UPLOAD_FAILED: 'Event photo upload failed.',
 
+    //Setting
+    SETTING_NOT_ALLOWED:'This operation is not allowed. Consider updating the existing resource.'
+
 }

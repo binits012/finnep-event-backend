@@ -163,7 +163,7 @@
 	eventSchema.post('findOne',  async function(doc, next) {
 		
 		if(doc !== null || doc !== undefined){
-			doc.eventDate =  new Date(await convertDateTimeWithTimeZone(doc.eventDate)+'.000+00:00');  
+			doc.eventDate =  new Date(await convertDateTimeWithTimeZone(doc.eventDate)+'.000+00:00')  
 		}  
 		next()
 	})
@@ -171,7 +171,7 @@
 	eventSchema.post('find', async (docs, next) =>{
 		if(docs !== null && docs.length > 0){
 			docs.forEach(async element => {
-				element.eventDate =  new Date(await convertDateTimeWithTimeZone(element.eventDate)+'.000+00:00');
+				element.eventDate =  new Date(await convertDateTimeWithTimeZone(element.eventDate)+'.000+00:00')
 			});
 		} 
 		next()
@@ -236,10 +236,42 @@
 	const messageSchema = new mongoose.Schema({
 		createdAt: { type: Date, default: Date.now },
 		msgFrom:{ type: mongoose.Schema.Types.ObjectId, ref: 'Crypto' },
-		msg:{type:String, required:true},
+		msg:{ type:String, required:true },
 		reply:[]
 	})
 	const Message = mongoose.model('Message',messageSchema)
 	root.Message = Message
+
+	const ticketSchema = new mongoose.Schema({
+		createdAt: { type: Date, default: Date.now },
+		qrCode:{type:Buffer, default:null},
+		ticketFor:{ type: mongoose.Schema.Types.ObjectId, ref: 'Crypto' },
+		event:{type: mongoose.Schema.Types.ObjectId, ref: 'Event' },
+		isSend: {type:Boolean, required:true, default:false},
+		active:{type:Boolean, required:true, default:true},
+		isRead: {type:Boolean, required:true, default:false},
+		readyBy: {type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+		readTime:{ type: Date }
+
+
+	})
+	const Ticket = new mongoose.model('Ticket',ticketSchema)
+	root.Ticket = Ticket
+
+	const settingSchema = new mongoose.Schema({
+		createdAt: { type: Date, default: Date.now },
+		aboutSection:{ type: String },
+		contactInfo:{
+			type: Map,
+			of: String
+		  },
+		socialMedia:{
+			type: Map,
+			of: String
+		  }
+	})
+
+	const Setting = mongoose.model('Setting', settingSchema)
+	root.Setting = Setting
 
 }).call(this)

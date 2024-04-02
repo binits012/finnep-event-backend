@@ -1,8 +1,8 @@
 (function () {
-	var model = require('./mongoModel')
+	let model = require('./mongoModel')
 	const consts = require('../const') 
 	const logger = require('./logger')
-	var User = (function () {
+	let User = (function () {
 		function User(name, pwd, role, active, notificationAllowed) {
 			this.name = name
 			this.pwd = pwd
