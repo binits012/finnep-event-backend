@@ -1,6 +1,7 @@
 'use strict'
 const jwtToken = require('../util/jwtToken')
-
+const consts = require('../const')
+const appText = require('../applicationTexts.js')
 const user = require('../controllers/user.controller')
 const contact = require('../controllers/contact.controller')
 const photo = require('../controllers/photo.controller')
@@ -8,9 +9,8 @@ const notification = require('../controllers/notification.controller')
 const event = require('../controllers/event.controller')
 const { param, body } = require('express-validator')
 const common = require('../util/common')
-const consts = require('../const')
-const appText = require('../applicationTexts.js')
 const photoType = require('../model/photoType')
+const setting = require('../controllers/setting.controller')
 
 /** USER STUFF BEGINGS */
 const login = async (req, res, next) => {
@@ -299,6 +299,38 @@ const dashboard = async(req, res, next) =>{
 }
 
 
+/** Setting */
+const createSetting = async(req,res,next) =>{
+    await setting.createSetting(req,res,next)
+}
+
+const getSetting = async(req,res,next) =>{
+    await setting.getSetting(req,res,next)
+}
+
+const getSettingById = async(req,res,next) =>{
+    const id = req.params.id 
+    param(id).custom(common.validateParam(id).then(async data=>{
+        if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            message: 'Invalid Id.', error: appText.INVALID_ID
+        })
+        await setting.getSettingById(req,res,next)
+    }))
+    
+}
+
+const updateSettingById = async(req,res,next) =>{
+    const id = req.params.id 
+    param(id).custom(common.validateParam(id).then(async data=>{
+        if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            message: 'Invalid Id.', error: appText.INVALID_ID
+        })
+        await setting.updateSettingById(req,res,next)
+    }))
+    
+}
+/** Setting ends */
+
 const uploadPhotosForParticularEvent = async(req,res,next) =>{
     const id = req.params.id 
     param(id).custom(common.validateParam(id).then(async data=>{
@@ -346,6 +378,11 @@ module.exports = {
     updateEventById,
     uploadPhotosForParticularEvent,
 
+    //setting
+    createSetting,
+    getSetting,
+    getSettingById,
+    updateSettingById,
     //dashboard
     dashboard
 }

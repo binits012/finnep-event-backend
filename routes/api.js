@@ -1,6 +1,6 @@
 "use strict"
 const express = require('express')
-const router = express.Router()
+const router = express.Router() 
 const api = require('../controllers/api.controller') 
 
 router.route('/auth/user/login').post(api.login)
@@ -45,11 +45,20 @@ router.route('/event')
     .get(api.getEvents)
 
 router.route('/event/:id')
-    .get(api.getEventById)
+    .get( api.getEventById)
     .put(api.updateEventById) 
     
 router.route('/event/:id/eventPhoto')
     .post(api.uploadPhotosForParticularEvent)
+
+router.route('/setting')
+    .post(api.createSetting)
+    .get(api.getSetting)
+
+router.route('/setting/:id')
+    .get(api.getSettingById)
+    .post(api.updateSettingById)
+    
 
 router.route('/dashboard')
     .get(api.dashboard)

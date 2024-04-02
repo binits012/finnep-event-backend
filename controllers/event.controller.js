@@ -27,8 +27,6 @@ const createEvent = async (req, res, next) =>{
     const active = req.body.active
     const eventName=req.body.eventName
     const videoUrl = req.body.videoUrl
-   // const convertDateTime = await commonUtil.convertDateTimeWithTimeZone(eventDate)
-    //console.log(convertDateTime)
     if(lang === 'undefined' || lang === ""){
         lang = "en"
     }  
@@ -78,7 +76,7 @@ const getEvents = async(req,res,next)=>{
             } 
              
             await Event.getEvents().then(data=>{
-                return res.status(consts.HTTP_STATUS_CREATED).json({ data: data })
+                return res.status(consts.HTTP_STATUS_CREATED).json({ data: data, timeZone:process.env.TIME_ZONE })
             }).catch(err=>{
                 logger.log('error',err)
                 return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -106,7 +104,7 @@ const getEventById = async (req, res, next) => {
             } 
              
             await Event.getEventById(id).then(data=>{
-                return res.status(consts.HTTP_STATUS_CREATED).json({ data: data })
+                return res.status(consts.HTTP_STATUS_CREATED).json({ data: data,  timeZone:process.env.TIME_ZONE })
             }).catch(err=>{
                 logger.log('error',err)
                 return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
