@@ -11,6 +11,7 @@ const { param, body } = require('express-validator')
 const common = require('../util/common')
 const photoType = require('../model/photoType')
 const setting = require('../controllers/setting.controller')
+const ticket = require('../controllers/ticket.controller')
 
 /** USER STUFF BEGINGS */
 const login = async (req, res, next) => {
@@ -261,39 +262,40 @@ const dashboard = async(req, res, next) =>{
                     message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
                 })
             } 
-
-            const eventAll = await event.getAllEventsForDashboard().catch(err=>{
-                logger.log('error',err)
-                return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
-                    message: 'Sorry, contact creation failed', error: appText.EVENT_CREATE_FAILED
-                })
-            })  
-            const photoAll = await photo.getAllPhotoForDashboard().catch(err=>{
-                logger.log('error',err)
-                return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
-                    message: 'Sorry, contact creation failed', error: appText.EVENT_CREATE_FAILED
-                })
-            }) 
-            const notificationAll = await notification.getAllNotificationForDashboard().catch(err=>{
-                logger.log('error',err)
-                return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
-                    message: 'Sorry, contact creation failed', error: appText.EVENT_CREATE_FAILED
-                })
-            }) 
-            const photoTypes = await photoType.getPhotoTypes().catch(err=>{
-                logger.log('error',err)
-                return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
-                    message: 'Sorry, contact creation failed', error: appText.EVENT_CREATE_FAILED
-                })
-            }) 
-            const dashboardData = {
-                event:eventAll,
-                photoType:photoTypes,
-                photo:photoAll,
-                notification:notificationAll
-
-            }  
-            return res.status(consts.HTTP_STATUS_OK).json({ data: dashboardData })
+            try{
+                const eventAll = await event.getAllEventsForDashboard().catch(err=>{
+                    logger.log('error',err)
+                    throw err
+                })  
+                const photoAll = await photo.getAllPhotoForDashboard().catch(err=>{
+                    logger.log('error',err)
+                    throw err
+                }) 
+                const notificationAll = await notification.getAllNotificationForDashboard().catch(err=>{
+                    logger.log('error',err) 
+                    throw err
+                }) 
+                const photoTypes = await photoType.getPhotoTypes().catch(err=>{
+                    logger.log('error',err)
+                    throw err
+                    
+                }) 
+                const dashboardData = {
+                    event:eventAll,
+                    photoType:photoTypes,
+                    photo:photoAll,
+                    notification:notificationAll
+    
+                }  
+                return res.status(consts.HTTP_STATUS_OK).json({ data: dashboardData })
+            }catch(err){
+                if(!res.headersSent){
+                    return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                        message: 'Sorry, fetching dashboard data failed', error: appText.DASHBOARD_DATA_FAILED
+                    })
+                }
+            }
+            
         }
     })
 }
@@ -330,6 +332,27 @@ const updateSettingById = async(req,res,next) =>{
     
 }
 /** Setting ends */
+
+/** Ticket */
+const createSingleTicket = async(req,res,next) =>{
+    await common.validate([
+        body('event').notEmpty(),
+        body('ticketFor').notEmpty(), 
+    ], req).then(async data =>{ 
+        if(data.errors.length === 0){
+            await ticket.createSingleTicket(req, res, next)
+        } else {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            message: 'Please check the payload.', error: data.errors })
+        }
+    })
+}
+
+const createMultipleTicket = async(req, res, next) =>{ 
+    return await ticket.createMultipleTicket(req,res,next)
+}
+
+/** Ticket Ends  */
 
 const uploadPhotosForParticularEvent = async(req,res,next) =>{
     const id = req.params.id 
@@ -384,5 +407,7 @@ module.exports = {
     getSettingById,
     updateSettingById,
     //dashboard
-    dashboard
+    dashboard,
+    createSingleTicket,
+    createMultipleTicket
 }

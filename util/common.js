@@ -3,6 +3,10 @@ require('dotenv')
 const moment = require('moment-timezone')
 const {ObjectId} = require('mongodb')
 const { validationResult } = require('express-validator')
+var QRCode = require('qrcode')
+const ICS = require('ics')
+const fs = require('fs').promises
+
 const manipulatePhoneNumber = async (phoneNumber) =>{
     if(/[aA-zZ].*/.test(phoneNumber)){
         return null
@@ -39,7 +43,7 @@ const formateDateWithHash = async (date) =>{
 }
 
 const convertDateTimeWithTimeZone = async (eventDate) =>{ 
-    return  moment.utc(eventDate).tz(process.env.TIME_ZONE).format('YYYY-MM-DDTHH:mm:ss')
+    return  moment(eventDate).tz(process.env.TIME_ZONE).format('YYYY-MM-DDTHH:mm:ss')
 }
 //redis-client
 const getCacheByKey = async(redisClient, key) =>{ 
@@ -109,11 +113,69 @@ const validateParam = async (id) =>{
 const validate = async (validations, req) => { 
     
     for (let validation of validations) {
-        const result = await validation.run(req)
         
+        const result = await validation.run(req)
+        console.log(result)
         if (result.errors.length)  break
     } 
+    
     return validationResult(req)    
+  }
+
+const generateQRCode = async(ticketId) =>{
+    let opts = {
+        errorCorrectionLevel: 'H',
+        type: 'image/png',
+        quality: 0.3,
+        margin: 1,
+        color: {
+          dark:"#010599FF",
+          light:"#FFBF60FF"
+        }
+    }
+    return await new Promise((resolve, reject)=>{
+        QRCode.toDataURL(process.env.FQDN+'/api/ticket/'+ticketId, opts, function (err, url) {
+             
+            if(err) reject(err)
+            resolve(url)
+        })
+    })
+    /*
+    QRCode.toDataURL(process.env.FQDN+'/api/ticket/'+ticketId, opts, function (err, url) {
+        callback(err,url)
+    })
+    */
+}
+const generateICS = async(event, ticketId)=>{
+    const eventDate = event.eventDate
+    const start = moment(eventDate).utc().format('YYYY-MM-DD-HH-mm-ss').split("-").map((a) => parseInt(a))  
+    const eventGeoCode = event.eventLocationGeoCode.split(',')
+    const icsData = {
+        title: event.eventTitle,
+        description: event.eventDescription,
+        busyStatus: 'Busy',
+        location:event.eventLocationAddress,
+        geo:{ lat: parseFloat(eventGeoCode[0]) , lon: parseFloat(eventGeoCode[1].trim()) },
+        start: start,
+        duration: {hours: 5, minutes: 0 },
+        status:'CONFIRMED',
+        classification:'PRIVATE',
+        organizer: { name: process.env.COMPANY_TITLE, email: process.env.EMAIL_USERNAME },
+        uid:ticketId
+    } 
+    return await new Promise((resolve, reject)=>{
+        ICS.createEvent(icsData, async(err, value)=>{
+            if(err) reject(err)
+            resolve(value)
+       })
+    }) 
+
+}
+
+const loadEmailTemplate = async (fileLocation, eventTitle,eventPromotionalPhoto, qrCode) => {
+    const emailData = (await fs.readFile(fileLocation,'utf8')).replace('$eventTitle',eventTitle).replace('$eventPromotionalPhoto',eventPromotionalPhoto)
+    .replace('$qrcodeData',qrCode) 
+    return emailData
   }
 module.exports = {
     manipulatePhoneNumber,
@@ -128,5 +190,9 @@ module.exports = {
     sortByDate,
     validateParam,
     validate,
-    convertDateTimeWithTimeZone
+    convertDateTimeWithTimeZone,
+    generateQRCode,
+    generateICS,
+    loadEmailTemplate
+    
 }

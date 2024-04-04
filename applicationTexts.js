@@ -39,6 +39,9 @@ module.exports = {
     EVENT_PHOTO_UPLOAD_FAILED: 'Event photo upload failed.',
 
     //Setting
-    SETTING_NOT_ALLOWED:'This operation is not allowed. Consider updating the existing resource.'
+    SETTING_NOT_ALLOWED:'This operation is not allowed. Consider updating the existing resource.',
+
+    //dashboard
+    DASHBOARD_DATA_FAILED:"Something went wrong on fetching dashboard data.",
 
 }
