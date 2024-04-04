@@ -55,7 +55,6 @@
     const createEvent = async (eventTitle, eventDescription, eventDate, eventTime,  eventPrice, 
         occupancy, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
         socialMedia, lang, position, active, eventName, videoUrl) =>{
-        console.log("=========>",eventDate)    
         const event = new Event(eventTitle, eventDescription, eventDate, eventTime,  eventPrice, 
             occupancy, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
             socialMedia, lang, position, active, eventName, videoUrl)
@@ -63,11 +62,11 @@
     }
 
     const getEvents = async() =>{
-        return await model.Event.find().exec() 
+        return await model.Event.find().sort({eventDate:-1}).exec() 
     }
 
-    const getEventById = async(id) =>{
-        return await model.Event.findOne({_id:id}).exec() 
+    const getEventById = async(id) =>{ 
+        return await model.Event.findById({_id:id}).exec()
     }
     const updateEventById = async (id, obj) =>{
         return await model.Event.findByIdAndUpdate(id, {

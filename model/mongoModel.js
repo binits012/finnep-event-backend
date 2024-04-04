@@ -92,17 +92,6 @@
 	const SocialMedia = mongoose.model('SocialMedia', socialMediaSchema )
 	root.SocialMedia = SocialMedia
 
-
-	const eventOnSocialMediaSchema =  new mongoose.Schema({
-		socialMedia:{type: mongoose.Schema.Types.ObjectId, ref: 'SocialMedia'}, 
-		link: {type:String},
-		active:{ type: Boolean, default: true },
-		createdAt: { type: Date, default: Date.now }
-	})
-
-	const EventOnSocialMedia = mongoose.model('EventOnSocialMedia',eventOnSocialMediaSchema)
-	root.EventOnSocialMedia = EventOnSocialMedia
-
     /**************** Event Type schema ******************** */
 	const eventTypeSchema = new mongoose.Schema({
 
@@ -233,11 +222,23 @@
 	const Photo = mongoose.model('Photo', photoSchema)
 	root.Photo = Photo
 
+	const messageReply = new mongoose.Schema({
+		createdAt: { type: Date, default: Date.now },
+		msgId:{ type: mongoose.Schema.Types.ObjectId, ref: 'Message' },
+		replyMsg:{type:String, required:true},
+		replyFrom:{ type: mongoose.Schema.Types.ObjectId, ref: 'Crypto' }
+	})
+
+	const Reply = new mongoose.model('Reply', messageReply)
+	root.Reply = Reply
+
 	const messageSchema = new mongoose.Schema({
 		createdAt: { type: Date, default: Date.now },
 		msgFrom:{ type: mongoose.Schema.Types.ObjectId, ref: 'Crypto' },
+		msgTo:[{ type: mongoose.Schema.Types.ObjectId, ref: 'Crypto' }],
 		msg:{ type:String, required:true },
-		reply:[]
+		active:{type:Boolean, default:true},
+		reply:[{type:mongoose.Schema.Types.ObjectId, ref:'Reply'}]
 	})
 	const Message = mongoose.model('Message',messageSchema)
 	root.Message = Message
@@ -245,15 +246,16 @@
 	const ticketSchema = new mongoose.Schema({
 		createdAt: { type: Date, default: Date.now },
 		qrCode:{type:Buffer, default:null},
-		ticketFor:{ type: mongoose.Schema.Types.ObjectId, ref: 'Crypto' },
-		event:{type: mongoose.Schema.Types.ObjectId, ref: 'Event' },
+		ics:{type:Buffer, default:null},
+		ticketFor:{ type: mongoose.Schema.Types.ObjectId, ref: 'Crypto', required:true },
+		event:{type: mongoose.Schema.Types.ObjectId, ref: 'Event', required:true },
 		isSend: {type:Boolean, required:true, default:false},
 		active:{type:Boolean, required:true, default:true},
 		isRead: {type:Boolean, required:true, default:false},
-		readyBy: {type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-		readTime:{ type: Date }
-
-
+		readBy: {type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+		readAt:{ type: Date },
+		type:{type:String, default:'normal'},
+		validUntil:{type:Date}
 	})
 	const Ticket = new mongoose.model('Ticket',ticketSchema)
 	root.Ticket = Ticket

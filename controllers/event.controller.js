@@ -37,24 +37,31 @@ const createEvent = async (req, res, next) =>{
                 message: 'Please, provide valid token', error: appText.TOKEN_NOT_VALID
             })
         } else { 
-            const userRoleFromToken = data.role
-            if (consts.ROLE_MEMBER ===userRoleFromToken) { 
-                return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
-                    message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
-                })
+            try{
+                const userRoleFromToken = data.role
+                if (consts.ROLE_MEMBER ===userRoleFromToken) { 
+                    if(!res.headersSent){
+                        return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
+                            message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
+                        })
+                    }
+                    
+                }
+                const timeInMinutes =  commonUtil.timeInMinutes(eventTime)
+                await Event.createEvent(eventTitle, eventDescription, eventDate, timeInMinutes,  eventPrice, 
+                    occupancy, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
+                    socialMedia, lang, position, active, eventName, videoUrl).then(data=>{
+                    return res.status(consts.HTTP_STATUS_CREATED).json({ data: data })
+                }) 
+            }catch(err){
+                if(!res.headersSent){
+                    logger.log('error',err)
+                    return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                        message: 'Sorry, event creation failed', error: err.stack
+                    })
+                }
             }
-            const timeInMinutes =  commonUtil.timeInMinutes(eventTime)
-             
-            await Event.createEvent(eventTitle, eventDescription, eventDate, timeInMinutes,  eventPrice, 
-                occupancy, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
-                socialMedia, lang, position, active, eventName, videoUrl).then(data=>{
-                return res.status(consts.HTTP_STATUS_CREATED).json({ data: data })
-            }).catch(err=>{
-                logger.log('error',err)
-                return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
-                    message: 'Sorry, event creation failed', error: err.stack
-                })
-            }) 
+            
         }
     })
 

@@ -1,11 +1,13 @@
 const { Worker } = require('bullmq')
 const logger = require('../model/logger')
-const fs = require('fs').promises
 const consts = require('../const')
 require('dotenv').config()
 const {uploadToS3Bucket,streamBasedParallelUpload} = require('./aws')
 const Event = require('../model/event')
-const path = require('path')
+const {TicketReport} = require('../model/reporting')
+const Excel = require('exceljs')
+const workbook = new Excel.Workbook()
+
 const worker = new Worker(consts.PHOTO_ARRIVAL_QUEUE, async job => {
     //get the information of the job 
     const eventId = job.data.event._id
@@ -65,12 +67,73 @@ const worker = new Worker(consts.PHOTO_ARRIVAL_QUEUE, async job => {
     console.log(err)
     logger.log('error','%s has failed with %s', job.id, err.message)
   })
+ 
+//create ticket via fileUpload
+const ticketViaFileUpload = new Worker(consts.CREATE_TICKET_FROM_FILE_UPLOAD, async job =>{
+  logger.log('info', "bullmq processing excel starts at "+ Date.now()) 
+  const jobData = job.data
+  const dataFromFile = await readFile(jobData.fileLocation)
+  console.log(dataFromFile)
+  try{
+     const reporting =  TicketReport({data:"ok"})
+     reporting.save()
+     
+  }catch(err){
+    console.log(err)
+  }
+  
+},
+{
+  connection: {
+    host: process.env.REDIS_HOST, port: process.env.REDIS_PORT, no_ready_check: true,
+    password: process.env.REDIS_PWD
+  }
+})
+ticketViaFileUpload.on('completed', job => {
+  logger.log('info','%s has completed!',job.id) 
+  logger.log('info', "bullmq processing excel completes at "+ Date.now())
+})
+ticketViaFileUpload.on("error", (err) => {
+  console.log(err)
+  logger.log('error',err)
+})
+ticketViaFileUpload.on('failed', (job, err) => { 
+  logger.log('error','%s has failed with %s', job.id, err.message)
+})
+
+//private method
+const readFile = async (fileLocation) =>{
+  let idSet = new Array() 
+  await workbook.xlsx
+		.readFile(fileLocation)
+		.then(() => {
+			let worksheet = workbook.getWorksheet('Sheet1');
+			worksheet.eachRow({ includeEmpty: true }, function(row, rowNumber) {
+				if (rowNumber > 1 && row.values.length > 0) {
+          const val = row.values 
+          const fileData = {
+            emailId:val[2],
+            type:val[3]
+          }
+          idSet.push(fileData);
+        }
+			})
+		})
+		.catch((err) => {
+			logger.log('error', err)
+		})
+		.finally(() => { 
+			return idSet
+		})
+  return idSet
+}
 
 //System related calls
 const gracefulShutdown = async (signal) => {
     console.log(`Received ${signal}, closing server...`)
-    await worker.close()
-  }
+    await worker.close() 
+    await ticketViaFileUpload.close()
+}
   
 process.on('SIGINT', () => gracefulShutdown('SIGINT'))
 

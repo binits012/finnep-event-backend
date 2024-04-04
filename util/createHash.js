@@ -48,9 +48,14 @@ const updateHash = async (id, text) => {
     return await Crypto.updateCryptoById(id,  iv.toString('hex'), encrypted.toString('hex'))
 
 }
+
+const getCryptoByEmail = async (email) =>{
+    return await Crypto.getCryptoByEmail(email)
+}
 module.exports = {
     createHashData,
     deleteHashById,
     readHash,
-    updateHash
+    updateHash,
+    getCryptoByEmail
 }

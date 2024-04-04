@@ -59,6 +59,10 @@ router.route('/setting/:id')
     .get(api.getSettingById)
     .post(api.updateSettingById)
     
+router.route('/singleTicket')
+    .post(api.createSingleTicket)
+router.route('/multipleTicket')
+    .post(api.createMultipleTicket)
 
 router.route('/dashboard')
     .get(api.dashboard)

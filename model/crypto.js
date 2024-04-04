@@ -45,6 +45,7 @@
 
     getCryptoByEmail = async (email) =>{
         const emailCryptos = await model.Crypto.find({'type':'email'}) 
+        
         return emailCryptos.map(element => {
             const encryptedData = element.encryptedData
             const iv = element.iv
@@ -52,8 +53,13 @@
             let decipher = CryptoLibrary.createDecipheriv(algorithm, key, Buffer.from(iv,'hex'))
             let decrypted = decipher.update(encryptedData, 'hex', 'utf8')
             decrypted += decipher.final('utf8')  
-            return decrypted 
-        })
+            const emailCryto ={
+                email:decrypted,
+                _id:element._id
+
+            } 
+            return emailCryto 
+        }).filter(e=>e.email === email)
         
     }
     root = typeof exports !== 'undefined' && exports !== null ? exports : window
