@@ -352,6 +352,25 @@ const createMultipleTicket = async(req, res, next) =>{
     return await ticket.createMultipleTicket(req,res,next)
 }
 
+const getAllTicketByEventId = async(req, res, next) =>{ 
+    const id = req.params.id 
+    param(id).custom(common.validateParam(id).then(async data=>{
+        if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            message: 'Invalid Id.', error: appText.INVALID_ID
+        })
+        await ticket.getAllTicketByEventId(req,res,next)
+    }))
+}
+
+const getTicketById = async(req,res,next) =>{
+    const id = req.params.id 
+    param(id).custom(common.validateParam(id).then(async data=>{
+        if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            message: 'Invalid Id.', error: appText.INVALID_ID
+        })
+        await ticket.getTicketById(req,res,next)
+    }))
+}
 /** Ticket Ends  */
 
 const uploadPhotosForParticularEvent = async(req,res,next) =>{
@@ -408,6 +427,10 @@ module.exports = {
     updateSettingById,
     //dashboard
     dashboard,
+
+    //ticket
     createSingleTicket,
-    createMultipleTicket
+    createMultipleTicket,
+    getAllTicketByEventId,
+    getTicketById
 }

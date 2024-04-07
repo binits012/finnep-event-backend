@@ -5,6 +5,10 @@ require('dotenv').config()
 const {uploadToS3Bucket,streamBasedParallelUpload} = require('./aws')
 const Event = require('../model/event')
 const {TicketReport} = require('../model/reporting')
+const hash = require('./createHash')  
+const ticketMaster = require('./ticketMaster')
+const Ticket = require('../model/ticket')
+const sendMail = require('../util/sendMail')
 const Excel = require('exceljs')
 const workbook = new Excel.Workbook()
 
@@ -72,13 +76,50 @@ const worker = new Worker(consts.PHOTO_ARRIVAL_QUEUE, async job => {
 const ticketViaFileUpload = new Worker(consts.CREATE_TICKET_FROM_FILE_UPLOAD, async job =>{
   logger.log('info', "bullmq processing excel starts at "+ Date.now()) 
   const jobData = job.data
-  const dataFromFile = await readFile(jobData.fileLocation)
-  console.log(dataFromFile)
-  try{
-     const reporting =  TicketReport({data:"ok"})
-     reporting.save()
-     
-  }catch(err){
+
+  try {
+    const dataFromFile = await readFile(jobData.fileLocation)
+    const event = await Event.getEventById(jobData.eventId)
+    
+    
+    dataFromFile.forEach( async e=>{
+      const ticketFor = e.emailId
+      const type = e.type
+      const emailCrypto = await hash.getCryptoByEmail(ticketFor)
+      let emailHash = null
+      if (emailCrypto.length == 0) {
+        //new email which is not yet in the system
+        let tempEmailHash = await hash.createHashData(ticketFor, 'email')
+        emailHash = tempEmailHash._id
+      } else {
+        emailHash = emailCrypto[0]._id
+      }
+      if (type === 'undefined' || type === '' || type === null) type = 'normal'
+      // create a ticket
+      const ticket = await Ticket.createTicket(null, emailHash, event,type) 
+      const emailPayload = await ticketMaster.createEmailPayload(event, ticket, ticketFor) 
+      await sendMail.forward(emailPayload).then(async data => {
+        //all good let's update the ticket model once more
+        console.log("email sent data \n", data)
+        await Ticket.updateTicketById(ticket.id, { isSend: true }) 
+        
+      }).catch(err => {
+        //let's not dump the hard work, we will try to send the mail in a while later
+        logger.log('error', err)
+
+        if(ticket !== null || ticket !=='undefined'){
+          const reportStatus = {
+            ticketId: ticket.id,
+            isSend:false,
+            retryCount:0
+          }
+          const reporting = TicketReport(reportStatus)
+          reporting.save()
+        }
+        
+      })
+    })
+  } catch (err) {
     console.log(err)
   }
   

@@ -38,7 +38,12 @@ const ticketMasterCreate = async(eventId, ticketId) =>{
     console.log(tm)
 }
 
+const getAllTicketByEventId = async(eventId) =>{
+    const ticket = await Ticket.getAllTicketByEventId(eventId)
+    console.log(ticket)
+}
 //getCryptoByEmail('binits09@gmail.com')
 //readTicketById('660d9536dd2faa2fe7ac675d')
 //createTicket()
-ticketMasterCreate('66099df581fd6537fc5a0aba','660dae4f5ae091c27074ef5d')
+//ticketMasterCreate('66099df581fd6537fc5a0aba','660dae4f5ae091c27074ef5d')
+getAllTicketByEventId('65fffacbec8fca063dc1ff08')
