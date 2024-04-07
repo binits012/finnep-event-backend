@@ -68,6 +68,9 @@ router.route('/event/:id/ticket')
 router.route('/ticket/:id')
     .get(api.getTicketById)
 
+router.route('/ticket/:id/checkIn')
+    .put(api.ticketCheckIn)
+
 router.route('/dashboard')
     .get(api.dashboard)
 router.route('/logout')

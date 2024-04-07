@@ -207,8 +207,7 @@ const getTicketById = async(req,res,next) =>{
         if(ticket === null){
             return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
                 message: 'Sorry, get ticket by id failed.', error: appText.RESOURCE_NOT_FOUND
-            })
-            throw new Error()
+            }) 
         }
         if(typeof token === 'undefined' || token === null){ 
                 const pattern = /(?!^).(?=[^@]+@)/g
@@ -241,7 +240,7 @@ const getTicketById = async(req,res,next) =>{
                             message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
                         })
                     }  
-                    if(!res.headersSent){  
+                    if(!res.headersSent){    
                         const data = {
                             id: ticket.id,
                             ticketFor: await getEmail(ticket.ticketFor.id),
@@ -249,6 +248,7 @@ const getTicketById = async(req,res,next) =>{
                             isSend: ticket.isSend,
                             active: ticket.active,
                             isRead: ticket.isRead,
+                            readBy: typeof ticket.readBy !== 'undefined' ? ticket.readBy.name : null,
                             type: ticket.type,
                             createdAt: ticket.createdAt
                         }  
@@ -267,10 +267,74 @@ const getTicketById = async(req,res,next) =>{
             })
         }
     }
-    
-    
-    
 }
+
+const ticketCheckIn = async(req, res, next) =>{
+    const token = req.headers.authorization
+    const id = req.params.id
+    const isRead = req.body.isRead
+    const ticketFor = req.body.ticketFor
+    const eventId = req.body.event
+    try{
+
+        const ticket = await Ticket.getTicketById(id)
+        if(ticket === null){
+            return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+                message: 'Sorry, get ticket by id failed.', error: appText.RESOURCE_NOT_FOUND
+            }) 
+        }
+
+        //check ticket info
+        const emailCrypto = await hash.getCryptoByEmail(ticketFor)
+        console.log(emailCrypto[0]._id.toString(), '=', ticket.ticketFor.id, ticket.event.id,'=', eventId )
+        if(emailCrypto[0]._id.toString() === ticket.ticketFor.id && ticket.event.id === eventId){
+
+            await jwtToken.verifyJWT(token, async (err, data) => {
+                if (err || data === null) { 
+                    return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({
+                        message: 'Please, provide valid token', error: appText.TOKEN_NOT_VALID
+                    })
+                } else { 
+                    const userRoleFromToken = data.role
+                    if (consts.ROLE_MEMBER ===userRoleFromToken) { 
+                        return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
+                            message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
+                        })
+                    }  
+                    if(!res.headersSent){  
+                        const userId = data.id  
+                        console.log(data)
+                        const obj = {
+                            isRead: isRead,
+                            readBy:userId
+                        }
+                        console.log(obj) 
+                        await Ticket.updateTicketById(id, obj).then(data=>{
+                            res.status(consts.HTTP_STATUS_OK).json({data:data}) 
+                        }) 
+                          
+                    }
+        
+                }
+            })
+        }else{
+            if(!res.headersSent){
+                return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+                    message: 'Sorry, ticket not found. Could be ticket is not for this event.', error: appText.RESOURCE_NOT_FOUND
+                })
+            }
+        }
+        
+    }catch(err){
+        logger.log('error',err.stack)
+        if(!res.headersSent){
+            return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
+                message: 'Sorry, update ticket by id failed.', error: appText.INTERNAL_SERVER_ERROR
+            })
+        }
+    }
+}
+
 //private
 const getEmail = async(id)=>{
     const emailObj =  await hash.readHash(id)  
@@ -280,5 +344,6 @@ module.exports = {
     createSingleTicket,
     createMultipleTicket,
     getAllTicketByEventId,
-    getTicketById
+    getTicketById,
+    ticketCheckIn
 }

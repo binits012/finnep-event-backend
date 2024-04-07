@@ -37,7 +37,7 @@
         return await model.Ticket.findById({_id:id}).populate('ticketFor').populate('event').populate('readBy').exec()
     }
 
-    const updateTicketById = async(id, obj) =>{
+    const updateTicketById = async(id, obj) =>{ 
         return await model.Ticket.findOneAndUpdate({_id:id},{$set:obj}, {new:true}).catch(err=>{
             logger.log('error', err.stack)
         })
