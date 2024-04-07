@@ -4,10 +4,11 @@
     const logger = require('./logger')
 
     const Ticket = (function(){
-        function Ticket(qrCode, ticketFor, event ){
+        function Ticket(qrCode, ticketFor, event, type ){
             this.qrCode = qrCode
             this.ticketFor = ticketFor,
             this.event = event  
+            this.type = type
 
         }
 
@@ -16,7 +17,8 @@
             const ticket = new model.Ticket({
                 qrCode:this.qrCode, 
                 ticketFor:this.ticketFor, 
-                event:this.event
+                event:this.event,
+                type:this.type
             }) 
             return  ticket.save()
         }
@@ -25,9 +27,9 @@
 
     })()
 
-    const createTicket = async(qrCode, ticketFor, event) =>{
+    const createTicket = async(qrCode, ticketFor, event, type) =>{
           
-        const ticket = new Ticket(qrCode, ticketFor, event)
+        const ticket = new Ticket(qrCode, ticketFor, event, type)
         return await ticket.saveToDB()
     }
 
@@ -44,11 +46,16 @@
     const deleteTicketById = async(id) =>{
         return await model.Ticket.findOneAndDelete({_id:id})
     }
+
+    const getAllTicketByEventId = async(eventId) =>{  
+        return await model.Ticket.find().populate({path:'event', select: 'id', match:{_id:eventId}}).populate('ticketFor').select('-qrCode -ics').exec()
+    }
     
     let root = typeof exports !== 'undefined' && exports !== null ? exports : window
     root.Ticket = Ticket
     root.createTicket = createTicket
     root.updateTicketById = updateTicketById
     root.getTicketById = getTicketById
-    root.deleteTicketById = deleteTicketById
+    root.deleteTicketById = deleteTicketById,
+    root.getAllTicketByEventId = getAllTicketByEventId
 }).call(this)
