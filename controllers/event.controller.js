@@ -53,6 +53,7 @@ const createEvent = async (req, res, next) =>{
                     socialMedia, lang, position, active, eventName, videoUrl).then(data=>{
                     return res.status(consts.HTTP_STATUS_CREATED).json({ data: data })
                 }).catch(err=>{
+                    logger.log("error", err.stack)
                     throw err
                 }) 
             }catch(err){
