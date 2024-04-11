@@ -1,6 +1,7 @@
 (function () {
     const mongoose = require('mongoose')
-	const Schema = mongoose.Schema;
+	const Schema = mongoose.Schema
+	mongoose.set('strict', true)
 	const bcrypt = require('bcrypt')
 	require('dotenv').config()
 	const {convertDateTimeWithTimeZone} = require("../util/common")

@@ -58,7 +58,10 @@
         const event = new Event(eventTitle, eventDescription, eventDate, eventTime,  eventPrice, 
             occupancy, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
             socialMedia, lang, position, active, eventName, videoUrl)
-        return  await event.saveToDB()
+        return  await event.saveToDB().catch(err=>{
+            console.log(err)
+            throw err
+        })
     }
 
     const getEvents = async() =>{
