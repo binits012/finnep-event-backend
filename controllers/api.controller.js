@@ -223,8 +223,7 @@ const updateEventById = async(req,res,next) =>{
     await common.validate([
         body('eventTitle').notEmpty(),
         body('eventDescription').notEmpty(),
-        body('eventDate').notEmpty(),
-        body('eventTime').notEmpty(),
+        body('eventDate').notEmpty(), 
         body('eventPrice').notEmpty(),
         body('occupancy').notEmpty().isNumeric(),
         body('eventPromotionPhoto').notEmpty(),
