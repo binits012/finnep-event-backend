@@ -115,7 +115,6 @@ const validate = async (validations, req) => {
     for (let validation of validations) {
         
         const result = await validation.run(req)
-        console.log(result)
         if (result.errors.length)  break
     } 
     

@@ -6,7 +6,7 @@ const logger = require('../model/logger')
 const appText = require('../applicationTexts')
 const commonUtil = require('../util/common') 
 const busboyFileUpload = require('../util/busboyFileUpload')
-const moment = require('moment-timezone')
+
 
 const createEvent = async (req, res, next) =>{
     const token = req.headers.authorization
@@ -52,8 +52,11 @@ const createEvent = async (req, res, next) =>{
                     occupancy, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
                     socialMedia, lang, position, active, eventName, videoUrl).then(data=>{
                     return res.status(consts.HTTP_STATUS_CREATED).json({ data: data })
+                }).catch(err=>{
+                    throw err
                 }) 
             }catch(err){
+                logger.log("error", err.stack)
                 if(!res.headersSent){
                     logger.log('error',err)
                     return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -83,7 +86,7 @@ const getEvents = async(req,res,next)=>{
             } 
              
             await Event.getEvents().then(data=>{
-                return res.status(consts.HTTP_STATUS_CREATED).json({ data: data, timeZone:process.env.TIME_ZONE })
+                return res.status(consts.HTTP_STATUS_OK).json({ data: data, timeZone:process.env.TIME_ZONE })
             }).catch(err=>{
                 logger.log('error',err)
                 return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -132,8 +135,7 @@ const updateEventById = async (req,res,next) =>{
     const eventTime = req.body.eventTime
     const eventPrice = req.body.eventPrice
     const occupancy = req.body.occupancy
-    const eventPromotionPhoto = req.body.eventPromotionPhoto
-    const eventPhoto = req.body.eventPhoto
+    const eventPromotionPhoto = req.body.eventPromotionPhoto 
     const eventLocationAddress = req.body.eventLocationAddress
     const eventLocationGeoCode = req.body.eventLocationGeoCode
     const transportLink = req.body.transportLink
@@ -155,8 +157,7 @@ const updateEventById = async (req,res,next) =>{
         eventTime:timeInMinutes,
         eventPrice:eventPrice,
         occupancy:occupancy,
-        eventPromotionPhoto:eventPromotionPhoto,
-        eventPhoto:eventPhoto,
+        eventPromotionPhoto:eventPromotionPhoto, 
         eventLocationAddress:eventLocationAddress,
         eventLocationGeoCode:eventLocationGeoCode,
         transportLink:transportLink,
