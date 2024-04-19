@@ -1,7 +1,7 @@
 (function () {
 	let model = require('../model/mongoModel')
 
-	let root, photo, uploadPhoto, listPhoto, updatePhotoById, getPhotoById, deletePhotoById
+	let root, uploadPhoto, listPhoto, updatePhotoById, getPhotoById, deletePhotoById,getGalleryPhoto
 
 	let Photo = (function () {
 		function Photo(photoLink, publish, position, photoType) {
@@ -44,6 +44,10 @@
 	deletePhotoById = async (id) => {
 		return await model.Photo.findByIdAndRemove(id).catch(err=>{return {error:err.stack}})
 	}
+
+	getGalleryPhoto = async() =>{
+		return await model.Photo.find().populate({path:'photoType', match:{name:"Gallery"}}).exec()
+	}
 	root = typeof exports !== 'undefined' && exports !== null ? exports : window
 	root.Photo = Photo
 	root.listPhoto = listPhoto
@@ -51,5 +55,6 @@
 	root.updatePhotoById = updatePhotoById
 	root.getPhotoById = getPhotoById
 	root.deletePhotoById = deletePhotoById
+	root.getGalleryPhoto = getGalleryPhoto
 
 }).call(this);

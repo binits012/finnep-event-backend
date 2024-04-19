@@ -68,9 +68,11 @@ const createSingleTicket = async(req,res,next) =>{
                     }).catch(err=>{
                         //let's not dump the hard work, we will try to send the mail in a while later
                         logger.log('error',err)
+                        throw err
                     })
                 }catch(err){ 
                     //no point keeping the ticket let's roll back 
+                    logger.log("info", "created %s", ticketId + " but due to error we might throw it out")
                     if(ticketId) await Ticket.deleteTicketById(ticketId).catch(err=>{ 
                         //let it fail, at this point we are really not intrested with it, we did what we could
                         logger.log('error',err)
@@ -183,6 +185,9 @@ const getAllTicketByEventId = async(req,res,next) =>{
                         }).then(()=>{
                             const flattenedArray = tempData.reduce((acc, curr)=>acc.concat(curr),[])
                             res.status(consts.HTTP_STATUS_OK).json({data:flattenedArray})
+                        }).catch(err=>{
+                            logger.log('error',err)
+                            throw err
                         })
                         
                     }
@@ -221,7 +226,7 @@ const getTicketById = async(req,res,next) =>{
                     type: ticket.type,
                     createdAt: ticket.createdAt  
                 }
-                const page = (await fs.readFile(__dirname.replace('controllers','')+'/staticPages/ticketInfo.html','utf8')) .replace('$eventTitle',data.event.eventName)
+                const page = (await fs.readFile(__dirname.replace('controllers','')+'/staticPages/ticketInfo.html','utf8')) .replace('$eventTitle',data.event.eventTitle)
                 .replace('$ticketId', data.id).replace('$ticketFor',data.ticketFor).replace('$eventDate',data.event.eventDate).replace('$eventLocation',data.event.venue)
                 .replace('$createdAt', data.createdAt)
                 res.type('text/html')
@@ -303,13 +308,12 @@ const ticketCheckIn = async(req, res, next) =>{
                     }  
                     if(!res.headersSent){  
                         const userId = data.id  
-                        console.log(data)
                         const obj = {
                             isRead: isRead,
                             readBy:userId
                         }
-                        console.log(obj) 
                         await Ticket.updateTicketById(id, obj).then(data=>{
+                            logger.info('ticket %s',id + " is now updated by %s" + userId)
                             res.status(consts.HTTP_STATUS_OK).json({data:data}) 
                         }) 
                           
@@ -335,6 +339,12 @@ const ticketCheckIn = async(req, res, next) =>{
     }
 }
 
+const getAllTickets = async (req, res,next) =>{ 
+         
+    return await Ticket.getAllTickets()
+    
+}
+
 //private
 const getEmail = async(id)=>{
     const emailObj =  await hash.readHash(id)  
@@ -345,5 +355,6 @@ module.exports = {
     createMultipleTicket,
     getAllTicketByEventId,
     getTicketById,
-    ticketCheckIn
+    ticketCheckIn,
+    getAllTickets
 }

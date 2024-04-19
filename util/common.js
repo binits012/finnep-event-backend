@@ -172,7 +172,9 @@ const generateICS = async(event, ticketId)=>{
 }
 
 const loadEmailTemplate = async (fileLocation, eventTitle,eventPromotionalPhoto, qrCode) => {
-    const emailData = (await fs.readFile(fileLocation,'utf8')).replace('$eventTitle',eventTitle).replace('$eventPromotionalPhoto',eventPromotionalPhoto)
+    const emailData = (await fs.readFile(fileLocation,'utf8')).replace('$eventTitle',eventTitle).replace('$eventTitle',eventTitle)
+    .replace('$eventTitle',eventTitle)
+    .replace('$eventPromotionalPhoto',eventPromotionalPhoto)
     .replace('$qrcodeData',qrCode) 
     return emailData
   }

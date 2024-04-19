@@ -72,8 +72,13 @@ const getAllPhotos = async (req, res, next) => {
                     message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
                 })
             }
-            await Photo.listPhoto().then(data => {
-                return res.status(consts.HTTP_STATUS_OK).json({ data: data })
+            const photoType = await PhotoType.getPhotoTypes()
+            await Photo.listPhoto().then(obj => {
+                const data= {
+                    photoType:photoType,
+                    photo:obj
+                }
+                return res.status(consts.HTTP_STATUS_OK).json(data)
             }).catch(err => {
                 logger.error(err) 
                 return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
@@ -84,6 +89,7 @@ const getAllPhotos = async (req, res, next) => {
     })
     
 }
+
 const getPhotoById = async (req, res, next) => {
     const photoId = req.params.id
     const token = req.headers.authorization
@@ -161,17 +167,23 @@ const deletePhotoById = async (req, res, next) => {
                 })
             }
             const myPhoto = await Photo.getPhotoById(photoId)
+            console.log(myPhoto)
             if (myPhoto !== null) {
                 await Photo.deletePhotoById(photoId).then(data => {
+                    /*
                     const filePath = __dirname.replace('controllers', 'public/') + data.photoLink
                     fs.unlink(filePath) 
+                    */
                     return res.status(consts.HTTP_STATUS_OK).send()
                 }).catch(err => {
-                    logger.error(err)
-                    UserActivity.createUserActivity(token, Action.DELETE, "photo delete failed.")
+                    logger.error(err) 
                     return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
                         message: 'Sorry, something went wrong', error: err
                     })
+                })
+            }else{
+                return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+                    message: 'Sorry, photo not found.', error: appText.RESOURCE_NOT_FOUND
                 })
             }
         }
@@ -182,6 +194,9 @@ const getAllPhotoForDashboard = async () =>{
    return await Photo.listPhoto()
 } 
 
+const getGalleryPhoto = async () =>{
+    return  await Photo.getGalleryPhoto()
+}
  
 module.exports = {
     createPhoto, 
@@ -189,5 +204,6 @@ module.exports = {
     getPhotoById,
     updatePhotoById,
     deletePhotoById, 
-    getAllPhotoForDashboard
+    getAllPhotoForDashboard,
+    getGalleryPhoto
 }
