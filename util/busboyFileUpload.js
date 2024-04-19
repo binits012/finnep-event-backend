@@ -65,7 +65,7 @@ const uploadToS3 = async(event, req, callback) =>{
             event:event,
             fileInfo: fileInfo
         } 
-        uploadArrivalPhotoQueue.add(event.eventName+'-'+event.id,jobData,
+        uploadArrivalPhotoQueue.add(trimAllWhiteSpaces(event.eventTitle)+'-'+event.id,jobData,
             {
                 removeOnComplete: {
                 age: 3600, // keep up to 1 hour
@@ -83,6 +83,15 @@ const uploadToS3 = async(event, req, callback) =>{
     req.pipe(bb)
 }
 
+const trimAllWhiteSpaces = (str) =>{
+    let newStr = ""
+    for(let char of str){
+        if(!/\s/.test(char)){
+            newStr += char
+        }
+    }
+    return newStr
+}
 const createTicketViaFile = async(req) =>{
     await createFileFolder('excelFiles')
     let saveTo = null

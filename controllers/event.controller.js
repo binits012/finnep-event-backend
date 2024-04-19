@@ -29,8 +29,7 @@ const createEvent = async (req, res, next) =>{
     const videoUrl = req.body.videoUrl
     if(lang === 'undefined' || lang === ""){
         lang = "en"
-    }  
-    
+    }   
     await jwtToken.verifyJWT(token, async (err, data) => {
         if (err || data === null) { 
             return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({
@@ -47,7 +46,7 @@ const createEvent = async (req, res, next) =>{
                     }
                     
                 }
-                const timeInMinutes =  commonUtil.timeInMinutes(eventTime)
+                const timeInMinutes =  0//commonUtil.timeInMinutes(eventTime) 
                 await Event.createEvent(eventTitle, eventDescription, eventDate, timeInMinutes,  eventPrice, 
                     occupancy, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
                     socialMedia, lang, position, active, eventName, videoUrl).then(data=>{
@@ -147,7 +146,7 @@ const updateEventById = async (req,res,next) =>{
     const eventName = req.body.eventName
     const videoUrl = req.body.videoUrl
     const convertDateTime = await commonUtil.convertDateTimeWithTimeZone(eventDate)
-    const timeInMinutes =  commonUtil.timeInMinutes(eventTime)
+    //const timeInMinutes =  commonUtil.timeInMinutes(eventTime)
     if(lang === 'undefined' || lang === ""){
         lang = "en"
     } 
@@ -155,7 +154,7 @@ const updateEventById = async (req,res,next) =>{
         eventTitle: eventTitle,
         eventDescription:eventDescription,
         eventDate:convertDateTime,
-        eventTime:timeInMinutes,
+        eventTime:0,
         eventPrice:eventPrice,
         occupancy:occupancy,
         eventPromotionPhoto:eventPromotionPhoto, 

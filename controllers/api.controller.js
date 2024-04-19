@@ -243,6 +243,16 @@ const updateEventById = async(req,res,next) =>{
     })
 }
  
+const uploadPhotosForParticularEvent = async(req,res,next) =>{
+    const id = req.params.id 
+    param(id).custom(common.validateParam(id).then(async data=>{
+        if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            message: 'Invalid Id.', error: appText.INVALID_ID
+        })
+        return await event.uploadPhotosForParticularEvent(req,res,next)
+    }))
+    
+}
 /** EVENT ENDS */
 
 /** dashboard helper */
@@ -279,15 +289,22 @@ const dashboard = async(req, res, next) =>{
                     throw err
                     
                 }) 
+                const tickets = await ticket.getAllTickets().catch(err=>{
+                    logger.log('error',err)
+                    throw err
+                    
+                }) 
                 const dashboardData = {
                     event:eventAll,
                     photoType:photoTypes,
                     photo:photoAll,
-                    notification:notificationAll
+                    notification:notificationAll,
+                    ticket:tickets
     
                 }  
                 return res.status(consts.HTTP_STATUS_OK).json({ data: dashboardData })
             }catch(err){
+                console.log(err)
                 if(!res.headersSent){
                     return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
                         message: 'Sorry, fetching dashboard data failed', error: appText.DASHBOARD_DATA_FAILED
@@ -299,7 +316,12 @@ const dashboard = async(req, res, next) =>{
     })
 }
 
+const getGalleyPhoto = async(req,res,next)=>{
 
+    const photo = await photo.getGalleryPhoto()
+    return res.status(consts.HTTP_STATUS_OK).json({ data: photo })
+
+}
 /** Setting */
 const createSetting = async(req,res,next) =>{
     await setting.createSetting(req,res,next)
@@ -382,16 +404,7 @@ const ticketCheckIn = async(req,res,next) =>{
 }
 /** Ticket Ends  */
 
-const uploadPhotosForParticularEvent = async(req,res,next) =>{
-    const id = req.params.id 
-    param(id).custom(common.validateParam(id).then(async data=>{
-        if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
-            message: 'Invalid Id.', error: appText.INVALID_ID
-        })
-        return await event.uploadPhotosForParticularEvent(req,res,next)
-    }))
-    
-}
+
 module.exports = {
     login,
     createAdminUser,
@@ -414,6 +427,7 @@ module.exports = {
     getPhotoById,
     updatePhotoById,
     deletePhotoById,
+    getGalleyPhoto,
     
     //notification
     getAllNotification,

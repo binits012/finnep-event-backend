@@ -1,4 +1,3 @@
-/* Company Confidential, Copyright (c) 2016 CRF Box, Ltd. All Rights Reserved. */
 "use strict";
 
 const webpack = require('webpack');
@@ -16,7 +15,7 @@ module.exports = {
     target: "node",
     context: __dirname,
     mode: env === 'dev' ? 'development' : 'production',
-    devtool: env === 'dev' ? "inline-sourcemap" : false,
+    devtool:  "source-map",
     entry: ['@babel/polyfill', "./app.js"
     ],
     output: {
@@ -47,6 +46,12 @@ module.exports = {
     },
     optimization: {
         minimize: true,
-        minimizer: [new TerserPlugin()]
-    },
+        minimizer: [
+          new TerserPlugin({
+            compress: {
+              keep_fnames: true,
+            },
+          }),
+        ],
+      }
 };

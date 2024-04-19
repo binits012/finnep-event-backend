@@ -27,6 +27,7 @@ router.route('/photo')
     .post(api.createPhoto)
     .get(api.getPhoto)
     .patch(api.updatePhotoById)
+router.route('/photo/:id')
     .delete(api.deletePhotoById)
 
  

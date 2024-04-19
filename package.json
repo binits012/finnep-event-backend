@@ -23,6 +23,7 @@
     "@babel/plugin-proposal-object-rest-spread": "^7.20.7",
     "@babel/polyfill": "^7.12.1",
     "@babel/preset-env": "^7.22.7",
+    "@hokify/agenda": "^6.3.0",
     "ajv": "^6.10.2",
     "ajv-errors": "^1.0.1",
     "babel-loader": "^9.1.3",

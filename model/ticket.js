@@ -51,6 +51,10 @@
         return await model.Ticket.find().populate({path:'event', select: 'id', match:{_id:eventId}}).populate('ticketFor').select('-qrCode -ics').exec()
     }
     
+    const getAllTickets = async() =>{
+        return await model.Ticket.find().select('-qrCode -ics').exec()
+    }
+    
     let root = typeof exports !== 'undefined' && exports !== null ? exports : window
     root.Ticket = Ticket
     root.createTicket = createTicket
@@ -58,4 +62,5 @@
     root.getTicketById = getTicketById
     root.deleteTicketById = deleteTicketById,
     root.getAllTicketByEventId = getAllTicketByEventId
+    root.getAllTickets = getAllTickets
 }).call(this)
