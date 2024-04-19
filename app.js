@@ -9,6 +9,7 @@ const adminRole = require('./util/adminUser')
 const api = require('./routes/api')
 const front = require('./routes/front')
 const cors = require('cors')
+require('./util/schedular')
 var app = express();
 app.use(cors())
 app.options('*',cors())
