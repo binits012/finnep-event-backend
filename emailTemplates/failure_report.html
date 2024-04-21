@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Failure Report </title>
+  <style>
+    table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+    th, td {
+      padding: 8px;
+      border: 1px solid #ddd;
+    }
+    th {
+      text-align: left;
+      background-color: #f2f2f2;
+    }
+  </style>
+</head>
+<body>
+  <h1>Failed Emails</h1>
+  <p>Hi $adminName,</p>
+  <p>Unfortunately, we have some dangling emails. Please do the needful</p>
+
+  <h2>Failure Email Lists</h2>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Id</th>
+        <th>Email</th>
+        <th>Event</th>
+      </tr>
+    </thead>
+    <tbody>
+        $trData
+      
+    </tbody>
+  </table>
+
+</body>
+</html>
