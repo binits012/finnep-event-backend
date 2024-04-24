@@ -3,7 +3,9 @@ import * as Ticket from '../model/ticket.js'
 import {error} from '../model/logger.js'
 import dotenv from 'dotenv'
 dotenv.config()
-const __dirname = import.meta.dirname;
+import { dirname } from 'path'
+const __dirname = dirname(import.meta.url)
+console.log(__dirname)
 export const createEmailPayload = async (event,ticketInfo, ticketFor, type) =>{
     try{
         const ticketId = ticketInfo.id
