@@ -1,12 +1,11 @@
-'use strict'
-const jwtToken = require('../util/jwtToken')
-const logger = require('../model/logger')
-const appText = require('../applicationTexts.js') 
-const consts = require('../const') 
-const Notification = require('../model/notification.js')
-const NotificationType = require('../model/notificationType.js')
+import * as jwtToken from'../util/jwtToken.js'
+import {error} from '../model/logger.js'
+import * as appText from'../applicationTexts.js'
+import * as consts from'../const.js'
+import * as Notification from'../model/notification.js'
+import * as NotificationType from '../model/notificationType.js'
 
-const createNotification = async (req, res, next) => {
+export const createNotification = async (req, res, next) => {
     const token = req.headers.authorization
     const notification = req.body.notification
     const startDate = req.body.startDate
@@ -45,7 +44,7 @@ const createNotification = async (req, res, next) => {
                         return res.status(consts.HTTP_STATUS_CREATED).json({ data: data })
                     })
                     .catch(err => {
-                        logger.log('error', err.stack) 
+                        error('error', err.stack) 
                         return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
                             message: 'Sorry, something went wrong', error: err
                         })
@@ -60,7 +59,7 @@ const createNotification = async (req, res, next) => {
     })
 }
 
-const getAllNotification = async (req, res, next) => {
+export const getAllNotification = async (req, res, next) => {
     const token = req.headers.authorization
     await jwtToken.verifyJWT(token, async (err, data) => { 
         if (err || data === null) { 
@@ -77,7 +76,7 @@ const getAllNotification = async (req, res, next) => {
             await Notification.getAllNotification().then(data => {
                 return res.status(consts.HTTP_STATUS_OK).json({ data: data })
             }).catch(err => {
-                logger.log('error',err)
+                error('error',err)
                 return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
                     message: 'Sorry, something went wrong', error: err
                 })
@@ -86,7 +85,8 @@ const getAllNotification = async (req, res, next) => {
     })
     
 }
-const getNotificationById = async (req, res, next) => {
+
+export const getNotificationById = async (req, res, next) => {
     const notificationId = req.params.id
     const token = req.headers.authorization
     await jwtToken.verifyJWT(token, async (err, data) => { 
@@ -104,7 +104,7 @@ const getNotificationById = async (req, res, next) => {
             await Notification.getNotificationById(notificationId).then(data => {
                 return res.status(consts.HTTP_STATUS_OK).json({ data: data })
             }).catch(err => {
-                logger.log('error',err)
+                error('error',err)
                 return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
                     message: 'Sorry, something went wrong', error: err
                 })
@@ -114,7 +114,7 @@ const getNotificationById = async (req, res, next) => {
     
 }
 
-const updateNotificationById = async (req, res, next) => {
+export const updateNotificationById = async (req, res, next) => {
     const token = req.headers.authorization
     const notification = req.body.notification
     const startDate = req.body.startDate
@@ -162,7 +162,7 @@ const updateNotificationById = async (req, res, next) => {
                         return res.status(consts.HTTP_STATUS_OK).json({ data: data })
                     })
                     .catch(err => {
-                        logger.log('error',err) 
+                        error('error',err) 
                         return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
                             message: 'Sorry, something went wrong', error: err
                         })
@@ -177,7 +177,7 @@ const updateNotificationById = async (req, res, next) => {
     })
 }
 
-const deleteNotificationById = async (req, res, next) => {
+export const deleteNotificationById = async (req, res, next) => {
     const notificationId = req.params.id
     const token = req.headers.authorization
     if (token === "" || token === null || token === undefined
@@ -207,7 +207,7 @@ const deleteNotificationById = async (req, res, next) => {
                         return res.status(consts.HTTP_STATUS_OK).send()
                     })
                     .catch(err => {
-                        logger.log('error',err) 
+                        error('error',err) 
                         return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
                             message: 'Sorry, something went wrong', error: err
                         })
@@ -223,14 +223,6 @@ const deleteNotificationById = async (req, res, next) => {
 
 }
  
-const getAllNotificationForDashboard = async() =>{
+export const getAllNotificationForDashboard = async() =>{
     return await Notification.getAllNotification()
-}
-module.exports = {
-    createNotification,
-    getAllNotification,
-    getNotificationById,
-    updateNotificationById,
-    deleteNotificationById,
-    getAllNotificationForDashboard
 }

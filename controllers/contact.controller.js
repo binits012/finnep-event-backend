@@ -1,14 +1,14 @@
-'use strict'
-const jwtToken = require('../util/jwtToken')
-const logger = require('../model/logger')
-const User = require('../model/users')
-const Contact = require('../model/contact')
-const appText = require('../applicationTexts.js')
-const commonUtil = require('../util/common')
-require('dotenv').config()
-const consts = require('../const')
+import * as jwtToken from '../util/jwtToken.js'
+import {error} from '../model/logger.js'
+import * as User from '../model/users.js'
+import * as Contact from '../model/contact.js'
+import * as appText from '../applicationTexts.js'
+import * as commonUtil from '../util/common.js'
+import dotenv from 'dotenv'
+dotenv.config() 
+import * as consts from '../const.js'
 
-const createContact = async (req, res, next) => {
+export const createContact = async (req, res, next) => {
     const username = req.body.username
     const token = req.headers.authorization
     const streetName = req.body.streetName
@@ -18,7 +18,7 @@ const createContact = async (req, res, next) => {
     const manipulatedNumber = await commonUtil.manipulatePhoneNumber(phone) 
     if(manipulatedNumber === null){
         res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ message: 'bad phone number.', error: "you provided bad phone number "});
-        logger.log('error',"reservation create failed."+token)
+        error('error',"reservation create failed."+token)
         return
     }
     await jwtToken.verifyJWT(token, async (err, data) => {
@@ -40,7 +40,7 @@ const createContact = async (req, res, next) => {
             const userRoleFromToken = data.role
             const getUserFromToken = await User.getUserByName(userFromToken)
             const getUserFromPayload = await User.getUserByName(username) 
-            if (getUserFromPayload.role.roleType === consts.ROLE_SUPER_ADMIN || consts.ROLE_CUSTOMER === userRoleFromToken) {
+            if (getUserFromPayload.role.roleType === consts.ROLE_SUPER_ADMIN || consts.ROLE_MEMBER === userRoleFromToken) {
                 res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
                     message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
                 })
@@ -69,7 +69,7 @@ const createContact = async (req, res, next) => {
                     data.user.pwd = ""
                     return res.status(consts.HTTP_STATUS_CREATED).json({ data: data })
                 }).catch(err => {
-                    logger.log('error',err)
+                    error('error',err)
                     return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
                         message: 'Sorry, contact creation failed', error: appText.CONTACT_CREATE_FAILED
                     })
@@ -85,7 +85,7 @@ const createContact = async (req, res, next) => {
 
 }
 
-const getContact = async (req, res, next) => {
+export const getContact = async (req, res, next) => {
     const token = req.headers.authorization
     const userId = req.params.id
     if (userId === null || userId === "" || userId === undefined
@@ -137,7 +137,7 @@ const getContact = async (req, res, next) => {
             await Contact.getContactById(getUserByGivenId.id).then(data => {
                 return res.status(consts.HTTP_STATUS_OK).json({ data: data })
             }).catch(err => {
-                logger.log('error',err)
+                error('error',err)
                 return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
                     message: 'Sorry, listing user contact failed', error: appText.CONTACT_READ_FAILED
                 })
@@ -146,7 +146,7 @@ const getContact = async (req, res, next) => {
     })
 }
 
-const updateContact = async (req, res, next) => {
+export const updateContact = async (req, res, next) => {
     const username = req.body.username
     const token = req.headers.authorization
     const streetName = req.body.streetName
@@ -199,7 +199,7 @@ const updateContact = async (req, res, next) => {
                     await Contact.getContactById(getUserFromPayload.id).then(data => {
                         return res.status(consts.HTTP_STATUS_OK).json({ data: data })
                     }).catch(err => {
-                        logger.log('error',err)
+                        error('error',err)
                          return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
                             message: 'Sorry, listing user contact failed', error:err
                         })
@@ -215,7 +215,7 @@ const updateContact = async (req, res, next) => {
     })
 }
 
-const deleteContact = async (req, res, next) => {
+export const deleteContact = async (req, res, next) => {
     const token = req.headers.authorization
     const userId = req.params.id
     if (userId === null || userId === "" || userId === undefined
@@ -267,7 +267,7 @@ const deleteContact = async (req, res, next) => {
                     userContact.contact[1]._id).then(data => {
                         return res.status(consts.HTTP_STATUS_NO_CONTENT).send()
                     }).catch(err => {
-                        logger.log('error',err)
+                        error('error',err)
                         return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
                             message: 'Sorry, deleting user contact failed', error: appText.CONTACT_DELETE_FAILED
                         })
@@ -276,10 +276,4 @@ const deleteContact = async (req, res, next) => {
 
         }
     })
-}
-module.exports = {
-    createContact,
-    getContact,
-    updateContact,
-    deleteContact
 }

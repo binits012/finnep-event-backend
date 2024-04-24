@@ -1,17 +1,20 @@
 "use strict";
+import webpack from 'webpack'
+import CopyWebpackPlugin from 'copy-webpack-plugin'
+const __dirname = import.meta.dirname;
+import TerserPlugin from 'terser-webpack-plugin'
+import minimist from 'minimist'
+const args = minimist(process.argv.slice(2));
 
-const webpack = require('webpack');
-const CopyWebpackPlugin = require('copy-webpack-plugin');
-const path = require('path');
-const TerserPlugin = require("terser-webpack-plugin");
-const args = require('minimist')(process.argv.slice(2));
+
+ console.log(__dirname)
 //== Set the correct environment (e.g. 'production')
 let env = 'dev';
 if (args.env) { env = args.env; }
 
 let projectName = process.env.npm_package_name + '-' + process.env.npm_package_version;
 
-module.exports = {
+export default {
     target: "node",
     context: __dirname,
     mode: env === 'dev' ? 'development' : 'production',
@@ -22,7 +25,17 @@ module.exports = {
         path: __dirname + "/dist/" + projectName,
         filename: "app.min.js"
     },
-    externals: { 'winston': 'require("winston")', 'bcrypt': 'require("bcrypt")' }, // put winston as an external lib since it doesn't work after webpack transforms and bundles it
+    externals: [function(context, request, callback) {
+        if (/winston|bcrypt/.test(request)) {
+          callback(null, {
+            // Use a dynamic ESM import statement
+            local: 'import("' + request + '").then(mod => mod.default || mod)',
+            external: request,
+          });
+        } else {
+          callback();
+        }
+      }], // put winston as an external lib since it doesn't work after webpack transforms and bundles it
     module: {
         rules: [{
             test: /\.jsx?$/,
@@ -48,9 +61,11 @@ module.exports = {
         minimize: true,
         minimizer: [
           new TerserPlugin({
-            compress: {
-              keep_fnames: true,
-            },
+            terserOptions:{
+                compress: {
+                    keep_fnames: true,
+                  },
+            } 
           }),
         ],
       }

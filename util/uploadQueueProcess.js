@@ -1,16 +1,18 @@
-const { Worker } = require('bullmq')
-const logger = require('../model/logger')
-const consts = require('../const')
-require('dotenv').config()
-const {uploadToS3Bucket,streamBasedParallelUpload} = require('./aws')
-const Event = require('../model/event')
-const {TicketReport} = require('../model/reporting')
-const hash = require('./createHash')  
-const ticketMaster = require('./ticketMaster')
-const Ticket = require('../model/ticket')
-const sendMail = require('../util/sendMail')
-const Excel = require('exceljs')
-const workbook = new Excel.Workbook()
+import { Worker } from 'bullmq'
+import {error, info} from '../model/logger.js'
+import * as consts from '../const.js'
+import dotenv from 'dotenv'
+dotenv.config()
+import {uploadToS3Bucket,streamBasedParallelUpload} from './aws.js'
+import * as Event from '../model/event.js'
+import {TicketReport} from '../model/reporting.js'
+import * as hash from './createHash.js'
+import * as ticketMaster from './ticketMaster.js'
+import * as Ticket from '../model/ticket.js'
+import * as sendMail from '../util/sendMail.js'
+import * as Excel from 'exceljs'
+const workbook = new Excel.default.Workbook()
+
 
 const worker = new Worker(consts.PHOTO_ARRIVAL_QUEUE, async job => {
     //get the information of the job 
@@ -27,15 +29,15 @@ const worker = new Worker(consts.PHOTO_ARRIVAL_QUEUE, async job => {
        const pathToS3 = eventName+'/'+fileName
        const linkToFile = "https://"+process.env.BUCKET_NAME+".s3."+process.env.BUCKET_REGION+".amazonaws.com/" +pathToS3
        photoLinkArray.push(linkToFile)
-       logger.log('info', "sending photo to bucket starts at "+ new Date()) 
+       info(  "sending photo to bucket starts at "+ new Date()) 
        if(streamData.lenght > (1024*1024*5)){
         await streamBasedParallelUpload(ct, pathToS3, streamData ).catch(err=>{
-            logger.log('error', err.stack)
+            error('error', err.stack)
             shouldContinue = false
         }) 
        }else{
         await uploadToS3Bucket(ct, streamData, pathToS3).catch(err=>{
-            logger.log('error', err.stack)
+            error('error', err.stack)
             shouldContinue = false
         })
        } 
@@ -48,10 +50,10 @@ const worker = new Worker(consts.PHOTO_ARRIVAL_QUEUE, async job => {
         const photoArray = [...new Set(job.data.event.eventPhoto)]
         job.data.event.eventPhoto = photoArray
         await Event.updateEventById(eventId,job.data.event).catch(err=>{
-            logger.log('error',err.stack)
+            error('error',err.stack)
         })
           
-        logger.log('info', "the whole job completes at "+ new Date()) 
+        info(  "the whole job completes at "+ new Date()) 
     }
 
 }, {
@@ -61,22 +63,21 @@ const worker = new Worker(consts.PHOTO_ARRIVAL_QUEUE, async job => {
     }
   })
   worker.on('completed', job => {
-    logger.log('info','%s has completed!',job.id) 
+    info( '%s has completed!',job.id) 
   });
   worker.on("error", (err) => {
     console.log(err)
-    logger.log('error',err)
+    error('error',err.stack)
   })
   worker.on('failed', (job, err) => { 
     console.log(err)
-    logger.log('error','%s has failed with %s', job.id, err.message)
+    error('error','%s has failed with %s', job.id, err.message)
   })
  
 //create ticket via fileUpload
 const ticketViaFileUpload = new Worker(consts.CREATE_TICKET_FROM_FILE_UPLOAD, async job =>{
-  logger.log('info', "bullmq processing excel starts at "+ Date.now()) 
-  const jobData = job.data
-
+  info( "bullmq processing excel starts at "+ Date.now()) 
+  const jobData = job.data 
   try {
     const dataFromFile = await readFile(jobData.fileLocation)
     const event = await Event.getEventById(jobData.eventId)
@@ -84,7 +85,7 @@ const ticketViaFileUpload = new Worker(consts.CREATE_TICKET_FROM_FILE_UPLOAD, as
     
     dataFromFile.forEach( async e=>{
       const ticketFor = e.emailId
-      const type = e.type
+      let typeOfTicket = e.type
       const emailCrypto = await hash.getCryptoByEmail(ticketFor)
       let emailHash = null
       if (emailCrypto.length == 0) {
@@ -94,9 +95,9 @@ const ticketViaFileUpload = new Worker(consts.CREATE_TICKET_FROM_FILE_UPLOAD, as
       } else {
         emailHash = emailCrypto[0]._id
       }
-      if (type === 'undefined' || type === '' || type === null) type = 'normal'
+      if (typeOfTicket === 'undefined' || typeOfTicket === '' || typeOfTicket === null) typeOfTicket = 'normal'
       // create a ticket
-      const ticket = await Ticket.createTicket(null, emailHash, event,type) 
+      const ticket = await Ticket.createTicket(null, emailHash, event,typeOfTicket) 
       const emailPayload = await ticketMaster.createEmailPayload(event, ticket, ticketFor) 
       await sendMail.forward(emailPayload).then(async data => {
         //all good let's update the ticket model once more
@@ -105,7 +106,7 @@ const ticketViaFileUpload = new Worker(consts.CREATE_TICKET_FROM_FILE_UPLOAD, as
         
       }).catch(err => {
         //let's not dump the hard work, we will try to send the mail in a while later
-        logger.log('error', err)
+        error('error', err.stack)
 
         if(ticket !== null || ticket !=='undefined'){
           const reportStatus = {
@@ -131,15 +132,15 @@ const ticketViaFileUpload = new Worker(consts.CREATE_TICKET_FROM_FILE_UPLOAD, as
   }
 })
 ticketViaFileUpload.on('completed', job => {
-  logger.log('info','%s has completed!',job.id) 
-  logger.log('info', "bullmq processing excel completes at "+ Date.now())
+  info( '%s has completed!',job.id) 
+  info(  "bullmq processing excel completes at "+ Date.now())
 })
 ticketViaFileUpload.on("error", (err) => {
   console.log(err)
-  logger.log('error',err)
+  error('error',err)
 })
 ticketViaFileUpload.on('failed', (job, err) => { 
-  logger.log('error','%s has failed with %s', job.id, err.message)
+  error('error','%s has failed with %s', job.id, err.message)
 })
 
 //private method
@@ -161,7 +162,7 @@ const readFile = async (fileLocation) =>{
 			})
 		})
 		.catch((err) => {
-			logger.log('error', err)
+			error('error', err)
 		})
 		.finally(() => { 
 			return idSet

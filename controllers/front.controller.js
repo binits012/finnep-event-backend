@@ -1,12 +1,10 @@
-'use strict' 
+import * as consts from '../const.js'
+import * as  Photo from '../model/photo.js'
+import * as  Notification from'../model/notification.js'
+import * as  Event from'../model/event.js'
+import * as  Setting from'../model/setting.js'
 
-const consts = require('../const')
-const Photo = require('../model/photo')
-const Notification = require('../model/notification')
-const Event = require('../model/event')
-const Setting = require('../model/setting')
-
-const getDataForFront = async(req,res,next) =>{
+export const getDataForFront = async(req,res,next) =>{
     const photo = await Photo.listPhoto()
     const notification = await Notification.getAllNotification()
     const event = await Event.getEvents()
@@ -18,7 +16,4 @@ const getDataForFront = async(req,res,next) =>{
         setting:setting
     }
     res.status(consts.HTTP_STATUS_OK).json(data)
-}
-module.exports = {
-    getDataForFront
-}
+} 

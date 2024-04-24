@@ -1,3 +1,4 @@
+/*
 'use strict'
 const jwtToken = require('../util/jwtToken')
 const consts = require('../const')
@@ -6,4 +7,4 @@ const logger = require('../model/logger')
 
 module.exports = {
     
-}
+}*/

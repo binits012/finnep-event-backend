@@ -1,15 +1,14 @@
-'use strict'
-const jwtToken = require('../util/jwtToken')
-const logger = require('../model/logger')
-const appText = require('../applicationTexts.js')
-const consts = require('../const') 
-const Photo = require('../model/photo')
-const PhotoType = require('../model/photoType')
-const fs = require('fs/promises')
-const crypto = require('crypto')
-const {uploadToS3Bucket} = require('../util/aws')
+import * as jwtToken from '../util/jwtToken.js'
+import {error} from '../model/logger.js'
+import * as appText from'../applicationTexts.js'
+import * as consts from'../const.js'
+import * as Photo from'../model/photo.js'
+import * as PhotoType from'../model/photoType.js'
+import * as fs from 'fs/promises'
+import * as crypto from 'crypto'
+import {uploadToS3Bucket} from '../util/aws.js'
 
-const createPhoto = async (req, res, next) => {
+export const createPhoto = async (req, res, next) => {
     const token = req.headers.authorization
     const position = req.body.position
     const image = req.body.image
@@ -34,7 +33,7 @@ const createPhoto = async (req, res, next) => {
                 const photoTypeName = photoTypeObj[0].name
                 const imageName = photoTypeName+"/"+  crypto.randomUUID()+'.'+imageType.substring(6,9)
                 await uploadToS3Bucket(imageType, base64Data, imageName).catch(err=>{
-                    logger.log('error',err.stack)
+                    error('error',err.stack)
                     return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
                         message: 'Sorry, something went wrong', error: err
                     })
@@ -58,7 +57,7 @@ const createPhoto = async (req, res, next) => {
 }
 
 
-const getAllPhotos = async (req, res, next) => {
+export const getAllPhotos = async (req, res, next) => {
     const token = req.headers.authorization
     await jwtToken.verifyJWT(token, async (err, data) => {
         if (err || data === null) { 
@@ -90,7 +89,7 @@ const getAllPhotos = async (req, res, next) => {
     
 }
 
-const getPhotoById = async (req, res, next) => {
+export const getPhotoById = async (req, res, next) => {
     const photoId = req.params.id
     const token = req.headers.authorization
     await jwtToken.verifyJWT(token, async (err, data) => {
@@ -117,7 +116,7 @@ const getPhotoById = async (req, res, next) => {
     })    
 }
  
-const updatePhotoById = async (req, res, next) => {
+export const updatePhotoById = async (req, res, next) => {
     const token = req.headers.authorization
     const photoId = req.params.id
     const position = req.body.position
@@ -151,7 +150,7 @@ const updatePhotoById = async (req, res, next) => {
         }
     })
 }
-const deletePhotoById = async (req, res, next) => {
+export const deletePhotoById = async (req, res, next) => {
     const token = req.headers.authorization
     const photoId = req.params.id
     await jwtToken.verifyJWT(token, async (err, data) => {
@@ -190,20 +189,11 @@ const deletePhotoById = async (req, res, next) => {
     })
 }
 
-const getAllPhotoForDashboard = async () =>{
+export const getAllPhotoForDashboard = async () =>{
    return await Photo.listPhoto()
 } 
 
-const getGalleryPhoto = async () =>{
+export const getGalleryPhoto = async () =>{
     return  await Photo.getGalleryPhoto()
 }
- 
-module.exports = {
-    createPhoto, 
-    getAllPhotos,
-    getPhotoById,
-    updatePhotoById,
-    deletePhotoById, 
-    getAllPhotoForDashboard,
-    getGalleryPhoto
-}
+  

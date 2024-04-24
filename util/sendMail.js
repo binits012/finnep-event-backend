@@ -1,9 +1,11 @@
-let nodemailer = require("nodemailer");
-const logger = require('../model/logger')
-let smtpTransport = require('nodemailer-smtp-transport');
-require('dotenv').config()  
-const {TicketReport} = require('../model/reporting')
-let transport = nodemailer.createTransport(smtpTransport({
+ 
+import { createTransport } from 'nodemailer'
+import {error, info} from '../model/logger.js' 
+import dotenv from 'dotenv'
+dotenv.config()
+import {TicketReport} from '../model/reporting.js'
+
+let transport = createTransport({
     host: process.env.EMAIL_SERVER,
     port: process.env.EMAIL_PORT,
     auth: {
@@ -12,10 +14,10 @@ let transport = nodemailer.createTransport(smtpTransport({
     },
     secure: false, 
     ignoreTLS: true
-}));
+});
 
 
-const forward = async (emailData) =>{ 
+export const forward = async (emailData) =>{ 
     if(process.env.SEND_MAIL){ 
         try{ 
             return await new Promise((resolve, reject)=>{
@@ -28,8 +30,10 @@ const forward = async (emailData) =>{
                         }
                         const reporting = TicketReport(msg)
                         await reporting.save()
+                        error('error sending email %s', err)
                         reject(err)
                     } 
+                    info('email sent %s', data)
                     resolve(data)
                 })
             })
@@ -47,7 +51,7 @@ const forward = async (emailData) =>{
     
 }
 
-const retryForward = async (id, emailData, retryCount) => { 
+export const retryForward = async (id, emailData, retryCount) => { 
     return await new Promise((resolve, reject)=>{
         transport.sendMail(emailData, async function (err, data) {
             if(err){
@@ -56,15 +60,19 @@ const retryForward = async (id, emailData, retryCount) => {
                 } 
                 await TicketReport.findByIdAndUpdate(id, { $set:  msg },
                     { new: true }).catch(err=>{return {error:err.stack}})
+                    error('error sending email %s', err)
                 reject(err)
             } 
+            info('email sent %s', data)
             resolve(data)
         })
     })
      
 }
 
+/*
 module.exports = {
     forward,
     retryForward
 }
+*/

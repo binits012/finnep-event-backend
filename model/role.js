@@ -1,45 +1,38 @@
-(function () {
+import * as model from '../model/mongoModel.js'
+import {error} from './logger.js'
 
-	var model = require('./mongoModel');
-
-	var Role = (function () {
-
-		function Role(roleType) {
-			this.roleType = roleType;
+export class Role {
+	constructor(roleType) {
+		this.roleType = roleType;
+	}
+	async saveToDB() {
+		try{
+			const role = new model.Role({ roleType: this.roleType });
+			await await role.save();
+		}catch(err){
+			error('error creating role %s', err.stack)
+			throw err
 		}
-
-		Role.prototype.saveToDB = async function () {
-			var role = new model.Role({ roleType: this.roleType });
-			await role.save();
-		}
-		return Role;
-	})();
-
-	const createRole = async function (roleType) { 
-		var role = new Role(roleType);
-		return await role.saveToDB();
+		
 	}
+}
+export const createRole = async function (roleType) { 
+	var role = new Role(roleType);
+	return await role.saveToDB();
+}
 
-	const getAllRole = async function () {
-		return await model.Role.find().catch(err=>{return {error:err.stack}})
-	}
+export const getAllRole = async function () {
+	return await model.Role.find().catch(err=>{return {error:err.stack}})
+}
 
-	const getRoleByRoleType = async (roleType) => {
-		return await model.Role.findOne({ 'roleType': roleType }).catch(err=>{return {error:err.stack}})
-	}
+export const getRoleByRoleType = async (roleType) => {
+	return await model.Role.findOne({ 'roleType': roleType }).catch(err=>{return {error:err.stack}})
+}
 
-	const findRoleById = async function (id) {
-		return await model.Role.findById(id).catch(err=>{return {error:err.stack}})
-	}
+export const findRoleById = async function (id) {
+	return await model.Role.findById(id).catch(err=>{return {error:err.stack}})
+}
 
-	const deleteRole = async (roleType) => {
-		return await model.Role.deleteOne({ 'roleType': roleType }).catch(err=>{return {error:err.stack}})
-	}
-	let root = typeof exports !== 'undefined' && exports !== null ? exports : window;
-	root.Role = Role;
-	root.createRole = createRole;
-	root.getAllRole = getAllRole;
-	root.findRoleById = findRoleById;
-	root.getRoleByRoleType = getRoleByRoleType
-	root.deleteRole = deleteRole
-}).call(this);
+export const deleteRole = async (roleType) => {
+	return await model.Role.deleteOne({ 'roleType': roleType }).catch(err=>{return {error:err.stack}})
+}

@@ -1,11 +1,10 @@
-'use strict'
-const jwtToken = require('../util/jwtToken')
-const consts = require('../const')
-const appText = require('../applicationTexts.js')
-const logger = require('../model/logger')
-const Setting = require('../model/setting')
+import * as jwtToken from '../util/jwtToken.js'
+import * as consts from'../const.js'
+import * as appText from '../applicationTexts.js'
+import {error} from '../model/logger.js'
+import * as Setting from '../model/setting.js'
 
-const createSetting = async (req,res,next) =>{
+export const createSetting = async (req,res,next) =>{
     const token = req.headers.authorization
     const aboutSection = req.body.aboutSection
     const contactInfo = req.body.contactInfo
@@ -23,7 +22,7 @@ const createSetting = async (req,res,next) =>{
                 })
             } 
             const prevSetting = await Setting.getSetting().catch(err=>{ 
-                logger.log('error',err)
+                error('error',err)
                 return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
                     message: 'Sorry, setting creation failed', error: err.stack
                 })
@@ -33,7 +32,7 @@ const createSetting = async (req,res,next) =>{
                 await Setting.createSetting(aboutSection, contactInfo, socialMedia).then(data=>{
                     return res.status(consts.HTTP_STATUS_CREATED).json({ data: data })
                 }).catch(err=>{
-                    logger.log('error',err)
+                    error('error',err)
                     return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
                         message: 'Sorry, setting creation failed', error: err.stack
                     })
@@ -49,7 +48,7 @@ const createSetting = async (req,res,next) =>{
     })
 }
 
-const getSetting = async(req,res,next)=>{
+export const getSetting = async(req,res,next)=>{
     const token = req.headers.authorization 
     await jwtToken.verifyJWT(token, async (err, data) => {
         if (err || data === null) { 
@@ -67,7 +66,7 @@ const getSetting = async(req,res,next)=>{
             await Setting.getSetting().then(data=>{
                 return res.status(consts.HTTP_STATUS_OK).json({ data: data })
             }).catch(err=>{
-                logger.log('error',err)
+                error('error',err)
                 return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
                     message: 'Sorry, get setting failed', error: err.stack
                 })
@@ -77,7 +76,7 @@ const getSetting = async(req,res,next)=>{
     })
 }
 
-const getSettingById = async(req,res,next)=>{
+export const getSettingById = async(req,res,next)=>{
     const token = req.headers.authorization 
     const id = req.params.id
     await jwtToken.verifyJWT(token, async (err, data) => {
@@ -96,7 +95,7 @@ const getSettingById = async(req,res,next)=>{
             await Setting.getSettingById(id).then(data=>{
                 return res.status(consts.HTTP_STATUS_OK).json({ data: data })
             }).catch(err=>{
-                logger.log('error',err)
+                error('error',err)
                 return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
                     message: 'Sorry, get setting by id failed', error: err.stack
                 })
@@ -106,7 +105,7 @@ const getSettingById = async(req,res,next)=>{
     })
 }
 
-const updateSettingById = async(req,res,next)=>{
+export const updateSettingById = async(req,res,next)=>{
     const token = req.headers.authorization 
     const id = req.params.id
     const aboutSection = req.body.aboutSection
@@ -135,7 +134,7 @@ const updateSettingById = async(req,res,next)=>{
                 await Setting.updateSettingById(id, updateObj).then(data =>{
                     return res.status(consts.HTTP_STATUS_OK).json({ data: data })
                 }).catch(err=>{
-                    logger.log('error',err)
+                    error('error',err)
                     return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
                         message: 'Sorry, update setting by id failed', error: err.stack
                     })
@@ -150,10 +149,4 @@ const updateSettingById = async(req,res,next)=>{
         }
     })
 }
-
-module.exports={
-    createSetting,
-    getSetting,
-    getSettingById,
-    updateSettingById
-}
+ 

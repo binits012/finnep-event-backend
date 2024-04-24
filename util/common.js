@@ -1,13 +1,13 @@
-'use strict'
-require('dotenv')
-const moment = require('moment-timezone')
-const {ObjectId} = require('mongodb')
-const { validationResult } = require('express-validator')
-var QRCode = require('qrcode')
-const ICS = require('ics')
-const fs = require('fs').promises
+import * as fs from 'fs/promises'; 
+import * as ICS from 'ics'
+import * as QRCode from 'qrcode'
+import { validationResult } from 'express-validator'
+import  {ObjectId} from 'mongodb'
+import moment from 'moment-timezone'
+import dotenv from 'dotenv'
+dotenv.config()
 
-const manipulatePhoneNumber = async (phoneNumber) =>{
+export const manipulatePhoneNumber = async (phoneNumber) =>{
     if(/[aA-zZ].*/.test(phoneNumber)){
         return null
     }
@@ -29,7 +29,7 @@ const manipulatePhoneNumber = async (phoneNumber) =>{
      
 }
 
-const formatDate = async (dateString) =>{
+export const formatDate = async (dateString) =>{
     const dateSplit = dateString.split('/')
     const day = dateSplit[0]
     const month = dateSplit[1]
@@ -38,15 +38,15 @@ const formatDate = async (dateString) =>{
     return tempString
 }
 
-const formateDateWithHash = async (date) =>{ 
+export const formateDateWithHash = async (date) =>{ 
     return  moment(date).format("DD/MM/YYYY")
 }
 
-const convertDateTimeWithTimeZone = async (eventDate) =>{ 
+export const convertDateTimeWithTimeZone = async (eventDate) =>{ 
     return  moment(eventDate).tz(process.env.TIME_ZONE).format('YYYY-MM-DDTHH:mm:ss')
 }
 //redis-client
-const getCacheByKey = async(redisClient, key) =>{ 
+export const getCacheByKey = async(redisClient, key) =>{ 
     try{
         return JSON.parse(await redisClient.get(key))
     }catch(error){
@@ -56,7 +56,7 @@ const getCacheByKey = async(redisClient, key) =>{
     
 }
 
-const setCacheByKey = async(redisClient, key, data) =>{
+export const setCacheByKey = async(redisClient, key, data) =>{
     try{
         return await redisClient.set(key, JSON.stringify(data))
     }catch(error){ 
@@ -65,11 +65,11 @@ const setCacheByKey = async(redisClient, key, data) =>{
    
 }
 
-const removeCacheByKey = async(redisClient, key) =>{
+export const removeCacheByKey = async(redisClient, key) =>{
     return await redisClient.del(key);
 }
 
-const formatTime =  (time) =>{
+export const formatTime =  (time) =>{
     let hour = Math.floor(time/60)
     let min = time%60
     if(min < 10) min = '0'+min
@@ -77,13 +77,13 @@ const formatTime =  (time) =>{
     return hour+':'+min
 }
 
-const timeInMinutes = (time) =>{
+export const timeInMinutes = (time) =>{
     const hour = parseInt(time.substring(0, 2)) * 60
     const min = time.substring(3, 5)
     return hour + parseInt(min)
 }
 
-const sanitizeLanguage = (lang) =>{
+export const sanitizeLanguage = (lang) =>{
     let myLang = 'en'
     switch (lang) {
         case 'Finnish': 
@@ -101,16 +101,16 @@ const sanitizeLanguage = (lang) =>{
     return myLang
 }
 
-const sortByDate = (a, b) =>{ 
+export const sortByDate = (a, b) =>{ 
     return Date.parse(b.reservationDate) - Date.parse(a.reservationDate)
 }
 
 
-const validateParam = async (id) =>{
+export const validateParam = async (id) =>{
     return ObjectId.isValid(id) 
 }
 
-const validate = async (validations, req) => { 
+export  const validate = async (validations, req) => { 
     
     for (let validation of validations) {
         
@@ -121,7 +121,7 @@ const validate = async (validations, req) => {
     return validationResult(req)    
   }
 
-const generateQRCode = async(ticketId) =>{
+export  const generateQRCode = async(ticketId) =>{
     let opts = {
         errorCorrectionLevel: 'H',
         type: 'image/png',
@@ -145,7 +145,7 @@ const generateQRCode = async(ticketId) =>{
     })
     */
 }
-const generateICS = async(event, ticketId)=>{
+export  const generateICS = async(event, ticketId)=>{
     const eventDate = event.eventDate
     const start = moment(eventDate).utc().format('YYYY-MM-DD-HH-mm-ss').split("-").map((a) => parseInt(a))  
     const eventGeoCode = event.eventLocationGeoCode.split(',')
@@ -171,29 +171,11 @@ const generateICS = async(event, ticketId)=>{
 
 }
 
-const loadEmailTemplate = async (fileLocation, eventTitle,eventPromotionalPhoto, qrCode) => {
+export  const loadEmailTemplate = async (fileLocation, eventTitle,eventPromotionalPhoto, qrCode) => {
     const emailData = (await fs.readFile(fileLocation,'utf8')).replace('$eventTitle',eventTitle).replace('$eventTitle',eventTitle)
     .replace('$eventTitle',eventTitle)
     .replace('$eventPromotionalPhoto',eventPromotionalPhoto)
     .replace('$qrcodeData',qrCode) 
     return emailData
   }
-module.exports = {
-    manipulatePhoneNumber,
-    formatDate,
-    getCacheByKey,
-    setCacheByKey,
-    removeCacheByKey,
-    formatTime,
-    formateDateWithHash,
-    timeInMinutes,
-    sanitizeLanguage,
-    sortByDate,
-    validateParam,
-    validate,
-    convertDateTimeWithTimeZone,
-    generateQRCode,
-    generateICS,
-    loadEmailTemplate
-    
-}
+ 

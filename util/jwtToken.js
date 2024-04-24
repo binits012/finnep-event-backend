@@ -1,8 +1,9 @@
-const jwt = require('jsonwebtoken')
-require('dotenv').config()
-const logger = require('../model/logger')
+import jwt from 'jsonwebtoken'
+import dotenv from 'dotenv'
+dotenv.config()
+import {error} from '../model/logger.js'
+import * as redis from 'redis'
 
-const redis = require('redis');
 const redisClient = redis.createClient({
 	port: process.env.REDIS_PORT,
 	host: process.env.REDIS_HOST,
@@ -13,10 +14,10 @@ redisClient.connect().catch(console.error)
 redisClient.on('error', function (error) {
 	console.error(error);
 });
-const commonUtil = require('../util/common')
-const JWTToken = require('../model/token')
+import * as commonUtil from '../util/common.js'
+import * as JWTToken from '../model/token.js'
 
-const generateJWT = async (userData, cb) => {
+export const generateJWT = async (userData, cb) => {
   jwt.sign(userData, process.env.JWT_TOKEN_SECRET, {
     expiresIn: process.env.TOKEN_LIFE_SPAN,
   },  async(error, token) =>{
@@ -31,7 +32,7 @@ const generateJWT = async (userData, cb) => {
   })   
 }
 
-const generateReservationBasedJWT = async (userData, cb) =>{
+export const generateReservationBasedJWT = async (userData, cb) =>{
     const key = userData.id
     jwt.sign(userData, process.env.JWT_TOKEN_SECRET, {
         expiresIn: process.env.TOKEN_LIFE_SPAN,
@@ -48,7 +49,7 @@ const generateReservationBasedJWT = async (userData, cb) =>{
       })
 }
 
-const verifyJWT = async (token, cb) => {
+export const verifyJWT = async (token, cb) => {
     if (!token) return cb(null, null)
     try {
         const myToken = token.replace("Bearer ", "")
@@ -73,12 +74,12 @@ const verifyJWT = async (token, cb) => {
         });
 
     } catch (e) { 
-        logger.log('error',e.message)
+        error('error',e.message)
         cb(err, null)
     }
 }
 
-const invalidateJWT = async (token, cb) =>{ 
+export const invalidateJWT = async (token, cb) =>{ 
     try{
         jwt.verify(token.replace("Bearer ", ""),process.env.JWT_TOKEN_SECRET, async(err, data) => { 
             const id = data.id
@@ -91,14 +92,7 @@ const invalidateJWT = async (token, cb) =>{
     }
 }
 
-const invalidateReservationBasedJWT = async (id) => { 
+export const invalidateReservationBasedJWT = async (id) => { 
     await commonUtil.removeCacheByKey(redisClient,id).catch(err=>{return err}) 
            
-}
-module.exports = {
-    generateJWT,
-    verifyJWT,
-    invalidateJWT,
-    generateReservationBasedJWT,
-    invalidateReservationBasedJWT
-}
+} 

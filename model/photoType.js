@@ -1,39 +1,35 @@
-(function () {
-    let model = require('./mongoModel') 
-    let root, createPhotoType, getPhotoTypes,getPhotoTypeByName,getPhotoTypeById
-    let PhotoType = (function () {
-		function PhotoType(name ) {
-			this.name = name 
-		}
+import * as model from '../model/mongoModel.js'
+import {error} from './logger.js'
 
-		PhotoType.prototype.saveToDB = async function () {
-			let photoType = new model.PhotoType({ name: this.name  })
-			return await photoType.save()
-		}
-
-		return PhotoType
-
-	})()
-
-    createPhotoType = async (name) =>{ 
-        let photoType = new PhotoType(name)
-		return await photoType.saveToDB()
+export class PhotoType {
+    constructor(name) {
+        this.name = name
     }
-
-    getPhotoTypes = async() =>{ 
-        return await model.PhotoType.find().exec().catch(err=>{  return err})
+    async saveToDB() {
+        try{
+            const photoType = new model.PhotoType({ name: this.name })
+            return await photoType.save()
+        }catch(err){
+            error('error creating phototype %s', err.stack)
+            throw err
+        }
+        
     }
+}
 
-    getPhotoTypeByName = async(name) =>{
-        return await model.PhotoType.find({name:name}).exec().catch(err=>{return err})
-    }
+export const createPhotoType = async (name) =>{ 
+    let photoType = new PhotoType(name)
+    return await photoType.saveToDB()
+}
 
-    getPhotoTypeById = async(id) => { 
-        return await model.PhotoType.find({_id:id}).catch(err=>{return err})
-    }
-    root = typeof exports !== 'undefined' && exports !== null ? exports : window
-    root.createPhotoType = createPhotoType
-    root.getPhotoTypes = getPhotoTypes
-    root.getPhotoTypeByName = getPhotoTypeByName
-    root.getPhotoTypeById = getPhotoTypeById
-}).call()
+export const getPhotoTypes = async() =>{ 
+    return await model.PhotoType.find().exec().catch(err=>{  return err})
+}
+
+export const getPhotoTypeByName = async(name) =>{
+    return await model.PhotoType.find({name:name}).exec().catch(err=>{return err})
+}
+
+export const getPhotoTypeById = async(id) => { 
+    return await model.PhotoType.find({_id:id}).catch(err=>{return err})
+} 

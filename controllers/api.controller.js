@@ -1,41 +1,42 @@
-'use strict'
-const jwtToken = require('../util/jwtToken')
-const consts = require('../const')
-const appText = require('../applicationTexts.js')
-const user = require('../controllers/user.controller')
-const contact = require('../controllers/contact.controller')
-const photo = require('../controllers/photo.controller')
-const notification = require('../controllers/notification.controller')
-const event = require('../controllers/event.controller')
-const { param, body } = require('express-validator')
-const common = require('../util/common')
-const photoType = require('../model/photoType')
-const setting = require('../controllers/setting.controller')
-const ticket = require('../controllers/ticket.controller')
+import * as jwtToken from '../util/jwtToken.js'
+import * as consts from '../const.js'
+import * as appText from '../applicationTexts.js'
+import * as user from '../controllers/user.controller.js'
+import * as contact from '../controllers/contact.controller.js'
+import * as photo from '../controllers/photo.controller.js'
+import * as notification from '../controllers/notification.controller.js'
+import * as event from '../controllers/event.controller.js'
+import { param, body } from 'express-validator'
+import * as common from '../util/common.js'
+import * as photoType from '../model/photoType.js'
+import * as setting from '../controllers/setting.controller.js'
+import * as ticket from '../controllers/ticket.controller.js'
+import {error} from '../model/logger.js'
+
 
 /** USER STUFF BEGINGS */
-const login = async (req, res, next) => {
+export const login = async (req, res, next) => {
     await user.login(req,res,next)
 }
-const createAdminUser = async (req, res, next) => {
+export const createAdminUser = async (req, res, next) => {
     await user.createAdminUser(req,res,next)
 }
-const getAdminUsers = async (req, res, next) => {
+export const getAdminUsers = async (req, res, next) => {
     await user.getAdminUsers(req, res, next)
 }
-const createStaffUser = async (req, res, next) => {
+export const createStaffUser = async (req, res, next) => {
     await user.createStaffUser(req,res,next)
 }
 
-const getStaffUsers = async (req, res, next) => {
+export const getStaffUsers = async (req, res, next) => {
     await user.getStaffUsers(req,res,next)
 }
 
-const changePassword = async (req, res, next) => {
+export const changePassword = async (req, res, next) => {
     await user.changePassword(req,res,next)
 }
 
-const getUserById = async (req, res, next) => {
+export const getUserById = async (req, res, next) => {
     const id = req.params.id 
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -45,7 +46,7 @@ const getUserById = async (req, res, next) => {
     }))   
 }
 
-const updateUserById = async(req, res, next) =>{
+export const updateUserById = async(req, res, next) =>{
     const id = req.params.id 
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -54,7 +55,7 @@ const updateUserById = async(req, res, next) =>{
         await user.updateUserById(req,res,next)
     })) 
 }
-const deleteUserById = async (req, res, next) => {
+export const deleteUserById = async (req, res, next) => {
     const id = req.params.id 
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -64,23 +65,23 @@ const deleteUserById = async (req, res, next) => {
     }))
 }
 
-const getContact = async(req,res, next) => {
+export const getContact = async(req,res, next) => {
     await contact.getContact(req,res,next)
 }
 
-const createContact = async(req, res, next) =>{
+export const createContact = async(req, res, next) =>{
     await contact.createContact(req,res,next)
 }
 
-const updateContact = async(req, res, next) =>{
+export const updateContact = async(req, res, next) =>{
     await contact.updateContact(req, res, next) 
 }
 
-const deleteContact = async(req, res,next)=>{
+export const deleteContact = async(req, res,next)=>{
     await contact.deleteContact(req,res,next)
 }
 
-const logout = async (req, res, next) => {
+export const logout = async (req, res, next) => {
 	
     const token = req.query.token
     if(token !== null){
@@ -95,15 +96,15 @@ const logout = async (req, res, next) => {
 /** USER STUFF ENDS */
 
 /** PHOTO BEGINS */
-const createPhoto = async (req, res, next) => {
+export const createPhoto = async (req, res, next) => {
     await photo.createPhoto(req, res, next)
 }
 
-const getPhoto = async (req, res, next) => {
+export const getPhoto = async (req, res, next) => {
     await photo.getAllPhotos(req,res,next)
 }
 
-const getPhotoById = async (req,res,next) =>{
+export const getPhotoById = async (req,res,next) =>{
     const id = req.params.id 
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -113,7 +114,7 @@ const getPhotoById = async (req,res,next) =>{
     })) 
 }
 
-const updatePhotoById = async(req,res,next) =>{
+export const updatePhotoById = async(req,res,next) =>{
     const id = req.params.id 
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -123,7 +124,7 @@ const updatePhotoById = async(req,res,next) =>{
     }))  
 }
 
-const deletePhotoById = async(req,res,next) =>{
+export const deletePhotoById = async(req,res,next) =>{
     const id = req.params.id 
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -136,15 +137,15 @@ const deletePhotoById = async(req,res,next) =>{
 /** PHOTO ENDS */
 
 /** NOTIFICATION BEGINS */
-const getAllNotification = async(req, res, next) =>{
+export const getAllNotification = async(req, res, next) =>{
     await notification.getAllNotification(req,res,next)
 }
 
-const createNotification = async(req, res, next) =>{
+export const createNotification = async(req, res, next) =>{
     await notification.createNotification(req,res,next)
 }
 
-const getNotificationById = async(req,res,next) =>{
+export const getNotificationById = async(req,res,next) =>{
     const id = req.params.id 
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -155,7 +156,7 @@ const getNotificationById = async(req,res,next) =>{
     
 }
 
-const updateNotificationById = async(req,res,next) =>{
+export const updateNotificationById = async(req,res,next) =>{
     const id = req.params.id 
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -166,7 +167,7 @@ const updateNotificationById = async(req,res,next) =>{
     
 }
 
-const deleteNotificationById = async(req,res,next) =>{
+export const deleteNotificationById = async(req,res,next) =>{
     const id = req.params.id 
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -179,7 +180,7 @@ const deleteNotificationById = async(req,res,next) =>{
 
 /** EVENT BEGINS */
 
-const createEvent = async(req,res, next) =>{ 
+export const createEvent = async(req,res, next) =>{ 
     await common.validate([
         body('eventTitle').notEmpty(),
         body('eventDescription').notEmpty(),
@@ -205,11 +206,11 @@ const createEvent = async(req,res, next) =>{
     
 }
 
-const getEvents = async(req,res,next) =>{
+export const getEvents = async(req,res,next) =>{
     await event.getEvents(req,res,next)
 }
 
-const getEventById = async(req,res,next) =>{
+export const getEventById = async(req,res,next) =>{
     const id = req.params.id 
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -219,7 +220,7 @@ const getEventById = async(req,res,next) =>{
     }))
 }
 
-const updateEventById = async(req,res,next) =>{
+export const updateEventById = async(req,res,next) =>{
     await common.validate([
         body('eventTitle').notEmpty(),
         body('eventDescription').notEmpty(),
@@ -243,7 +244,7 @@ const updateEventById = async(req,res,next) =>{
     })
 }
  
-const uploadPhotosForParticularEvent = async(req,res,next) =>{
+export const uploadPhotosForParticularEvent = async(req,res,next) =>{
     const id = req.params.id 
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -256,7 +257,7 @@ const uploadPhotosForParticularEvent = async(req,res,next) =>{
 /** EVENT ENDS */
 
 /** dashboard helper */
-const dashboard = async(req, res, next) =>{
+export const dashboard = async(req, res, next) =>{
 
     const token = req.headers.authorization 
     await jwtToken.verifyJWT(token, async (err, data) => {
@@ -273,24 +274,24 @@ const dashboard = async(req, res, next) =>{
             } 
             try{
                 const eventAll = await event.getAllEventsForDashboard().catch(err=>{
-                    logger.log('error',err)
+                    error('error',err)
                     throw err
                 })  
                 const photoAll = await photo.getAllPhotoForDashboard().catch(err=>{
-                    logger.log('error',err)
+                    error('error',err)
                     throw err
                 }) 
                 const notificationAll = await notification.getAllNotificationForDashboard().catch(err=>{
-                    logger.log('error',err) 
+                    error('error',err) 
                     throw err
                 }) 
                 const photoTypes = await photoType.getPhotoTypes().catch(err=>{
-                    logger.log('error',err)
+                    error('error',err)
                     throw err
                     
                 }) 
                 const tickets = await ticket.getAllTickets().catch(err=>{
-                    logger.log('error',err)
+                    error('error',err)
                     throw err
                     
                 }) 
@@ -316,22 +317,22 @@ const dashboard = async(req, res, next) =>{
     })
 }
 
-const getGalleyPhoto = async(req,res,next)=>{
+export const getGalleyPhoto = async(req,res,next)=>{
 
     const photo = await photo.getGalleryPhoto()
     return res.status(consts.HTTP_STATUS_OK).json({ data: photo })
 
 }
 /** Setting */
-const createSetting = async(req,res,next) =>{
+export const createSetting = async(req,res,next) =>{
     await setting.createSetting(req,res,next)
 }
 
-const getSetting = async(req,res,next) =>{
+export const getSetting = async(req,res,next) =>{
     await setting.getSetting(req,res,next)
 }
 
-const getSettingById = async(req,res,next) =>{
+export const getSettingById = async(req,res,next) =>{
     const id = req.params.id 
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -342,7 +343,7 @@ const getSettingById = async(req,res,next) =>{
     
 }
 
-const updateSettingById = async(req,res,next) =>{
+export const updateSettingById = async(req,res,next) =>{
     const id = req.params.id 
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -355,7 +356,7 @@ const updateSettingById = async(req,res,next) =>{
 /** Setting ends */
 
 /** Ticket */
-const createSingleTicket = async(req,res,next) =>{
+export const createSingleTicket = async(req,res,next) =>{
     await common.validate([
         body('event').notEmpty(),
         body('ticketFor').notEmpty(), 
@@ -369,11 +370,11 @@ const createSingleTicket = async(req,res,next) =>{
     })
 }
 
-const createMultipleTicket = async(req, res, next) =>{ 
+export const createMultipleTicket = async(req, res, next) =>{ 
     return await ticket.createMultipleTicket(req,res,next)
 }
 
-const getAllTicketByEventId = async(req, res, next) =>{ 
+export const getAllTicketByEventId = async(req, res, next) =>{ 
     const id = req.params.id 
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -383,7 +384,7 @@ const getAllTicketByEventId = async(req, res, next) =>{
     }))
 }
 
-const getTicketById = async(req,res,next) =>{
+export const getTicketById = async(req,res,next) =>{
     const id = req.params.id 
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -393,7 +394,7 @@ const getTicketById = async(req,res,next) =>{
     }))
 }
 
-const ticketCheckIn = async(req,res,next) =>{
+export const ticketCheckIn = async(req,res,next) =>{
     const id = req.params.id 
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -403,58 +404,4 @@ const ticketCheckIn = async(req,res,next) =>{
     }))
 }
 /** Ticket Ends  */
-
-
-module.exports = {
-    login,
-    createAdminUser,
-    getAdminUsers,
-    createStaffUser, 
-    getStaffUsers,
-    changePassword,
-    getUserById,
-    updateUserById,
-    deleteUserById,
-    getContact,
-    createContact,
-    updateContact,
-    deleteContact,
-    logout,
-
-    //photo
-    createPhoto,
-    getPhoto,
-    getPhotoById,
-    updatePhotoById,
-    deletePhotoById,
-    getGalleyPhoto,
-    
-    //notification
-    getAllNotification,
-    createNotification,
-    getNotificationById,
-    updateNotificationById,
-    deleteNotificationById,
-
-    //event
-    createEvent,
-    getEvents,
-    getEventById,
-    updateEventById,
-    uploadPhotosForParticularEvent,
-
-    //setting
-    createSetting,
-    getSetting,
-    getSettingById,
-    updateSettingById,
-    //dashboard
-    dashboard,
-
-    //ticket
-    createSingleTicket,
-    createMultipleTicket,
-    getAllTicketByEventId,
-    getTicketById,
-    ticketCheckIn
-}
+ 

@@ -1,34 +1,30 @@
+import * as model from '../model/mongoModel.js'
+import {error} from './logger.js'
 
-(function(){
+export class SocialMedia{
+    constructor(name){
+        this.name = name
+    }
 
-    const model = require('./mongoModel')
-    let root = typeof exports !== "undefined" && exports !== null ? exports : window;
-    const SocialMedia = (function(){
-        function SocialMedia(name){
-            this.name = name
-        }
-
-        SocialMedia.prototype.saveToDB = function(){
+    async saveToDB(){
+        try{
             const socialMedia = new model.SocialMedia({
                 name: this.name,
             })
-            return socialMedia.save()
+            return await socialMedia.save()
+        }catch(err){
+            error('error creating social media %s',err.stack)
+            throw err
         }
-
-        return SocialMedia
-    })()
-
-    const createSocialMedia = async (name) =>{
-        const socialMedia = new SocialMedia(name)
-        return await socialMedia.saveToDB()
     }
+}
 
-    const getAllSocialMedia = async () => {
-        return await model.SocialMedia.find().exec().catch(err =>{return err})
-    }
-    root.SocialMedia = SocialMedia
-    root.createSocialMedia = createSocialMedia
-    root.getAllSocialMedia = getAllSocialMedia
+export const createSocialMedia = async (name) =>{
+    const socialMedia = new SocialMedia(name)
+    return await socialMedia.saveToDB()
+}
 
-
-}).call(this)
+export const getAllSocialMedia = async () => {
+    return await model.SocialMedia.find().exec().catch(err =>{return err})
+}
+ 

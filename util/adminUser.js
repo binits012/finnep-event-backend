@@ -1,13 +1,13 @@
-'use strict'
-const Role = require('../model/role')
-const User = require('../model/users')
-const PhotoType = require('../model/photoType')
-const NotificationType = require('../model/notificationType')
-const SocialMedia = require('../model/socialMedia')
-const consts = require('../const')
-require('dotenv').config()
-const logger = require('../model/logger')
-const createAdmin = async () => {
+import * as Role from '../model/role.js'
+import * as User from '../model/users.js'
+import * as PhotoType from '../model/photoType.js'
+import * as NotificationType from '../model/notificationType.js'
+import * as SocialMedia from '../model/socialMedia.js'
+import * as consts from '../const.js'
+import * as logger from '../model/logger.js'
+import dotenv from 'dotenv'
+dotenv.config()
+export const createAdmin = async () => {
 
     //check whether it already exists or not 
     const roles = await Role.getAllRole();
@@ -21,14 +21,14 @@ const createAdmin = async () => {
                 adminRole._id, true, false)
         } catch (e) {
             //something went wrong roll back 
-            logger.log('error',e)
+            error('error on admin %s',e.stack)
             await Role.deleteRole(consts.ROLE_SUPER_ADMIN)
             await User.deleteUserByname(consts.ROLE_SUPER_ADMIN)
         }
     }
 }
 
-const createRoles = async () => {
+export const createRoles = async () => {
     const adminRole = await Role.getRoleByRoleType(consts.ROLE_ADMIN)
     const staffRole = await Role.getRoleByRoleType(consts.ROLE_STAFF)
     const customerRole = await Role.getRoleByRoleType(consts.ROLE_MEMBER)
@@ -38,7 +38,7 @@ const createRoles = async () => {
             await Role.createRole(consts.ROLE_STAFF)
             await Role.createRole(consts.ROLE_MEMBER)
         } catch (error) {
-            logger.log('error',error)
+            error('error on roles %s ',error.stack)
             await Role.deleteRole(consts.ROLE_ADMIN)
             await Role.deleteRole(consts.ROLE_STAFF)
             await Role.deleteRole(consts.ROLE_MEMBER)
@@ -47,7 +47,7 @@ const createRoles = async () => {
 }
  
 
-const photoTypes = async () => {
+export const photoTypes = async () => {
     const photoType= await PhotoType.getPhotoTypes() 
     if(photoType.length ===  0){
         
@@ -56,12 +56,12 @@ const photoTypes = async () => {
             await PhotoType.createPhotoType("Other")
         }catch (err){
             console.log(err)
-            logger.log('error',err)
+            error('error on photoType %s',err.stack)
         }
     }
 }
 
-const notificationTypes = async () =>{
+export const notificationTypes = async () =>{
     const notificationTypes = await NotificationType.getNotificationTypes()
     if(notificationTypes.length === 0){
         try{
@@ -70,12 +70,12 @@ const notificationTypes = async () =>{
             await NotificationType.createNotificationType("pop-over")
             await NotificationType.createNotificationType("footer-based")
         }catch(err){
-            logger.log('error',err)
+            error('error on notificationType %s ',err.stack)
         }
     }
 }
 
-const socialMedia = async () =>{
+export const socialMedia = async () =>{
     const socialMedia = await SocialMedia.getAllSocialMedia()
     if(socialMedia.length === 0){
         try{
@@ -87,14 +87,7 @@ const socialMedia = async () =>{
             await SocialMedia.createSocialMedia("Tiktok")
 
         }catch(err){
-            logger.log('error',err)
+            error('error on socialMedia %s',err.stack)
         }
     }
-}
-module.exports = {
-    createAdmin,
-    createRoles, 
-    photoTypes,
-    notificationTypes,
-    socialMedia
-}
+} 
