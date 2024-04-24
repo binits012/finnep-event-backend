@@ -11,7 +11,9 @@ import * as ticketMaster from '../util/ticketMaster.js'
 import * as busboyFileUpload from '../util/busboyFileUpload.js'
 import * as  fs from 'fs/promises'
 
-const __dirname = import.meta.dirname;
+import { dirname } from 'path'
+const __dirname = dirname(import.meta.url)
+console.log(__dirname)
 
 export const createSingleTicket = async(req,res,next) =>{
     const token = req.headers.authorization
@@ -73,7 +75,7 @@ export const createSingleTicket = async(req,res,next) =>{
                     })
                 }catch(err){ 
                     //no point keeping the ticket let's roll back 
-                    error( "created %s", ticketId + " but due to error we might throw it out. %s", err.stack)
+                    error( "created %s", ticketId + " but due to error we might throw it out. %s", err)
                     if(ticketId) await Ticket.deleteTicketById(ticketId).catch(err=>{ 
                         //let it fail, at this point we are really not intrested with it, we did what we could
                         error('error deleting ticket id %s due to error %s', ticketId, err.stack)

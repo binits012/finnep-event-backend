@@ -13,7 +13,9 @@ import  { getUsersByRole } from '../model/users.js'
 import { getContactById } from '../model/contact.js'
 import { ROLE_ADMIN } from '../const.js' 
 
-const __dirname = import.meta.dirname;
+import { dirname } from 'path'
+const __dirname = dirname(import.meta.url)
+console.log(__dirname)
 agenda.on('ready', () => console.log("Agenda started!"))
 agenda.on('error', () => console.log("Agenda connection error!"))
 
