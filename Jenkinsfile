@@ -3,23 +3,19 @@ pipeline {
     stages {
         stage('Build') { 
             steps {
-                sh 'npm install' 
-                sh 'npm run esbuild'
-                if (!fileExists(dir: 'staticPages')) {
-                    sh 'mkdir staticPages'
+                script {
+                    sh 'npm install' 
+                    sh 'npm run esbuild' 
+                    sh 'cp -r staticPages /opt/deployment/yellowbridge/'
+                    sh 'cp -r emailTemplates /opt/deployment/yellowbridge/' 
+                    sh 'cp .env  /opt/deployment/yellowbridge/'
+                    sh 'cp app.min.js  /opt/deployment/yellowbridge/'
+                    sh 'cp -r node_modules /opt/deployment/yellowbridge/'
+                    sh 'cp package.json /opt/deployment/yellowbridge/'
+                    sh 'cd /opt/deployment/yellowbridge/'
                 }
-                if (!fileExists(dir: 'emailTemplates')) {
-                    sh 'mkdir emailTemplates'
-                }
-                sh 'cp -r staticPages /opt/deployment/yellowbridge/'
-                sh 'cp -r emailTemplates /opt/deployment/yellowbridge/'
-                if (!fileExists(dir: 'logs')) {
-                    sh 'mkdir logs'
-                }
-                sh 'cp .env  /opt/deployment/yellowbridge/'
-                sh 'cp app.min.js  /opt/deployment/yellowbridge/'
-                sh 'cp -r node_modules /opt/deployment/yellowbridge/'
-                sh 'cd /opt/deployment/yellowbridge/'
+                
+                
             }
         }
         stage('Stop and Run Instance ') {
