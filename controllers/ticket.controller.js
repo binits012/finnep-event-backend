@@ -55,7 +55,7 @@ export const createSingleTicket = async(req,res,next) =>{
                     if(typeOfTicket === 'undefined' || typeOfTicket === '' || typeOfTicket === null) typeOfTicket = 'normal' 
                     // create a ticket
                     const ticket = await Ticket.createTicket(null, emailHash,event,typeOfTicket).catch(err=>{
-                        error('error',err)
+                        error('error creating ticket',err.stack)
                         throw err
                     })
                     ticketId = ticket.id
@@ -68,15 +68,15 @@ export const createSingleTicket = async(req,res,next) =>{
                         return res.status(consts.HTTP_STATUS_CREATED).json({ data:ticketData })
                     }).catch(err=>{
                         //let's not dump the hard work, we will try to send the mail in a while later
-                        error('error',err)
+                        error('error forwarding ticket %s',err)
                         throw err
                     })
                 }catch(err){ 
                     //no point keeping the ticket let's roll back 
-                    error("info", "created %s", ticketId + " but due to error we might throw it out")
+                    error( "created %s", ticketId + " but due to error we might throw it out. %s", err.stack)
                     if(ticketId) await Ticket.deleteTicketById(ticketId).catch(err=>{ 
                         //let it fail, at this point we are really not intrested with it, we did what we could
-                        error('error',err)
+                        error('error deleting ticket id %s due to error %s', ticketId, err.stack)
                     })
                     if(!res.headersSent){
                         return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({

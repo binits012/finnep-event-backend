@@ -32,7 +32,7 @@ export const createEmailPayload = async (event,ticketInfo, ticketFor, type) =>{
         return message
          
     }catch(err) {
-        error('error', err.stack)
+        error('error creating ticket email payload %s', err)
         return err
     }
 } 
