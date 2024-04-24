@@ -1,11 +1,15 @@
-const mongoose = require('mongoose')
+import  mongoose from 'mongoose'
+import  '../model/dbConnect.js'
 const ticketReportSchema = new mongoose.Schema({}, { strict: false })
-const TicketReport = mongoose.model('TicketReport', ticketReportSchema)
-const getAllTicketReport = async() =>{
-     
-    return await  TicketReport.find().exec()
+export const TicketReport = mongoose.model('TicketReport', ticketReportSchema)
+export const getAllTicketReport = async() =>{
+    console.log('this is called')
+    try{
+        return await  TicketReport.find().exec()
+    } catch(err){
+        console.log(err)
+        throw err
+    }
+    
 }
-module.exports = { 
-    TicketReport,
-    getAllTicketReport
-}
+ 

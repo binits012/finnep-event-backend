@@ -1,22 +1,23 @@
-'use strict'
-const jwtToken = require('../util/jwtToken')
-const consts = require('../const')
-const appText = require('../applicationTexts.js')
-const logger = require('../model/logger')
-const Event = require('../model/event')
-const Ticket = require('../model/ticket')
-const hash = require('../util/createHash')  
-const sendMail = require('../util/sendMail')
-const ticketMaster = require('../util/ticketMaster')
-const busboyFileUpload = require('../util/busboyFileUpload')
-const fs = require('fs').promises
+ 
+import * as jwtToken from '../util/jwtToken.js'
+import * as consts from '../const.js'
+import * as appText from '../applicationTexts.js'
+import {error} from '../model/logger.js'
+import * as Event from '../model/event.js'
+import * as Ticket from '../model/ticket.js'
+import * as hash from '../util/createHash.js'  
+import * as sendMail from '../util/sendMail.js'
+import * as ticketMaster from '../util/ticketMaster.js'
+import * as busboyFileUpload from '../util/busboyFileUpload.js'
+import * as  fs from 'fs/promises'
 
+const __dirname = import.meta.dirname;
 
-const createSingleTicket = async(req,res,next) =>{
+export const createSingleTicket = async(req,res,next) =>{
     const token = req.headers.authorization
     const ticketFor = req.body.ticketFor
     const eventId = req.body.event
-    const type = req.body.type
+    let typeOfTicket = req.body.type
 
     await jwtToken.verifyJWT(token, async (err, data) => {
         if (err || data === null) { 
@@ -31,7 +32,7 @@ const createSingleTicket = async(req,res,next) =>{
                 })
             } 
             const event = await Event.getEventById(eventId).catch(err=>{
-                logger.log('error', err.stack) 
+                error('error', err.stack) 
                 if(!res.headersSent){
                     return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
                         message: 'Sorry, single ticket creation failed.', error: appText.RESOURCE_NOT_FOUND
@@ -51,10 +52,10 @@ const createSingleTicket = async(req,res,next) =>{
                     }else{
                         emailHash = emailCrypto[0]._id
                     }
-                    if(type === 'undefined' || type === '' || type === null) type = 'normal' 
+                    if(typeOfTicket === 'undefined' || typeOfTicket === '' || typeOfTicket === null) typeOfTicket = 'normal' 
                     // create a ticket
-                    const ticket = await Ticket.createTicket(null, emailHash,event,type).catch(err=>{
-                        logger.log('error',err)
+                    const ticket = await Ticket.createTicket(null, emailHash,event,typeOfTicket).catch(err=>{
+                        error('error',err)
                         throw err
                     })
                     ticketId = ticket.id
@@ -67,15 +68,15 @@ const createSingleTicket = async(req,res,next) =>{
                         return res.status(consts.HTTP_STATUS_CREATED).json({ data:ticketData })
                     }).catch(err=>{
                         //let's not dump the hard work, we will try to send the mail in a while later
-                        logger.log('error',err)
+                        error('error',err)
                         throw err
                     })
                 }catch(err){ 
                     //no point keeping the ticket let's roll back 
-                    logger.log("info", "created %s", ticketId + " but due to error we might throw it out")
+                    error("info", "created %s", ticketId + " but due to error we might throw it out")
                     if(ticketId) await Ticket.deleteTicketById(ticketId).catch(err=>{ 
                         //let it fail, at this point we are really not intrested with it, we did what we could
-                        logger.log('error',err)
+                        error('error',err)
                     })
                     if(!res.headersSent){
                         return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
@@ -88,7 +89,7 @@ const createSingleTicket = async(req,res,next) =>{
     })
 }
 
-const createMultipleTicket = async(req,res,next) =>{
+export const createMultipleTicket = async(req,res,next) =>{
     const token = req.headers.authorization 
     await jwtToken.verifyJWT(token, async (err, data) => {
         if (err || data === null) { 
@@ -111,13 +112,13 @@ const createMultipleTicket = async(req,res,next) =>{
                         return res.status(consts.HTTP_STATUS_ACCEPTED).json(data)
                     }
                 }).catch(err=>{ 
-                    logger.log('error',err.stack)
+                    error('error',err.stack)
                     throw err
                 }) 
 
             }catch(err){
                 if(!res.headersSent){
-                    logger.log('error', err)
+                    error('error', err)
                     return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
                         message: 'Sorry, something went wrong.', error: appText.INTERNAL_SERVER_ERROR
                     })
@@ -127,7 +128,7 @@ const createMultipleTicket = async(req,res,next) =>{
     })
 }
 
-const getAllTicketByEventId = async(req,res,next) =>{
+export const getAllTicketByEventId = async(req,res,next) =>{
      
     const token = req.headers.authorization
     const eventId = req.params.id
@@ -144,7 +145,7 @@ const getAllTicketByEventId = async(req,res,next) =>{
                 })
             }  
             const event = await Event.getEventById(eventId).catch(err=>{
-                logger.log('error', err.stack) 
+                error('error', err.stack) 
                 if(!res.headersSent){
                     return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
                         message: 'Sorry, get all tickets by event failed.', error: appText.RESOURCE_NOT_FOUND
@@ -186,7 +187,7 @@ const getAllTicketByEventId = async(req,res,next) =>{
                             const flattenedArray = tempData.reduce((acc, curr)=>acc.concat(curr),[])
                             res.status(consts.HTTP_STATUS_OK).json({data:flattenedArray})
                         }).catch(err=>{
-                            logger.log('error',err)
+                            error('error',err)
                             throw err
                         })
                         
@@ -204,7 +205,7 @@ const getAllTicketByEventId = async(req,res,next) =>{
     })
 }
 
-const getTicketById = async(req,res,next) =>{
+export const getTicketById = async(req,res,next) =>{
     const token = req.headers.authorization
     const id = req.params.id
     try{
@@ -265,7 +266,7 @@ const getTicketById = async(req,res,next) =>{
         }
         
     }catch(err){
-        logger.log('error',err.stack)
+        error('error',err.stack)
         if(!res.headersSent){
             return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
                 message: 'Sorry, get ticket by id failed.', error: appText.INTERNAL_SERVER_ERROR
@@ -274,7 +275,7 @@ const getTicketById = async(req,res,next) =>{
     }
 }
 
-const ticketCheckIn = async(req, res, next) =>{
+export const ticketCheckIn = async(req, res, next) =>{
     const token = req.headers.authorization
     const id = req.params.id
     const isRead = req.body.isRead
@@ -330,7 +331,7 @@ const ticketCheckIn = async(req, res, next) =>{
         }
         
     }catch(err){
-        logger.log('error',err.stack)
+        error('error',err.stack)
         if(!res.headersSent){
             return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
                 message: 'Sorry, update ticket by id failed.', error: appText.INTERNAL_SERVER_ERROR
@@ -339,7 +340,7 @@ const ticketCheckIn = async(req, res, next) =>{
     }
 }
 
-const getAllTickets = async (req, res,next) =>{ 
+export const getAllTickets = async (req, res,next) =>{ 
          
     return await Ticket.getAllTickets()
     
@@ -349,12 +350,4 @@ const getAllTickets = async (req, res,next) =>{
 const getEmail = async(id)=>{
     const emailObj =  await hash.readHash(id)  
     return emailObj.data
-}
-module.exports = {
-    createSingleTicket,
-    createMultipleTicket,
-    getAllTicketByEventId,
-    getTicketById,
-    ticketCheckIn,
-    getAllTickets
-}
+} 

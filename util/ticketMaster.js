@@ -1,10 +1,10 @@
-'use strict'
-require('dotenv').config()
-const logger = require('../model/logger')
-const Ticket = require('../model/ticket')
-const { generateICS,generateQRCode, loadEmailTemplate } = require('./common')
-
-const createEmailPayload = async (event,ticketInfo, ticketFor, type) =>{
+import { generateICS,generateQRCode, loadEmailTemplate } from './common.js'
+import * as Ticket from '../model/ticket.js'
+import {error} from '../model/logger.js'
+import dotenv from 'dotenv'
+dotenv.config()
+const __dirname = import.meta.dirname;
+export const createEmailPayload = async (event,ticketInfo, ticketFor, type) =>{
     try{
         const ticketId = ticketInfo.id
         const icsData = await generateICS(event, ticketId) 
@@ -32,11 +32,7 @@ const createEmailPayload = async (event,ticketInfo, ticketFor, type) =>{
         return message
          
     }catch(err) {
-        logger.log('error', err)
+        error('error', err.stack)
         return err
     }
-}
-
-module.exports ={
-    createEmailPayload
-}
+} 

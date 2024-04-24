@@ -1,14 +1,12 @@
-'use strict'
-const jwtToken = require('../util/jwtToken')
-const Event = require('../model/event')
-const consts = require('../const')
-const logger = require('../model/logger')
-const appText = require('../applicationTexts')
-const commonUtil = require('../util/common') 
-const busboyFileUpload = require('../util/busboyFileUpload')
+import * as jwtToken from '../util/jwtToken.js'
+import * as Event from '../model/event.js'
+import * as consts from '../const.js'
+import {error} from '../model/logger.js'
+import * as appText from '../applicationTexts.js'
+import * as commonUtil from '../util/common.js'
+import * as busboyFileUpload from '../util/busboyFileUpload.js'
 
-
-const createEvent = async (req, res, next) =>{
+export const createEvent = async (req, res, next) =>{
     const token = req.headers.authorization
     const eventTitle = req.body.eventTitle
     const eventDescription = req.body.eventDescription
@@ -52,13 +50,13 @@ const createEvent = async (req, res, next) =>{
                     socialMedia, lang, position, active, eventName, videoUrl).then(data=>{
                     return res.status(consts.HTTP_STATUS_CREATED).json({ data: data })
                 }).catch(err=>{
-                    logger.log("error", err.stack)
+                    error("error", err.stack)
                     throw err
                 }) 
             }catch(err){
-                logger.log("error", err.stack)
+                error("error", err.stack)
                 if(!res.headersSent){
-                    logger.log('error',err)
+                    error('error',err)
                     return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
                         message: 'Sorry, event creation failed', error: err.stack
                     })
@@ -70,7 +68,7 @@ const createEvent = async (req, res, next) =>{
 
 }
 
-const getEvents = async(req,res,next)=>{
+export const getEvents = async(req,res,next)=>{
     const token = req.headers.authorization
     await jwtToken.verifyJWT(token, async (err, data) => {
         if ( err || data === null) { 
@@ -88,7 +86,7 @@ const getEvents = async(req,res,next)=>{
             await Event.getEvents().then(data=>{
                 return res.status(consts.HTTP_STATUS_OK).json({ data: data, timeZone:process.env.TIME_ZONE })
             }).catch(err=>{
-                logger.log('error',err)
+                error('error',err)
                 return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
                     message: 'Sorry, get events failed', error: appText.EVENT_GET_FAILED
                 })
@@ -97,7 +95,7 @@ const getEvents = async(req,res,next)=>{
     })
 }
 
-const getEventById = async (req, res, next) => {
+export const getEventById = async (req, res, next) => {
     const token = req.headers.authorization
     const id = req.params.id
     await jwtToken.verifyJWT(token, async (err, data) => {
@@ -116,7 +114,7 @@ const getEventById = async (req, res, next) => {
             await Event.getEventById(id).then(data=>{
                 return res.status(consts.HTTP_STATUS_CREATED).json({ data: data,  timeZone:process.env.TIME_ZONE })
             }).catch(err=>{
-                logger.log('error',err)
+                error('error',err)
                 return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
                     message: 'Sorry, get event by id failed', error: appText.EVENT_GET_FAILED
                 })
@@ -125,7 +123,7 @@ const getEventById = async (req, res, next) => {
     })
 }
 
-const updateEventById = async (req,res,next) =>{
+export const updateEventById = async (req,res,next) =>{
 
     const token = req.headers.authorization
     const id = req.params.id
@@ -185,7 +183,7 @@ const updateEventById = async (req,res,next) =>{
             await Event.updateEventById(id,eventObj).then(data=>{
                 return res.status(consts.HTTP_STATUS_CREATED).json({ data: data })
             }).catch(err=>{
-                logger.log('error',err)
+                error('error',err)
                 return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
                     message: 'Sorry, update event failed.', error: err.stack
                 })
@@ -195,7 +193,7 @@ const updateEventById = async (req,res,next) =>{
 }
 
 
-const uploadPhotosForParticularEvent = async (req,res,next) =>{
+export const uploadPhotosForParticularEvent = async (req,res,next) =>{
     const token = req.headers.authorization
     const id = req.params.id
     await jwtToken.verifyJWT(token, async (err, data) => {
@@ -212,7 +210,7 @@ const uploadPhotosForParticularEvent = async (req,res,next) =>{
             }
             //check the event
             const myEvent = await Event.getEventById(id).catch(err=>{
-                logger.log('error',err)
+                error('error',err)
                 return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
                     message: 'Sorry, given event not found.', error: appText.RESOURCE_NOT_FOUND
                 })
@@ -243,14 +241,6 @@ const uploadPhotosForParticularEvent = async (req,res,next) =>{
 }
 
 
-const getAllEventsForDashboard = async () =>{
+export const getAllEventsForDashboard = async () =>{
     return await Event.getEvents()
-}
-module.exports = {
-    createEvent,
-    getEvents,
-    getEventById,
-    updateEventById,
-    uploadPhotosForParticularEvent,
-    getAllEventsForDashboard
-}
+} 

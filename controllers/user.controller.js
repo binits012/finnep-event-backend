@@ -1,15 +1,15 @@
-'use strict'
-const jwtToken = require('../util/jwtToken.js')
-const logger = require('../model/logger')
-const User = require('../model/users')
-const appText = require('../applicationTexts.js')
-require('dotenv').config() 
-const consts = require('../const')
-const Role = require('../model/role')
-const common = require('../util/common.js')
-const Contact = require('../model/contact')
+import * as jwtToken from '../util/jwtToken.js'
+import {error} from '../model/logger.js'
+import * as User from '../model/users.js'
+import * as appText from '../applicationTexts.js'
+import dotenv from 'dotenv'
+dotenv.config() 
+import * as consts from '../const.js'
+import * as Role from '../model/role.js'
+import * as common from '../util/common.js'
+import * as Contact from '../model/contact.js'
 
-const login = async (req, res, next) => {
+export const login = async (req, res, next) => {
     const username = req.body.username
     const password = req.body.password
     await User.loginCheck(username, password).then(data => {
@@ -23,7 +23,7 @@ const login = async (req, res, next) => {
                 if(data){ 
                     res.status(consts.HTTP_STATUS_OK).json({ token: data }) 
                 }else{
-                    logger.log('error',err.stack)
+                    error('error',err.stack)
                     res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ message: 'Failed to create token. Check inputs.', error: err.stack });
                 }
             }) 
@@ -33,13 +33,13 @@ const login = async (req, res, next) => {
         }
 
     }).catch(err => { 
-        logger.log('error',err)
+        error('error',err)
         next(err)
         res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ message: 'Failed to create token. Check inputs.', error: err.stack });
     })
 }
 
-const createAdminUser = async (req, res, next) => {
+export const createAdminUser = async (req, res, next) => {
     const username = req.body.username
     const password = req.body.password
     const token = req.headers.authorization 
@@ -65,7 +65,7 @@ const createAdminUser = async (req, res, next) => {
                     }
                     )
                     .catch(e => {
-                        logger.log('error',e.stack) 
+                        error('error',e.stack) 
                         return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ message: 'Failed to create new user. Check inputs.', error: e.message });
                     })
             } else { 
@@ -79,7 +79,7 @@ const createAdminUser = async (req, res, next) => {
 
 }
 
-const createStaffUser = async (req, res, next) => {
+export const createStaffUser = async (req, res, next) => {
     const username = req.body.username
     const password = req.body.password
     const token = req.headers.authorization
@@ -104,7 +104,7 @@ const createStaffUser = async (req, res, next) => {
                         res.status(consts.HTTP_STATUS_CREATED).json({ data: createdUser })
                     })
                     .catch(e => {
-                        logger.log('error',e.stack)
+                        error('error',e.stack)
                         res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ message: 'Failed to create new user. Check inputs.', error: e.message });
                     })
             } else { 
@@ -117,7 +117,7 @@ const createStaffUser = async (req, res, next) => {
     })
 }
 
-const getAdminUsers = async (req, res, next) => {
+export const getAdminUsers = async (req, res, next) => {
     const token = req.headers.authorization
     if (token === "" || token === undefined) {
         return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
@@ -137,7 +137,7 @@ const getAdminUsers = async (req, res, next) => {
                     await User.getUsersByRole(consts.ROLE_ADMIN).then(data => {
                         res.status(consts.HTTP_STATUS_OK).json({ data: data })
                     }).catch(e => {
-                        logger.log('error',e.stack)
+                        error('error',e.stack)
                         res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ message: 'Failed to get admin users List.', error: e.message });
                     })
                 } else { 
@@ -150,7 +150,7 @@ const getAdminUsers = async (req, res, next) => {
     }
 }
 
-const getStaffUsers = async (req, res, next) => {
+export const getStaffUsers = async (req, res, next) => {
     const token = req.headers.authorization
     if (token === "" || token === undefined) {
         return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
@@ -171,7 +171,7 @@ const getStaffUsers = async (req, res, next) => {
                         console.log(data)
                         res.status(consts.HTTP_STATUS_OK).json({ data: data })
                     }).catch(e => {
-                        logger.log('error',e.stack)
+                        error('error',e.stack)
                         res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ message: 'Failed to get staff users List.', error: e.message });
                     })
                 } else { 
@@ -185,7 +185,7 @@ const getStaffUsers = async (req, res, next) => {
     }
 }
 
-const changePassword = async (req, res, next) => {
+export const changePassword = async (req, res, next) => {
 
     const username = req.body.username
     const oldPassword = req.body.oldPassword
@@ -248,7 +248,7 @@ const changePassword = async (req, res, next) => {
     })
 }
 
-const getUserById = async (req, res, next) => {
+export const getUserById = async (req, res, next) => {
     const userId = req.params.id
     const token = req.headers.authorization
     if (userId === null || userId === "" || userId === undefined
@@ -287,7 +287,7 @@ const getUserById = async (req, res, next) => {
     })
 }
 
-const deleteUserById = async (req, res, next) => {
+export const deleteUserById = async (req, res, next) => {
     const userId = req.params.id
     const token = req.headers.authorization
     if (userId === null || userId === "" || userId === undefined
@@ -334,7 +334,7 @@ const deleteUserById = async (req, res, next) => {
             await User.updateUser(userId, getUserFromId).then(data => {
                 return res.status(consts.HTTP_STATUS_NO_CONTENT).send()
             }).catch(err => {
-                logger.log('error',err.stack)
+                error('error',err.stack)
                 return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).send(err)
             })
 
@@ -342,7 +342,7 @@ const deleteUserById = async (req, res, next) => {
     })
 }
 
-const updateUserById = async (req, res, next) => {
+export const updateUserById = async (req, res, next) => {
     const userId = req.params.id
     const token = req.headers.authorization
     const active = req.body.active
@@ -392,7 +392,7 @@ const updateUserById = async (req, res, next) => {
             await User.updateUser(userId, getUserFromId).then(data => {
                 return res.status(consts.HTTP_STATUS_OK).json({ data: data })
             }).catch(err => {
-                logger.log('error',err.stack)
+                error('error',err.stack)
                 return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).send(err)
             })
 
@@ -400,7 +400,7 @@ const updateUserById = async (req, res, next) => {
     })
 }
 
-const createUserWithContact = async(req,res, next) =>{
+export const createUserWithContact = async(req,res, next) =>{
     const username = req.body.username
     const password = req.body.password
     const verifyPassword = req.body.verifyPassword
@@ -465,7 +465,7 @@ const createUserWithContact = async(req,res, next) =>{
                         
                     })
                     .catch(e => {
-                        logger.log('error',e.stack)
+                        error('error',e.stack)
                         UserActivity.createUserActivity(token, Action.CREATE, "new  user creation failed.")
                         return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ message: 'Failed to create new user. Check inputs.', error: e.message });
                     })
@@ -478,17 +478,4 @@ const createUserWithContact = async(req,res, next) =>{
 
         }
     })
-}
-
-module.exports = {
-    login,
-    createAdminUser,
-    createStaffUser,
-    getAdminUsers,
-    getStaffUsers,
-    changePassword,
-    getUserById,
-    deleteUserById,
-    updateUserById,
-    createUserWithContact
 }

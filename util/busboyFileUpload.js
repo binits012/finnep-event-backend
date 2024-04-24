@@ -1,10 +1,11 @@
-const busboy = require('busboy')
-const fs = require('fs')
-const logger = require('../model/logger')
-const { Queue } = require('bullmq')  
-const consts = require('../const')
-require('dotenv').config()
-const Event = require('../model/event')
+import  busboy from 'busboy'
+import * as fs from 'fs'
+import {error, info} from '../model/logger.js'
+import { Queue } from 'bullmq'
+import * as consts from '../const.js'
+import dotenv from 'dotenv'
+dotenv.config()
+import * as Event from '../model/event.js'
 const uploadArrivalPhotoQueue = new Queue(consts.PHOTO_ARRIVAL_QUEUE,  {connection :{host:process.env.REDIS_HOST,
     port:process.env.REDIS_PORT,no_ready_check: true,
 password:process.env.REDIS_PWD}})
@@ -13,7 +14,8 @@ const ticketViaFileUploadQueue = new Queue(consts.CREATE_TICKET_FROM_FILE_UPLOAD
     port:process.env.REDIS_PORT,no_ready_check: true,
 password:process.env.REDIS_PWD}})
 
-const uploadToS3 = async(event, req, callback) =>{
+const __dirname = import.meta.dirname;
+export const uploadToS3 = async(event, req, callback) =>{
     //lets start parsing the file 
 
     const bb = busboy({headers:req.headers,limits: {
@@ -22,7 +24,7 @@ const uploadToS3 = async(event, req, callback) =>{
     let fileInfo = []
     bb.on('error', err=>{ console.log(err); callback(false, true)}) 
     bb.on('file', async (name,file,info) =>{
-        logger.log('info', "busboy receiving photo starts at "+ new Date())
+        info( "busboy receiving photo starts at "+ new Date())
         const { filename, encoding, mimeType } = info
         if(filename.length > 0){
             if(mimeType != 'image/png' && mimeType != 'image/jpeg' && mimeType != 'image/jpg'){ 
@@ -48,7 +50,7 @@ const uploadToS3 = async(event, req, callback) =>{
                     streamData = []
                 }catch(err){
                     console.log(err)
-                    logger.log('error', err)
+                    error('error', err)
                 }
               })
             
@@ -77,7 +79,7 @@ const uploadToS3 = async(event, req, callback) =>{
                 delay: 1000 //1 second delay
             }
         )
-        logger.log('info', "busboy receiving photo ends at "+ new Date())
+        info( "busboy receiving photo ends at "+ new Date())
         callback(true, null)
     })
     req.pipe(bb)
@@ -92,7 +94,7 @@ const trimAllWhiteSpaces = (str) =>{
     }
     return newStr
 }
-const createTicketViaFile = async(req) =>{
+export const createTicketViaFile = async(req) =>{
     await createFileFolder('excelFiles')
     let saveTo = null
     let eventId = null
@@ -102,7 +104,7 @@ const createTicketViaFile = async(req) =>{
         } })
         bb.on('error', err=>{ console.log(err); callback(false, true)}) 
         bb.on('file', async (name,file,info) =>{
-            logger.log('info', "busboy receiving excel starts at "+ Date.now())
+            info(  "busboy receiving excel starts at "+ Date.now())
             const { filename, encoding, mimeType } = info
             console.log(info)
             if(filename.length > 0){
@@ -124,7 +126,7 @@ const createTicketViaFile = async(req) =>{
         bb.on('finish', async() =>{
             try{
                 const event = await Event.getEventById(eventId).catch(err=>{ 
-                    logger.log('error', err.stack)
+                    error('error', err.stack)
                     reject(false)  
                 })
                 const jobData = {
@@ -143,7 +145,7 @@ const createTicketViaFile = async(req) =>{
                         delay: 1000 //1 second delay
                     }
                 )
-                logger.log('info', "busboy receiving excel ends at "+ Date.now()) 
+                info(  "busboy receiving excel ends at "+ Date.now()) 
                 resolve(true)
             }catch(err){
                 reject(false)
@@ -158,8 +160,4 @@ const createFileFolder = async (dir) => {
 	if (!fs.existsSync(dir)) {
 		fs.mkdirSync(dir);
 	}
-}
-module.exports = {
-     uploadToS3,
-     createTicketViaFile
-}
+} 

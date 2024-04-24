@@ -1,7 +1,12 @@
+/*
 "use strict"
 const express = require('express')
 const router = express.Router() 
 const api = require('../controllers/api.controller') 
+*/
+import * as express from 'express'
+const router = express.Router() 
+import * as api  from '../controllers/api.controller.js'
 
 router.route('/auth/user/login').post(api.login)
 router.route('/auth/user/changePassword').post(api.changePassword)
@@ -76,4 +81,5 @@ router.route('/dashboard')
     .get(api.dashboard)
 router.route('/logout')
     .get(api.logout)
-module.exports = router
+
+export default router

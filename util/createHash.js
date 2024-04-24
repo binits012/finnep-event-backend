@@ -1,12 +1,11 @@
-'use strict'
-
-const crypto = require('crypto')
-require('dotenv').config()
-const Crypto = require('../model/crypto')
+import * as crypto from 'crypto'
+import dotenv from 'dotenv'
+dotenv.config()
+import * as Crypto from '../model/crypto.js'
 // Defining algorithm
 const algorithm = 'aes-256-cbc';
 
-const createHashData = async (text, type) => { 
+export const createHashData = async (text, type) => { 
     const key =  crypto.scryptSync(process.env.CRYPTO_KEY,'salt',32)  
     const iv = crypto.randomBytes(16);
     const cipher = crypto.createCipheriv(algorithm, key, iv)
@@ -18,11 +17,11 @@ const createHashData = async (text, type) => {
 
 }
 
-const deleteHashById = async (id) => {
+export const deleteHashById = async (id) => {
     return await Crypto.deleteCryptoById(id)
 }
 
-const readHash = async (id) => {
+export const readHash = async (id) => {
     const myCrypto = await Crypto.readCryptoById(id) 
     const key =  crypto.scryptSync(process.env.CRYPTO_KEY,'salt',32)   
     const encryptedData = myCrypto.encryptedData
@@ -37,7 +36,7 @@ const readHash = async (id) => {
     return returnData
 }
 
-const updateHash = async (id, text) => {
+export const updateHash = async (id, text) => {
     const key =  crypto.scryptSync(process.env.CRYPTO_KEY,'salt',32)  
     const iv = crypto.randomBytes(16)
     let cipher =  crypto.createCipheriv(algorithm, key, iv) 
@@ -49,13 +48,6 @@ const updateHash = async (id, text) => {
 
 }
 
-const getCryptoByEmail = async (email) =>{
+export const getCryptoByEmail = async (email) =>{
     return await Crypto.getCryptoByEmail(email)
-}
-module.exports = {
-    createHashData,
-    deleteHashById,
-    readHash,
-    updateHash,
-    getCryptoByEmail
-}
+} 
