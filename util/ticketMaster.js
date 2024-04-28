@@ -4,8 +4,8 @@ import {error} from '../model/logger.js'
 import dotenv from 'dotenv'
 dotenv.config()
 import { dirname } from 'path'
-const __dirname = dirname(import.meta.url)
-console.log(__dirname)
+const __dirname = dirname(import.meta.url).slice(7)
+
 export const createEmailPayload = async (event,ticketInfo, ticketFor, type) =>{
     try{
         const ticketId = ticketInfo.id

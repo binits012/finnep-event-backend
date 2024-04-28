@@ -14,7 +14,7 @@ import { getContactById } from '../model/contact.js'
 import { ROLE_ADMIN } from '../const.js' 
 
 import { dirname } from 'path'
-const __dirname = dirname(import.meta.url)
+const __dirname = dirname(import.meta.url).slice(7)
 console.log(__dirname)
 agenda.on('ready', () => console.log("Agenda started!"))
 agenda.on('error', () => console.log("Agenda connection error!"))
