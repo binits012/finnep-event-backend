@@ -67,7 +67,9 @@ export const createEvent = async (eventTitle, eventDescription, eventDate, event
 }
 
 export const getEvents = async() =>{
-    return await model.Event.find().sort({eventDate:-1}).exec() 
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    return await model.Event.find({eventDate:{$gte:today}}).sort({position:1}).sort({eventDate:-1}).exec() 
 }
 
 export const getEventById = async(id) =>{ 

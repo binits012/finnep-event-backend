@@ -4,7 +4,7 @@ esbuild.build({
   entryPoints: ["app.js"], 
 
   // Output file name for the bundled code
-  outfile: "app.min.js",
+  outfile: "yellowbridge.min.js",
 
   // Enable minification for production builds
   minify: process.env.NODE_ENV === "production",
