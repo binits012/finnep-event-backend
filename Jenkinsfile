@@ -9,7 +9,7 @@ pipeline {
                     sh 'cp -r staticPages /opt/deployment/yellowbridge/'
                     sh 'cp -r emailTemplates /opt/deployment/yellowbridge/' 
                     sh 'cp .env  /opt/deployment/yellowbridge/'
-                    sh 'cp app.min.js  /opt/deployment/yellowbridge/'
+                    sh 'cp yellowbridge.min.js  /opt/deployment/yellowbridge/'
                     sh 'cp -r node_modules /opt/deployment/yellowbridge/'
                     sh 'cp package.json /opt/deployment/yellowbridge/'
                     sh 'cd /opt/deployment/yellowbridge/'
@@ -20,8 +20,8 @@ pipeline {
         }
         stage('Stop and Run Instance ') {
             steps {
-                sh 'pm2 stop 0'
-                sh 'pm2 start app.min.js'
+                sh "pm2 list | grep yellowbridge.min.js | awk '{print $2}' | xargs pm2 kill"
+                sh 'pm2 start yellowbridge.min.js'
             }
         }
     }
