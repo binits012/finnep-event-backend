@@ -20,7 +20,7 @@ pipeline {
         }
         stage('Stop and Run Instance ') {
             steps {
-                sh "pm2 list | grep yellowbridge.min.js | awk '{print $2}' | xargs pm2 kill"
+                sh "pm2 show yellowbridge.min.js | grep pid | awk '{print \$2}' | xargs pm2 kill"
                 sh 'pm2 start yellowbridge.min.js'
             }
         }
