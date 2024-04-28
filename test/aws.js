@@ -12,8 +12,7 @@
      } 
   })
 
-  const uploadToS3 = async () =>{
-    console.log(__dirname+'/nuppu.jpeg')
+  const uploadToS3 = async () =>{ 
     const fileContent = fs.readFileSync(__dirname+'/nuppu.jpeg')
     console.log(fileContent)
     /* 

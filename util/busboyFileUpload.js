@@ -15,7 +15,7 @@ const ticketViaFileUploadQueue = new Queue(consts.CREATE_TICKET_FROM_FILE_UPLOAD
 password:process.env.REDIS_PWD}})
 
 import { dirname } from 'path'
-const __dirname = dirname(import.meta.url)
+const __dirname = dirname(import.meta.url).slice(7)
 console.log(__dirname)
 export const uploadToS3 = async(event, req, callback) =>{
     //lets start parsing the file 
