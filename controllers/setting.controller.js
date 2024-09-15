@@ -111,6 +111,7 @@ export const updateSettingById = async(req,res,next)=>{
     const aboutSection = req.body.aboutSection
     const contactInfo = req.body.contactInfo
     const socialMedia = req.body.socialMedia
+    const otherInfo = req.body.otherInfo
     await jwtToken.verifyJWT(token, async (err, data) => {
         if (err || data === null) { 
             return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({
@@ -128,7 +129,8 @@ export const updateSettingById = async(req,res,next)=>{
                 const updateObj = {
                     aboutSection: aboutSection,
                     contactInfo: contactInfo,
-                    socialMedia: socialMedia
+                    socialMedia: socialMedia,
+                    otherInfo:otherInfo
                 }
                 console.log(updateObj)
                 await Setting.updateSettingById(id, updateObj).then(data =>{

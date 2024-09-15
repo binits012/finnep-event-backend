@@ -7,7 +7,10 @@ import * as  Setting from'../model/setting.js'
 export const getDataForFront = async(req,res,next) =>{
     const photo = await Photo.listPhoto()
     const notification = await Notification.getAllNotification()
-    const event = await Event.getEvents()
+    let event = await Event.getEvents()
+    if(event){
+        event = event.filter(e=>e.active)
+    }
     const setting = await Setting.getSetting()
     const data = {
         photo:photo,

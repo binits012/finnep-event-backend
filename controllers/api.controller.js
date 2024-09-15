@@ -11,6 +11,7 @@ import * as common from '../util/common.js'
 import * as photoType from '../model/photoType.js'
 import * as setting from '../controllers/setting.controller.js'
 import * as ticket from '../controllers/ticket.controller.js'
+import * as NotificationType from '../model/notificationType.js'
 import {error} from '../model/logger.js'
 
 
@@ -295,12 +296,14 @@ export const dashboard = async(req, res, next) =>{
                     throw err
                     
                 }) 
+                const notificationType = await NotificationType.getNotificationTypes()
                 const dashboardData = {
                     event:eventAll,
                     photoType:photoTypes,
                     photo:photoAll,
                     notification:notificationAll,
-                    ticket:tickets
+                    ticket:tickets,
+                    notificationType:notificationType
     
                 }  
                 return res.status(consts.HTTP_STATUS_OK).json({ data: dashboardData })

@@ -1,8 +1,8 @@
-import jwt from 'jsonwebtoken'
 import dotenv from 'dotenv'
 dotenv.config()
 import {error} from '../model/logger.js'
 import * as redis from 'redis'
+import jwt from 'jsonwebtoken'
 
 const redisClient = redis.createClient({
 	port: process.env.REDIS_PORT,

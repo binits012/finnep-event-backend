@@ -15,8 +15,7 @@ const ticketViaFileUploadQueue = new Queue(consts.CREATE_TICKET_FROM_FILE_UPLOAD
 password:process.env.REDIS_PWD}})
 
 import { dirname } from 'path'
-const __dirname = dirname(import.meta.url).slice(7)
-console.log(__dirname)
+const __dirname = dirname(import.meta.url).slice(7) 
 export const uploadToS3 = async(event, req, callback) =>{
     //lets start parsing the file 
 
@@ -25,9 +24,10 @@ export const uploadToS3 = async(event, req, callback) =>{
     } })
     let fileInfo = []
     bb.on('error', err=>{ console.log(err); callback(false, true)}) 
-    bb.on('file', async (name,file,info) =>{
+    bb.on('file', async (name,file,myFileInfo) =>{
+        console.log("==================",name,file,myFileInfo)
         info( "busboy receiving photo starts at "+ new Date())
-        const { filename, encoding, mimeType } = info
+        const { filename, encoding, mimeType } = myFileInfo
         if(filename.length > 0){
             if(mimeType != 'image/png' && mimeType != 'image/jpeg' && mimeType != 'image/jpg'){ 
                 //Ignore the upload, move on to next one
@@ -69,6 +69,7 @@ export const uploadToS3 = async(event, req, callback) =>{
             event:event,
             fileInfo: fileInfo
         } 
+        console.log(jobData)
         uploadArrivalPhotoQueue.add(trimAllWhiteSpaces(event.eventTitle)+'-'+event.id,jobData,
             {
                 removeOnComplete: {
