@@ -149,6 +149,7 @@ export const updateNotificationById = async (req, res, next) => {
                 })
             }
             const getNotificationType = await NotificationType.getNotificationTypeById(notificationType)
+            console.log(getNotificationType)
             if(getNotificationType.length == 0){
                 return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
                     message: 'Sorry, no record exists', error: appText.RESOURCE_NOT_FOUND

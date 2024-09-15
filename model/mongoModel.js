@@ -232,7 +232,11 @@ const settingSchema = new mongoose.Schema({
 	socialMedia:{
 		type: Map,
 		of: String
-	  }
+	  }, 
+	otherInfo:{
+		type:Map,
+		of:mongoose.Schema.Types.Mixed
+	} 
 })
 
 export const Setting = mongoose.model('Setting', settingSchema)

@@ -112,7 +112,7 @@ export const getEventById = async (req, res, next) => {
             } 
              
             await Event.getEventById(id).then(data=>{
-                return res.status(consts.HTTP_STATUS_CREATED).json({ data: data,  timeZone:process.env.TIME_ZONE })
+                return res.status(consts.HTTP_STATUS_OK).json({ data: data,  timeZone:process.env.TIME_ZONE })
             }).catch(err=>{
                 error('error',err)
                 return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -181,7 +181,7 @@ export const updateEventById = async (req,res,next) =>{
             } 
              
             await Event.updateEventById(id,eventObj).then(data=>{
-                return res.status(consts.HTTP_STATUS_CREATED).json({ data: data })
+                return res.status(consts.HTTP_STATUS_OK).json({ data: data })
             }).catch(err=>{
                 error('error',err)
                 return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
