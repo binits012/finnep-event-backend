@@ -3,15 +3,14 @@ import * as model from '../model/mongoModel.js'
 import {error} from './logger.js'
 
 export class Event {
-    constructor(eventTitle, eventDescription, eventDate, eventTime, eventPrice,
-        occupancy, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
+    constructor(eventTitle, eventDescription, eventDate,  
+        occupancy,ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
         socialMedia, lang, position, active, eventName, videoUrl) {
         this.eventTitle = eventTitle
         this.eventDescription = eventDescription
-        this.eventDate = eventDate
-        this.eventTime = eventTime
-        this.eventPrice = eventPrice
+        this.eventDate = eventDate 
         this.occupancy = occupancy
+        this.ticketInfo = ticketInfo
         this.eventPromotionPhoto = eventPromotionPhoto
         this.eventPhoto = eventPhoto
         this.eventLocationAddress = eventLocationAddress
@@ -31,10 +30,9 @@ export class Event {
             const event = new model.Event({
                 eventTitle: this.eventTitle,
                 eventDescription: this.eventDescription,
-                eventDate: this.eventDate,
-                eventTime: this.eventTime,
-                eventPrice: this.eventPrice,
+                eventDate: this.eventDate, 
                 occupancy: this.occupancy,
+                ticketInfo:this.ticketInfo,
                 eventPromotionPhoto: this.eventPromotionPhoto,
                 eventPhoto: this.eventPhoto,
                 eventLocationAddress: this.eventLocationAddress,
@@ -56,12 +54,12 @@ export class Event {
     }
 }
 
-export const createEvent = async (eventTitle, eventDescription, eventDate, eventTime,  eventPrice, 
-    occupancy, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
+export const createEvent = async (eventTitle, eventDescription, eventDate,  
+    occupancy, ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
     socialMedia, lang, position, active, eventName, videoUrl) =>{
         
-    const event = new Event(eventTitle, eventDescription, eventDate, eventTime,  eventPrice, 
-        occupancy, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
+    const event = new Event(eventTitle, eventDescription, eventDate,  
+        occupancy, ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
         socialMedia, lang, position, active, eventName, videoUrl)
     return await event.saveToDB()
 }

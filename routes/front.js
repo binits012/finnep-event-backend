@@ -10,4 +10,11 @@ import * as front  from '../controllers/front.controller.js'
 router.route('/')
     .get(front.getDataForFront)
 
+router.route('/create-checkout-session')
+    .post(front.createCheckoutSession)
+
+router.route('/ticket')
+    .post(front.completeOrderTicket)
+
+ 
 export default router

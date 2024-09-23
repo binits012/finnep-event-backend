@@ -100,13 +100,42 @@ const timeBasedPriceSchema = new mongoose.Schema({
 })
 export const TimeBasedPrice = mongoose.model('TimeBasedPrice', timeBasedPriceSchema)
 
+const ticketInfoSchema = new mongoose.Schema({
+	name: {
+	  type: String,
+	  required: true, // Name is required
+	},
+	price: {
+	  type: Number,
+	  required: true, // Price is required
+	  min: [0.01, 'Price must be a positive number']
+	},
+	quantity: {
+	  type: Number,
+	  required: true, // Quantity is required
+	  min: [1, 'Quantity must be at least 1']
+	}
+})
+
 const eventSchema = new mongoose.Schema({
 	eventTitle: { type: String, required: true, unique: true },
 	eventDescription: { type: String, required: true },
-	eventTime: { type: Number }, 
 	eventDate: { type: Date, required: true },
-	eventPrice: { type: mongoose.Decimal128, required: true },
 	occupancy: {type: Number, required:true},
+	ticketInfo: {
+		type: [ticketInfoSchema],
+		validate: {
+		  validator: function(ticketInfoArray) {
+			const size = ticketInfoArray.length
+			 
+			// Check for duplicate `name` fields
+			const names = ticketInfoArray.map((item) => item.name);
+			const uniqueNames = new Set(names);
+			return  size > 0 && names.length === uniqueNames.size;
+		  },
+		  message: 'Duplicate entries found in ticketInfo array'
+		}
+	},
 	lang:{type:String, default:'en'},
 	socialMedia:{
 		type: Map,
@@ -121,7 +150,22 @@ const eventSchema = new mongoose.Schema({
 	active:{type:Boolean, default:true},
 	eventName:{type:String,  unique:true},
 	videoUrl:{type:String},
+	status:{type:String, enum:['up-coming', 'on-going', 'completed'], default:'up-coming' },
 	createdAt: { type: Date, default: Date.now }
+})
+
+eventSchema.pre('findOneAndUpdate', function(next) {
+	const update = this.getUpdate() 
+	if (update && update.$set.ticketInfo) {
+	  const ticketInfoArray = update.$set.ticketInfo
+	  const names = ticketInfoArray.map(item => item.name)
+	  const uniqueNames = new Set(names)
+	  
+	  if (names.length !== uniqueNames.size) {
+		return next(new Error('Duplicate entries found in ticketInfoArray array'));
+	  }
+	}
+	next()
 })
 
 eventSchema.pre('save', function(next){
@@ -137,6 +181,7 @@ eventSchema.post('find', async (docs, next) =>{
 	} 
 	next()
 })
+
 
 export const Event = mongoose.model('Event', eventSchema)
 
@@ -217,6 +262,7 @@ const ticketSchema = new mongoose.Schema({
 	readBy: {type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 	readAt:{ type: Date },
 	type:{type:String, default:'normal'},
+	ticketInfo:{type:Map, of: mongoose.Schema.Types.Mixed},
 	validUntil:{type:Date}
 })
 export const Ticket = new mongoose.model('Ticket',ticketSchema)
@@ -240,4 +286,27 @@ const settingSchema = new mongoose.Schema({
 })
 
 export const Setting = mongoose.model('Setting', settingSchema)
+
+const paymentSchema = new mongoose.Schema({
+	createdAt: { type: Date, default: Date.now },
+	paymentInfo:{
+		type:Map,
+		of:mongoose.Schema.Types.Mixed
+	},
+	event:{type: mongoose.Schema.Types.ObjectId, ref: 'Event', required:true },
+	ticket: {type: mongoose.Schema.Types.ObjectId, ref: 'Ticket', required:true }
+})
+
+export const Payment = mongoose.model('Payment', paymentSchema)
  
+const orderTicketSchema = mongoose.Schema({
+	createdAt: { type: Date, default: Date.now }, 
+	ticketInfo:{type:Map, of: mongoose.Schema.Types.Mixed},
+	status:{type:String, enum:["created","in-complete","completed"], default:"created"},
+	otp:{type:String, required:true},
+	attempts: { type: Number, default: 0 },
+	ticket: {type: mongoose.Schema.Types.ObjectId, ref: 'Ticket' },
+	updatedAt: { type: Date, default: Date.now },
+})
+
+export const OrderTicket = mongoose.model('OrderTicket',orderTicketSchema)

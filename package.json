@@ -3,19 +3,19 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "start": "nodemon --exec node app.js", 
+    "start": "nodemon --exec node app.js",
     "esbuild": "node esbuild.config.js"
-
   },
   "type": "module",
   "dependencies": {
-    "cookie-parser": "~1.4.4", 
-    "express": "^4.18.3"
+    "cookie-parser": "~1.4.4",
+    "express": "^4.18.3",
+    "stripe": "^16.12.0"
   },
   "devDependencies": {
     "@aws-sdk/client-s3": "^3.537.0",
     "@aws-sdk/lib-storage": "^3.540.0",
-    "@hokify/agenda": "^6.3.0", 
+    "@hokify/agenda": "^6.3.0",
     "bcrypt": "^5.1.1",
     "bullmq": "^5.1.4",
     "busboy": "^1.6.0",
@@ -24,16 +24,16 @@
     "dotenv": "^16.3.1",
     "esbuild": "^0.20.2",
     "exceljs": "^4.4.0",
-    "express-validator": "^7.0.1", 
+    "express-validator": "^7.0.1",
     "ics": "^3.7.2",
-    "jsonwebtoken": "^9.0.1", 
+    "jsonwebtoken": "^9.0.1",
     "moment": "^2.29.4",
     "moment-timezone": "^0.5.44",
     "mongoose": "^7.3.2",
     "nodemailer": "^6.9.8",
     "nodemon": "^3.0.1",
     "qrcode": "^1.5.3",
-    "redis": "^4.6.12", 
+    "redis": "^4.6.12",
     "winston": "^3.10.0",
     "winston-daily-rotate-file": "^4.7.1"
   }

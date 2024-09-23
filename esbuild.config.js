@@ -24,7 +24,7 @@ esbuild.build({
 
   // Define external libraries (not bundled)
   external: ['winston', 'bcrypt', 'express', 'dotenv','mongoose', 'bullmq', 'winston-daily-rotate-file', "@smithy", "@aws-sdk",
-   "crypto", 'ics', 'qrcode','mongodb', 'nodemailer', 'exceljs', 'jsonwebtoken', 'redis', 'busboy', '@hokify','/node_modules/*'], // Example for external libraries
+   "crypto", 'ics', 'qrcode','mongodb', 'nodemailer', 'exceljs', 'jsonwebtoken', 'redis', 'busboy', 'stripe', '@hokify','/node_modules/*'], // Example for external libraries
 
   // Enable splitting large bundles into chunks
   //splitting: true, // Adjust options as needed

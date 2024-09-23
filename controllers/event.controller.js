@@ -10,10 +10,9 @@ export const createEvent = async (req, res, next) =>{
     const token = req.headers.authorization
     const eventTitle = req.body.eventTitle
     const eventDescription = req.body.eventDescription
-    const eventDate = req.body.eventDate
-    const eventTime = req.body.eventTime
-    const eventPrice = req.body.eventPrice
+    const eventDate = req.body.eventDate 
     const occupancy = req.body.occupancy
+    const ticketInfo = req.body.ticketInfo
     const eventPromotionPhoto = req.body.eventPromotionPhoto
     const eventPhoto = req.body.eventPhoto
     const eventLocationAddress = req.body.eventLocationAddress
@@ -43,10 +42,9 @@ export const createEvent = async (req, res, next) =>{
                         })
                     }
                     
-                }
-                const timeInMinutes =  0//commonUtil.timeInMinutes(eventTime) 
-                await Event.createEvent(eventTitle, eventDescription, eventDate, timeInMinutes,  eventPrice, 
-                    occupancy, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
+                } 
+                await Event.createEvent(eventTitle, eventDescription, eventDate, 
+                    occupancy, ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
                     socialMedia, lang, position, active, eventName, videoUrl).then(data=>{
                     return res.status(consts.HTTP_STATUS_CREATED).json({ data: data })
                 }).catch(err=>{
@@ -129,10 +127,9 @@ export const updateEventById = async (req,res,next) =>{
     const id = req.params.id
     const eventTitle = req.body.eventTitle
     const eventDescription = req.body.eventDescription
-    const eventDate = req.body.eventDate
-    const eventTime = req.body.eventTime
-    const eventPrice = req.body.eventPrice
+    const eventDate = req.body.eventDate  
     const occupancy = req.body.occupancy
+    const ticketInfo = req.body.ticketInfo
     const eventPromotionPhoto = req.body.eventPromotionPhoto 
     const eventLocationAddress = req.body.eventLocationAddress
     const eventLocationGeoCode = req.body.eventLocationGeoCode
@@ -151,10 +148,9 @@ export const updateEventById = async (req,res,next) =>{
     const eventObj = {
         eventTitle: eventTitle,
         eventDescription:eventDescription,
-        eventDate:convertDateTime,
-        eventTime:0,
-        eventPrice:eventPrice,
+        eventDate:convertDateTime,  
         occupancy:occupancy,
+        ticketInfo:ticketInfo,
         eventPromotionPhoto:eventPromotionPhoto, 
         eventLocationAddress:eventLocationAddress,
         eventLocationGeoCode:eventLocationGeoCode,
