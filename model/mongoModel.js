@@ -294,7 +294,8 @@ const paymentSchema = new mongoose.Schema({
 		of:mongoose.Schema.Types.Mixed
 	},
 	event:{type: mongoose.Schema.Types.ObjectId, ref: 'Event', required:true },
-	ticket: {type: mongoose.Schema.Types.ObjectId, ref: 'Ticket', required:true }
+	ticket: {type: mongoose.Schema.Types.ObjectId, ref: 'Ticket', required:true },
+	updatedAt: { type: Date, default: Date.now },
 })
 
 export const Payment = mongoose.model('Payment', paymentSchema)
@@ -302,7 +303,7 @@ export const Payment = mongoose.model('Payment', paymentSchema)
 const orderTicketSchema = mongoose.Schema({
 	createdAt: { type: Date, default: Date.now }, 
 	ticketInfo:{type:Map, of: mongoose.Schema.Types.Mixed},
-	status:{type:String, enum:["created","in-complete","completed"], default:"created"},
+	status:{type:String, enum:["created","in-complete","failed","completed","roundTripCompleted"], default:"created"},
 	otp:{type:String, required:true},
 	attempts: { type: Number, default: 0 },
 	ticket: {type: mongoose.Schema.Types.ObjectId, ref: 'Ticket' },

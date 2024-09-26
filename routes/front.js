@@ -15,6 +15,7 @@ router.route('/create-checkout-session')
 
 router.route('/ticket')
     .post(front.completeOrderTicket)
-
+router.route('/ticket/cancel')
+    .post(front.cancelOrderTicket)
  
 export default router

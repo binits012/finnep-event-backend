@@ -9,7 +9,7 @@ export class Payment {
     this.ticket = ticket;
   }
 
-  async saveToDB() {
+  async  saveToDB() {
     try {
       const payment = new model.Payment({
         paymentInfo: this.paymentInfo,
@@ -27,11 +27,7 @@ export class Payment {
 export const createPayment = async(paymentInfo, event, ticket) => {
     try {
        
-      const payment = new model.Payment({
-        paymentInfo,
-        event,
-        ticket,
-      });
+      const payment = new Payment( paymentInfo, event, ticket );
       return await payment.saveToDB();
     } catch (err) {
       error(  'Error creating payment:', err);
