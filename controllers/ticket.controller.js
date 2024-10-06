@@ -211,6 +211,7 @@ export const getTicketById = async(req,res,next) =>{
     const id = req.params.id
     try{
         const ticket = await Ticket.getTicketById(id)
+        const ticketTypeId = ticket.ticketInfo.get("ticketType")
         if(ticket === null){
             return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
                 message: 'Sorry, get ticket by id failed.', error: appText.RESOURCE_NOT_FOUND
@@ -226,11 +227,19 @@ export const getTicketById = async(req,res,next) =>{
                     active: ticket.active,
                     isRead: ticket.isRead,
                     type: ticket.type,
-                    createdAt: ticket.createdAt  
+                    createdAt: ticket.createdAt, 
+                    ticketInfo:{
+                        quantity:ticket.ticketInfo.get("quantity"),
+                        ticketType:ticket.event.ticketInfo.filter(e=>e.id===ticketTypeId).map(e=>e.name)[0],
+                        totalPrice:ticket.ticketInfo.get("totalPrice")
+                    }  
                 }
-                const page = (await fs.readFile(__dirname.replace('controllers','')+'/staticPages/ticketInfo.html','utf8')) .replace('$eventTitle',data.event.eventTitle)
+                const page = (await fs.readFile(__dirname.replace('controllers','')+'/staticPages/ticketInfo.html','utf8')) .replace('$eventTitle',data.event.eventName)
                 .replace('$ticketId', data.id).replace('$ticketFor',data.ticketFor).replace('$eventDate',data.event.eventDate).replace('$eventLocation',data.event.venue)
                 .replace('$createdAt', data.createdAt)
+                .replace('$ticketType', data.ticketInfo.ticketType)
+                .replace('$quantity', data.ticketInfo.quantity)
+                .replace('$totalPrice', data.ticketInfo.totalPrice)
                 res.type('text/html')
                 
                 res.status(consts.HTTP_STATUS_OK).send(page)   
@@ -248,16 +257,22 @@ export const getTicketById = async(req,res,next) =>{
                         })
                     }  
                     if(!res.headersSent){    
+                        
                         const data = {
                             id: ticket.id,
                             ticketFor: await getEmail(ticket.ticketFor.id),
-                            event:{id:ticket.event.id, eventName:ticket.event.eventTitle, eventDate:ticket.event.eventDate},
+                            event:{id:ticket.event.id, eventName:ticket.event.eventTitle, eventDate:ticket.event.eventDate, venue:ticket.event.eventLocationAddress},
                             isSend: ticket.isSend,
                             active: ticket.active,
                             isRead: ticket.isRead,
                             readBy: typeof ticket.readBy !== 'undefined' ? ticket.readBy.name : null,
                             type: ticket.type,
-                            createdAt: ticket.createdAt
+                            createdAt: ticket.createdAt,
+                            ticketInfo:{
+                                quantity:ticket.ticketInfo.get("quantity"),
+                                ticketType:ticket.event.ticketInfo.filter(e=>e.id===ticketTypeId).map(e=>e.name)[0],
+                                totalPrice:ticket.ticketInfo.get("totalPrice")
+                            }
                         }  
                         res.status(consts.HTTP_STATUS_OK).json({data:data})   
                     }

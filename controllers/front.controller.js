@@ -191,7 +191,7 @@ export const completeOrderTicket = async (req, res, next) => {
                     updatedAt: Date.now(),
                     ticket: ticket.id
                 });
-
+                
                 return res.status(consts.HTTP_STATUS_CREATED).json({ data: ticketData });
 
             }).catch(err => {
