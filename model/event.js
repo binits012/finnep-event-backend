@@ -1,7 +1,7 @@
  
 import * as model from '../model/mongoModel.js'
 import {error} from './logger.js'
-
+import { Ticket } from '../model/mongoModel.js'
 export class Event {
     constructor(eventTitle, eventDescription, eventDate,  
         occupancy,ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
@@ -77,5 +77,27 @@ export const updateEventById = async (id, obj) =>{
     return await model.Event.findByIdAndUpdate(id, {
         $set: obj
     }, { new: true })  
+}
+
+export const getEventsWithTicketCounts = async() =>{
+    try{ 
+        const events = await model.Event.find({}).lean()  // `.lean()` for plain JS objects instead of Mongoose models
+        const eventsWithTicketCounts = await Promise.all(
+        events.map(async (event) => {
+            const ticketsSold = await Ticket.countDocuments({ 
+            active: true,      // Count only active tickets
+            event:event._id
+            })
+
+            return {
+            ...event,
+            ticketsSold  // Add ticket count info to the event
+            }
+        }))
+
+        return eventsWithTicketCounts;
+    }catch(err){
+        throw err
+    }
 }
  

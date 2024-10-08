@@ -18,7 +18,7 @@ const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET
 export const getDataForFront = async (req, res, next) => {
     const photo = await Photo.listPhoto()
     const notification = await Notification.getAllNotification()
-    let event = await Event.getEvents()
+    let event = await Event.getEventsWithTicketCounts()
     if (event) {
         event = event.filter(e => e.active)
     }
