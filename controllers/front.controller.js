@@ -147,7 +147,7 @@ export const completeOrderTicket = async (req, res, next) => {
 
         // Check if status is already completed or max attempts reached
         if (orderTicket.status === 'completed' || orderTicket.attempts >= 1 || otp !== orderTicket.otp) {
-            return res.status(consts.HTTP_STATUS_CONFLICT).send({ error: RESOURCE_ALREADY_EXISTS });
+            return res.status(consts.HTTP_STATUS_CONFLICT).send({ error: consts.RESOURCE_ALREADY_EXISTS });
         }
 
         // Use an atomic operation to update status and prevent race conditions
@@ -162,7 +162,6 @@ export const completeOrderTicket = async (req, res, next) => {
 
         const ticketInfo = Object.fromEntries(orderTicket.ticketInfo);
         const sessionDetails = await stripe.checkout.sessions.retrieve(sessionId)
-        
         if ("paid"===sessionDetails.payment_status ) {
             // Create the ticket
             const ticket = await Ticket.createTicket(null, ticketInfo.email, ticketInfo.eventId, "normal", orderTicket.ticketInfo).catch(err => {
