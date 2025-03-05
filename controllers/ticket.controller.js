@@ -2,7 +2,7 @@
 import * as jwtToken from '../util/jwtToken.js'
 import * as consts from '../const.js'
 import * as appText from '../applicationTexts.js'
-import {error} from '../model/logger.js'
+import {error, info} from '../model/logger.js'
 import * as Event from '../model/event.js'
 import * as Ticket from '../model/ticket.js'
 import * as hash from '../util/createHash.js'  
@@ -10,7 +10,8 @@ import * as sendMail from '../util/sendMail.js'
 import * as ticketMaster from '../util/ticketMaster.js'
 import * as busboyFileUpload from '../util/busboyFileUpload.js'
 import * as  fs from 'fs/promises'
-
+import * as OrderTicket from '../model/orderTicket.js'
+import crypto from 'crypto'
 import { dirname } from 'path'
 const __dirname = dirname(import.meta.url).slice(7) 
 
@@ -33,7 +34,7 @@ export const createSingleTicket = async(req,res,next) =>{
                 })
             } 
             const event = await Event.getEventById(eventId).catch(err=>{
-                error('error', err.stack) 
+                error( err.stack) 
                 if(!res.headersSent){
                     return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
                         message: 'Sorry, single ticket creation failed.', error: appText.RESOURCE_NOT_FOUND
@@ -53,18 +54,41 @@ export const createSingleTicket = async(req,res,next) =>{
                     }else{
                         emailHash = emailCrypto[0]._id
                     }
-                    if(typeOfTicket === 'undefined' || typeOfTicket === '' || typeOfTicket === null) typeOfTicket = 'normal' 
+                    //get the ticketInfo eg price and rest of the stuff
+                    
+                    const eventPrice = event.ticketInfo.filter(e => typeOfTicket === e.id).map(e => e.price)  
+                    const tempTicketOrderObj = {
+                        eventName: event.eventTitle,
+                        eventId: eventId,
+                        price: eventPrice[0],
+                        quantity: 1,
+                        ticketType: typeOfTicket,
+                        totalPrice: eventPrice[0],
+                        email: emailHash
+                    } 
+                    //create order
+                    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+                    let otp = '';
+                    for (let i = 0; i < 10; i++) {
+                        otp += characters.charAt(crypto.randomInt(0, characters.length));
+                    }
+                    const ticketOrder = await createTicketOrder(otp, tempTicketOrderObj) 
                     // create a ticket
-                    const ticket = await Ticket.createTicket(null, emailHash,event,typeOfTicket).catch(err=>{
+                    const ticket = await Ticket.createTicket(null, emailHash,event,typeOfTicket,ticketOrder.ticketInfo).catch(err=>{
                         error('error creating ticket',err.stack)
                         throw err
                     })
                     ticketId = ticket.id
                     const emailPayload = await ticketMaster.createEmailPayload(event, ticket, ticketFor)
                     await new Promise(resolve => setTimeout(resolve, 100)) //100 mili second intentional delay
+                    await OrderTicket.updateOrderTicketById(ticketOrder.id, {
+                                        status: 'completed',
+                                        attempts:  1,
+                                        updatedAt: Date.now(),
+                                        ticket: ticketId
+                                    })
                     await sendMail.forward(emailPayload).then(async data=>{
-                        //all good let's update the ticket model once more
-                        console.log("email sent data \n", data)
+                        //all good let's update the ticket model once more 
                         const ticketData = await Ticket.updateTicketById(ticket.id, {isSend:true} )
                         return res.status(consts.HTTP_STATUS_CREATED).json({ data:ticketData })
                     }).catch(err=>{
@@ -74,7 +98,7 @@ export const createSingleTicket = async(req,res,next) =>{
                     })
                 }catch(err){ 
                     //no point keeping the ticket let's roll back 
-                    error( "created %s", ticketId + " but due to error we might throw it out. %s", err.message)
+                    error( "created %s", ticketId + " but due to error we might throw it out.", err)
                     if(ticketId) await Ticket.deleteTicketById(ticketId).catch(err=>{ 
                         //let it fail, at this point we are really not intrested with it, we did what we could
                         error('error deleting ticket id %s due to error %s', ticketId, err.stack)
@@ -118,7 +142,7 @@ export const createMultipleTicket = async(req,res,next) =>{
                 }) 
 
             }catch(err){
-                if(!res.headersSent){
+                if(!res.headersSent){ 
                     error('error', err)
                     return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
                         message: 'Sorry, something went wrong.', error: appText.INTERNAL_SERVER_ERROR
@@ -211,6 +235,7 @@ export const getTicketById = async(req,res,next) =>{
     const id = req.params.id
     try{
         const ticket = await Ticket.getTicketById(id)
+        
         const ticketTypeId = ticket.ticketInfo.get("ticketType")
         if(ticket === null){
             return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
@@ -330,7 +355,7 @@ export const ticketCheckIn = async(req, res, next) =>{
                             readBy:userId
                         }
                         await Ticket.updateTicketById(id, obj).then(data=>{
-                            logger.info('ticket %s',id + " is now updated by %s" + userId)
+                            info('ticket %s',id + " is now updated by %s" + userId)
                             res.status(consts.HTTP_STATUS_OK).json({data:data}) 
                         }) 
                           
@@ -367,3 +392,7 @@ const getEmail = async(id)=>{
     const emailObj =  await hash.readHash(id)  
     return emailObj.data
 } 
+
+const createTicketOrder = async (otp, obj) => {
+    return await OrderTicket.createOrderTicket(otp, obj)
+}

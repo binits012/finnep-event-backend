@@ -6,3 +6,4 @@ excelFiles
 dist
 yellowbridge.min.js
 package-lock.json
+.env

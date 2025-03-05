@@ -106,12 +106,12 @@ export const createTicketViaFile = async(req) =>{
             fileSize: 20*1024*1024  //max 20mb size
         } })
         bb.on('error', err=>{ console.log(err); callback(false, true)}) 
-        bb.on('file', async (name,file,info) =>{
-            info(  "busboy receiving excel starts at "+ Date.now())
+        bb.on('file', async (name,file,info) =>{ 
             const { filename, encoding, mimeType } = info
             console.log(info)
             if(filename.length > 0){
                 if(mimeType != 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'  ){ 
+                     
                     reject(false)
                     return
                 }
