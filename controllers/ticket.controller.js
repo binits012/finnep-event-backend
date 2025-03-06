@@ -299,6 +299,7 @@ export const getTicketById = async(req,res,next) =>{
                             readBy: typeof ticket.readBy !== 'undefined' ? ticket.readBy.name : null,
                             type: ticket.type,
                             createdAt: ticket.createdAt,
+                            ticketCode: ticket?.otp,
                             ticketInfo:{
                                 quantity:ticket.ticketInfo.get("quantity"),
                                 ticketType:ticket.event.ticketInfo.filter(e=>e.id===ticketTypeId).map(e=>e.name)[0],
