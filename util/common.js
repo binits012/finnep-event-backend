@@ -133,7 +133,7 @@ export  const generateQRCode = async(ticketId) =>{
         }
     }
     return await new Promise((resolve, reject)=>{
-        QRCode.toDataURL(process.env.FQDN+'/api/ticket/'+ticketId, opts, function (err, url) {
+        QRCode.toDataURL(ticketId, opts, function (err, url) {
              
             if(err) reject(err)
             resolve(url)
@@ -171,11 +171,13 @@ export  const generateICS = async(event, ticketId)=>{
 
 }
 
-export  const loadEmailTemplate = async (fileLocation, eventTitle,eventPromotionalPhoto, qrCode) => {
+export  const loadEmailTemplate = async (fileLocation, eventTitle,eventPromotionalPhoto, qrCode, otp) => {
+    console.log("=====>", otp)
     const emailData = (await fs.readFile(fileLocation,'utf8')).replace('$eventTitle',eventTitle).replace('$eventTitle',eventTitle)
     .replace('$eventTitle',eventTitle)
     .replace('$eventPromotionalPhoto',eventPromotionalPhoto)
     .replace('$qrcodeData',qrCode) 
+    .replace('$ticketCode',otp) 
     return emailData
   }
  

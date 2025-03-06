@@ -24,7 +24,7 @@ export const getDataForFront = async (req, res, next) => {
     }
     const setting = await Setting.getSetting()
     const data = {
-        photo: photo,
+        photo: photo?.filter(e=>e.publish),
         notification: notification,
         event: event,
         setting: setting
@@ -164,7 +164,8 @@ export const completeOrderTicket = async (req, res, next) => {
         const sessionDetails = await stripe.checkout.sessions.retrieve(sessionId)
         if ("paid"===sessionDetails.payment_status ) {
             // Create the ticket
-            const ticket = await Ticket.createTicket(null, ticketInfo.email, ticketInfo.eventId, "normal", orderTicket.ticketInfo).catch(err => {
+            const ticket = await Ticket.createTicket(null, ticketInfo.email, ticketInfo.eventId, ticketInfo?.ticketType , 
+                orderTicket?.ticketInfo, orderTicket?.otp).catch(err => {
                 error('error creating ticket', err.stack);
                 throw err;
             });
@@ -175,7 +176,7 @@ export const completeOrderTicket = async (req, res, next) => {
             const emailCrypto = await hash.readHash(ticketInfo.email);
             const ticketFor = emailCrypto.data;
             const event = await Event.getEventById(ticketInfo.eventId);
-            const emailPayload = await ticketMaster.createEmailPayload(event, ticket, ticketFor);
+            const emailPayload = await ticketMaster.createEmailPayload(event, ticket, ticketFor, orderTicket?.otp);
 
             await new Promise(resolve => setTimeout(resolve, 100)); // intentional delay
 

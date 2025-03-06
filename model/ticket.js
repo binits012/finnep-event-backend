@@ -2,12 +2,13 @@ import * as model from '../model/mongoModel.js'
 import {error} from '../model/logger.js'
 
 export class Ticket{
-    constructor(qrCode, ticketFor, event, type, ticketInfo) {
+    constructor(qrCode, ticketFor, event, type, ticketInfo, otp) {
         this.qrCode = qrCode
         this.ticketFor = ticketFor,
         this.event = event
         this.type = type
-        this.ticketInfo = ticketInfo
+        this.ticketInfo = ticketInfo,
+        this.otp = otp
     }
 
     async saveToDB(){
@@ -17,7 +18,8 @@ export class Ticket{
                 ticketFor: this.ticketFor,
                 event: this.event,
                 type: this.type,
-                ticketInfo:this.ticketInfo
+                ticketInfo:this.ticketInfo,
+                otp:this.otp
             })
             return await ticket.save()
         }catch(err){
@@ -27,9 +29,9 @@ export class Ticket{
     }
 }
 
-export const createTicket = async(qrCode, ticketFor, event, type,ticketInfo) =>{
+export const createTicket = async(qrCode, ticketFor, event, type,ticketInfo, otp) =>{
           
-    const ticket = new Ticket(qrCode, ticketFor, event, type,ticketInfo)
+    const ticket = new Ticket(qrCode, ticketFor, event, type,ticketInfo, otp)
     return await ticket.saveToDB()
 }
 
@@ -48,7 +50,7 @@ export const deleteTicketById = async(id) =>{
 }
 
 export const getAllTicketByEventId = async(eventId) =>{  
-    return await model.Ticket.find().populate({path:'event', select: 'id', match:{_id:eventId}}).populate('ticketFor').select('-qrCode -ics').exec()
+    return await model.Ticket.find().populate({path:'event', select: 'id ticketInfo', match:{_id:eventId}}).populate('ticketFor').select('-qrCode -ics').exec()
 }
 
 export const getAllTickets = async() =>{

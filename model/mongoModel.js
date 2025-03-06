@@ -263,7 +263,8 @@ const ticketSchema = new mongoose.Schema({
 	readAt:{ type: Date },
 	type:{type:String, default:'normal'},
 	ticketInfo:{type:Map, of: mongoose.Schema.Types.Mixed},
-	validUntil:{type:Date}
+	validUntil:{type:Date},
+	otp:{type:String, required:true}
 })
 export const Ticket = new mongoose.model('Ticket',ticketSchema)
 

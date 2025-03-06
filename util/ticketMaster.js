@@ -6,19 +6,18 @@ dotenv.config()
 import { dirname } from 'path'
 const __dirname = dirname(import.meta.url).slice(7)
 
-export const createEmailPayload = async (event,ticketInfo, ticketFor, type) =>{
+export const createEmailPayload = async (event,ticketInfo, ticketFor, otp) =>{
     try{
         const ticketId = ticketInfo.id
         const icsData = await generateICS(event, ticketId) 
         const qrData = await generateQRCode(ticketId)
         const updateObj = {
             qrCode:qrData,
-            ics:icsData,
-            type:type
+            ics:icsData
         }
         await Ticket.updateTicketById(ticketId,updateObj) 
         const fileLocation = __dirname.replace('util', '') +'/emailTemplates/ticket_template.html'
-        const loadedData = await  loadEmailTemplate(fileLocation, event.eventTitle, event.eventPromotionPhoto, qrData)
+        const loadedData = await  loadEmailTemplate(fileLocation, event.eventTitle, event.eventPromotionPhoto, qrData, otp)
         const message = {
             from:process.env.EMAIL_USERNAME,
             to:ticketFor,

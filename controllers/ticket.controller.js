@@ -74,12 +74,13 @@ export const createSingleTicket = async(req,res,next) =>{
                     }
                     const ticketOrder = await createTicketOrder(otp, tempTicketOrderObj) 
                     // create a ticket
-                    const ticket = await Ticket.createTicket(null, emailHash,event,typeOfTicket,ticketOrder.ticketInfo).catch(err=>{
+                    const ticket = await Ticket.createTicket(null, emailHash,event,typeOfTicket,ticketOrder.ticketInfo, otp).catch(err=>{
                         error('error creating ticket',err.stack)
                         throw err
                     })
                     ticketId = ticket.id
-                    const emailPayload = await ticketMaster.createEmailPayload(event, ticket, ticketFor)
+                    console.log("otp ===>",otp)
+                    const emailPayload = await ticketMaster.createEmailPayload(event, ticket, ticketFor, otp)
                     await new Promise(resolve => setTimeout(resolve, 100)) //100 mili second intentional delay
                     await OrderTicket.updateOrderTicketById(ticketOrder.id, {
                                         status: 'completed',
@@ -186,12 +187,13 @@ export const getAllTicketByEventId = async(req,res,next) =>{
                         // therefore filter out the db response with given event Id
                          
                         data = data.filter(e=>e.event !=null && e.event.id===eventId)
-
+                         
                         //email is still in encrypted state
                         // decrypt them 
-                         
                         data = data.map(async e=>{
-                            const email= await  getEmail(e.ticketFor.id)  
+                            console.log(e?.ticketInfo?.get("price"))
+                            const email= await  getEmail(e.ticketFor.id)   
+                            const ticketType = e?.event?.ticketInfo.filter(el =>e.type === el.id)?.map(el=>el.name)
                             const data = {
                                 id: e.id,
                                 ticketFor: email,
@@ -199,10 +201,13 @@ export const getAllTicketByEventId = async(req,res,next) =>{
                                 isSend:e.isSend,
                                 active: e.active,
                                 isRead: e.isRead,
-                                type: e.type,
+                                type: ticketType.length == 0 ? 'normal' : ticketType[0],
+                                ticketCode:e.otp,
+                                quantity:e?.ticketInfo?.get("quantity"),
+                                price:e?.ticketInfo?.get("price"),
+                                totalPrice: e?.ticketInfo?.get("totalPrice"),
                                 createdAt: e.createdAt
-                            }
-                            
+                            } 
                             return data
                         }) 
                         const tempData = new Array()

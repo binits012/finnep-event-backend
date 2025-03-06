@@ -122,6 +122,7 @@ export const updatePhotoById = async (req, res, next) => {
     const position = req.body.position
     const publish = req.body.publish
     const photoType = req.body.photoType
+ 
 
     await jwtToken.verifyJWT(token, async (err, data) => {
         if (err || data === null) { 

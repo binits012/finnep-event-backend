@@ -33,6 +33,7 @@ router.route('/photo')
     .get(api.getPhoto)
     .patch(api.updatePhotoById)
 router.route('/photo/:id')
+    .patch(api.updatePhotoById)
     .delete(api.deletePhotoById)
 
  
