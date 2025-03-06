@@ -43,7 +43,7 @@ export const formateDateWithHash = async (date) =>{
 }
 
 export const convertDateTimeWithTimeZone = async (eventDate) =>{ 
-    return  moment(eventDate).tz(process.env.TIME_ZONE).format('YYYY-MM-DDTHH:mm:ss')
+    return  moment(eventDate).tz('UTC').format('YYYY-MM-DDTHH:mm:ss')
 }
 //redis-client
 export const getCacheByKey = async(redisClient, key) =>{ 
