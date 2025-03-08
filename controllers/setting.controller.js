@@ -131,8 +131,7 @@ export const updateSettingById = async(req,res,next)=>{
                     contactInfo: contactInfo,
                     socialMedia: socialMedia,
                     otherInfo:otherInfo
-                }
-                console.log(updateObj)
+                } 
                 await Setting.updateSettingById(id, updateObj).then(data =>{
                     return res.status(consts.HTTP_STATUS_OK).json({ data: data })
                 }).catch(err=>{

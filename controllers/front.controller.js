@@ -213,8 +213,7 @@ export const cancelOrderTicket = async (req, res, next) => {
     const orderId = req.body.orderId
     const otp = req.body.otp
     const sessionId = req.body.sessionId
-    const sessionDetails = await stripe.checkout.sessions.retrieve(sessionId)
-    console.log(sessionDetails)
+    const sessionDetails = await stripe.checkout.sessions.retrieve(sessionId) 
     if (orderId && otp && sessionDetails) {
         //let's update the orderTicket status
         if (sessionDetails.payment_status === "unpaid") {

@@ -167,8 +167,7 @@ export const getStaffUsers = async (req, res, next) => {
                 if (consts.ROLE_SUPER_ADMIN === userRoleFromToken ||
                     consts.ROLE_ADMIN === userRoleFromToken) {
                     //get list of admin Users 
-                    await User.getUsersByRole(consts.ROLE_STAFF).then(data => {
-                        console.log(data)
+                    await User.getUsersByRole(consts.ROLE_STAFF).then(data => { 
                         res.status(consts.HTTP_STATUS_OK).json({ data: data })
                     }).catch(e => {
                         error('error',e.stack)

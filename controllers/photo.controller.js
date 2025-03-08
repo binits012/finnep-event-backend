@@ -166,8 +166,7 @@ export const deletePhotoById = async (req, res, next) => {
                     message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
                 })
             }
-            const myPhoto = await Photo.getPhotoById(photoId)
-            console.log(myPhoto)
+            const myPhoto = await Photo.getPhotoById(photoId) 
             if (myPhoto !== null) {
                 await Photo.deletePhotoById(photoId).then(data => {
                     /*

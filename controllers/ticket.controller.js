@@ -78,8 +78,7 @@ export const createSingleTicket = async(req,res,next) =>{
                         error('error creating ticket',err.stack)
                         throw err
                     })
-                    ticketId = ticket.id
-                    console.log("otp ===>",otp)
+                    ticketId = ticket.id 
                     const emailPayload = await ticketMaster.createEmailPayload(event, ticket, ticketFor, otp)
                     await new Promise(resolve => setTimeout(resolve, 100)) //100 mili second intentional delay
                     await OrderTicket.updateOrderTicketById(ticketOrder.id, {
@@ -190,8 +189,7 @@ export const getAllTicketByEventId = async(req,res,next) =>{
                          
                         //email is still in encrypted state
                         // decrypt them 
-                        data = data.map(async e=>{
-                            console.log(e?.ticketInfo?.get("price"))
+                        data = data.map(async e=>{ 
                             const email= await  getEmail(e.ticketFor.id)   
                             const ticketType = e?.event?.ticketInfo.filter(el =>e.type === el.id)?.map(el=>el.name)
                             const data = {
@@ -339,8 +337,7 @@ export const ticketCheckIn = async(req, res, next) =>{
         }
 
         //check ticket info
-        const emailCrypto = await hash.getCryptoByEmail(ticketFor)
-        console.log(emailCrypto[0]._id.toString(), '=', ticket.ticketFor.id, ticket.event.id,'=', eventId )
+        const emailCrypto = await hash.getCryptoByEmail(ticketFor) 
         if(emailCrypto[0]._id.toString() === ticket.ticketFor.id && ticket.event.id === eventId){
 
             await jwtToken.verifyJWT(token, async (err, data) => {

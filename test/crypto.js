@@ -3,8 +3,7 @@ require('../model/dbConnect')
 
 
 const getCryptoByEmail = async(email) =>{
-    await Crypto.getCryptoByEmail(email).then(data=>{
-        console.log(data)
+    await Crypto.getCryptoByEmail(email).then(data=>{ 
     })
 }
 
