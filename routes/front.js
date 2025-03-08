@@ -9,7 +9,8 @@ const router = express.Router()
 import * as front  from '../controllers/front.controller.js'
 router.route('/')
     .get(front.getDataForFront)
-
+router.route('/event/:id')
+    .get(front.getEventById)
 router.route('/create-checkout-session')
     .post(front.createCheckoutSession)
 

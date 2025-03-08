@@ -151,6 +151,9 @@ const eventSchema = new mongoose.Schema({
 	eventName:{type:String,  unique:true},
 	videoUrl:{type:String},
 	status:{type:String, enum:['up-coming', 'on-going', 'completed'], default:'up-coming' },
+	otherInfo:{
+		type: mongoose.Schema.Types.Mixed
+	},
 	createdAt: { type: Date, default: Date.now }
 })
 

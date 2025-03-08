@@ -1,11 +1,10 @@
- 
 import * as model from '../model/mongoModel.js'
 import {error} from './logger.js'
 import { Ticket } from '../model/mongoModel.js'
 export class Event {
     constructor(eventTitle, eventDescription, eventDate,  
         occupancy,ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
-        socialMedia, lang, position, active, eventName, videoUrl) {
+        socialMedia, lang, position, active, eventName, videoUrl, otherInfo) {
         this.eventTitle = eventTitle
         this.eventDescription = eventDescription
         this.eventDate = eventDate 
@@ -22,6 +21,7 @@ export class Event {
         this.active = active
         this.eventName = eventName
         this.videoUrl = videoUrl
+        this.otherInfo = otherInfo
 
     }
     async saveToDB() {
@@ -43,7 +43,8 @@ export class Event {
                 position: this.position,
                 active: this.active,
                 eventName: this.eventName,
-                videoUrl: this.videoUrl
+                videoUrl: this.videoUrl,
+                otherInfo: this.otherInfo
             })
             return await event.save()
         } catch (err) {
@@ -56,11 +57,11 @@ export class Event {
 
 export const createEvent = async (eventTitle, eventDescription, eventDate,  
     occupancy, ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
-    socialMedia, lang, position, active, eventName, videoUrl) =>{
+    socialMedia, lang, position, active, eventName, videoUrl, otherInfo) =>{
         
     const event = new Event(eventTitle, eventDescription, eventDate,  
         occupancy, ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
-        socialMedia, lang, position, active, eventName, videoUrl)
+        socialMedia, lang, position, active, eventName, videoUrl, otherInfo)
     return await event.saveToDB()
 }
 
@@ -81,16 +82,17 @@ export const updateEventById = async (id, obj) =>{
 
 export const getEventsWithTicketCounts = async() =>{
     try{ 
-        const events = await model.Event.find({}).lean()  // `.lean()` for plain JS objects instead of Mongoose models
+        const events = await model.Event.find({}).sort({'position':1}).lean()  // `.lean()` for plain JS objects instead of Mongoose models
         const eventsWithTicketCounts = await Promise.all(
         events.map(async (event) => {
             const ticketsSold = await Ticket.countDocuments({ 
             active: true,      // Count only active tickets
             event:event._id
             })
-
+            // Remove unwanted fields such as "otherInfo" -> destructuring 
+            const { otherInfo, ...cleanedEvent } = event;
             return {
-            ...event,
+            ...cleanedEvent,
             ticketsSold  // Add ticket count info to the event
             }
         }))

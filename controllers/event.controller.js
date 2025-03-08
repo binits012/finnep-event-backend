@@ -141,6 +141,7 @@ export const updateEventById = async (req,res,next) =>{
     const eventName = req.body.eventName
     const videoUrl = req.body.videoUrl
     const convertDateTime = await commonUtil.convertDateTimeWithTimeZone(eventDate)
+    const otherInfo = req.body.otherInfo
     //const timeInMinutes =  commonUtil.timeInMinutes(eventTime)
     if(lang === 'undefined' || lang === ""){
         lang = "en"
@@ -160,7 +161,8 @@ export const updateEventById = async (req,res,next) =>{
         position:position,
         active:active,
         eventName:eventName,
-        videoUrl:videoUrl
+        videoUrl:videoUrl,
+        otherInfo:otherInfo
 
     }
     await jwtToken.verifyJWT(token, async (err, data) => {

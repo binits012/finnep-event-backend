@@ -80,6 +80,7 @@ export const createSingleTicket = async(req,res,next) =>{
                     })
                     ticketId = ticket.id 
                     const emailPayload = await ticketMaster.createEmailPayload(event, ticket, ticketFor, otp)
+                     
                     await new Promise(resolve => setTimeout(resolve, 100)) //100 mili second intentional delay
                     await OrderTicket.updateOrderTicketById(ticketOrder.id, {
                                         status: 'completed',

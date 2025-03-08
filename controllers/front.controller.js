@@ -24,14 +24,34 @@ export const getDataForFront = async (req, res, next) => {
     }
     const setting = await Setting.getSetting()
     const data = {
-        photo: photo?.filter(e=>e.publish),
+        photo: photo?.filter(e => e.publish),
         notification: notification,
         event: event,
         setting: setting
     }
     res.status(consts.HTTP_STATUS_OK).json(data)
 }
+export const getEventById = async (req, res, next) => {
+    const id = req.params.id
+    try {
+        const event = await Event.getEventById(id)
+        if (event) {
+            const { otherInfo, ...restOfEvent } = event?._doc
+            const data = {
+                event: restOfEvent,
+            }
+            return res.status(consts.HTTP_STATUS_OK).json(data)
+        } else {
+            return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).send({ error: RESOURCE_NOT_FOUND });
+        }
 
+    } catch (err) {
+        if (!res.headersSent) {
+            return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).send({ error: INTERNAL_SERVER_ERROR });
+        }
+    }
+
+}
 const createTicketOrder = async (otp, obj) => {
     return await OrderTicket.createOrderTicket(otp, obj)
 }
@@ -162,13 +182,13 @@ export const completeOrderTicket = async (req, res, next) => {
 
         const ticketInfo = Object.fromEntries(orderTicket.ticketInfo);
         const sessionDetails = await stripe.checkout.sessions.retrieve(sessionId)
-        if ("paid"===sessionDetails.payment_status ) {
+        if ("paid" === sessionDetails.payment_status) {
             // Create the ticket
-            const ticket = await Ticket.createTicket(null, ticketInfo.email, ticketInfo.eventId, ticketInfo?.ticketType , 
+            const ticket = await Ticket.createTicket(null, ticketInfo.email, ticketInfo.eventId, ticketInfo?.ticketType,
                 orderTicket?.ticketInfo, orderTicket?.otp).catch(err => {
-                error('error creating ticket', err.stack);
-                throw err;
-            });
+                    error('error creating ticket', err.stack);
+                    throw err;
+                });
 
             ticketId = ticket.id;
 
@@ -177,9 +197,7 @@ export const completeOrderTicket = async (req, res, next) => {
             const ticketFor = emailCrypto.data;
             const event = await Event.getEventById(ticketInfo.eventId);
             const emailPayload = await ticketMaster.createEmailPayload(event, ticket, ticketFor, orderTicket?.otp);
-
             await new Promise(resolve => setTimeout(resolve, 100)); // intentional delay
-
             await sendMail.forward(emailPayload).then(async data => {
                 // Update the ticket to mark as sent
                 const ticketData = await Ticket.updateTicketById(ticket.id, { isSend: true });
@@ -191,7 +209,7 @@ export const completeOrderTicket = async (req, res, next) => {
                     updatedAt: Date.now(),
                     ticket: ticket.id
                 });
-                
+
                 return res.status(consts.HTTP_STATUS_CREATED).json({ data: ticketData });
 
             }).catch(err => {
@@ -199,8 +217,6 @@ export const completeOrderTicket = async (req, res, next) => {
                 throw err;
             });
         }
-
-
     } catch (err) {
         console.log(err);
         if (!res.headersSent) {
@@ -213,7 +229,7 @@ export const cancelOrderTicket = async (req, res, next) => {
     const orderId = req.body.orderId
     const otp = req.body.otp
     const sessionId = req.body.sessionId
-    const sessionDetails = await stripe.checkout.sessions.retrieve(sessionId) 
+    const sessionDetails = await stripe.checkout.sessions.retrieve(sessionId)
     if (orderId && otp && sessionDetails) {
         //let's update the orderTicket status
         if (sessionDetails.payment_status === "unpaid") {

@@ -16,8 +16,18 @@ export const createEmailPayload = async (event,ticketInfo, ticketFor, otp) =>{
             ics:icsData
         }
         await Ticket.updateTicketById(ticketId,updateObj) 
-        const fileLocation = __dirname.replace('util', '') +'/emailTemplates/ticket_template.html'
-        const loadedData = await  loadEmailTemplate(fileLocation, event.eventTitle, event.eventPromotionPhoto, qrData, otp)
+        // now we have email templates on the event itself, let's check whether it is configured or not and based on that we do what is needed to do 
+        const emailTemplate = event?.otherInfo?.emailTemplate
+        let loadedData = null
+        if(emailTemplate ){
+            loadedData = emailTemplate.replace('$eventTitle',event.eventTitle)
+            .replace('$eventPromotionalPhoto',event.eventPromotionalPhoto)
+            .replace('$qrcodeData', qrData) 
+            .replace('$ticketCode',otp)
+        }else{
+            const fileLocation = __dirname.replace('util', '') +'/emailTemplates/ticket_template.html'
+            loadedData = await  loadEmailTemplate(fileLocation, event.eventTitle, event.eventPromotionPhoto, qrData, otp)
+        }
         const message = {
             from:process.env.EMAIL_USERNAME,
             to:ticketFor,
