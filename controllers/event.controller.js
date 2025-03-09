@@ -24,6 +24,8 @@ export const createEvent = async (req, res, next) =>{
     const active = req.body.active
     const eventName=req.body.eventName
     const videoUrl = req.body.videoUrl
+    const otherInfo = req.body.otherInfo
+
     if(lang === 'undefined' || lang === ""){
         lang = "en"
     }   
@@ -45,7 +47,7 @@ export const createEvent = async (req, res, next) =>{
                 } 
                 await Event.createEvent(eventTitle, eventDescription, eventDate, 
                     occupancy, ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
-                    socialMedia, lang, position, active, eventName, videoUrl).then(data=>{
+                    socialMedia, lang, position, active, eventName, videoUrl, otherInfo).then(data=>{
                     return res.status(consts.HTTP_STATUS_CREATED).json({ data: data })
                 }).catch(err=>{
                     error("error", err.stack)
