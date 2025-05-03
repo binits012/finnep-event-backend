@@ -151,7 +151,7 @@ export const updateEventById = async (req,res,next) =>{
     const eventObj = {
         eventTitle: eventTitle,
         eventDescription:eventDescription,
-        eventDate:convertDateTime,  
+        eventDate:eventDate,  
         occupancy:occupancy,
         ticketInfo:ticketInfo,
         eventPromotionPhoto:eventPromotionPhoto, 

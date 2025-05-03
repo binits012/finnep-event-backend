@@ -7,3 +7,5 @@ dist
 yellowbridge.min.js
 package-lock.json
 .env
+.DS_Store
+ 
