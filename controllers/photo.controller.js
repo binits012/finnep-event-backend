@@ -88,14 +88,14 @@ export const getAllPhotos = async (req, res, next) => {
                         /https?:\/\/[^.]+\.s3\.[^.]+\.amazonaws\.com/,
                         process.env.CLOUDFRONT_URL
                     );
-                    
+                    const encodedCloudFrontUrl = encodeURI(cloudFrontUrl);
                     const policy = {
                         Statement: [
                           {
-                            Resource: cloudFrontUrl,
+                            Resource: encodedCloudFrontUrl,
                             Condition: {
                               DateLessThan: {
-                                "AWS:EpochTime": Math.floor(Date.now() / 1000) + (24 * 60 * 60) // time in seconds
+                                "AWS:EpochTime": Math.floor(Date.now() / 1000) + (30*24 * 60 * 60) // time in seconds
                               },
                             },
                           },
@@ -194,13 +194,14 @@ export const updatePhotoById = async (req, res, next) => {
                         /https?:\/\/[^.]+\.s3\.[^.]+\.amazonaws\.com/,
                         process.env.CLOUDFRONT_URL
                     )
+                    const encodedCloudFrontUrl = encodeURI(photoLink);
                     const policy = {
                         Statement: [
                           {
-                            Resource: photoLink,
+                            Resource: encodedCloudFrontUrl,
                             Condition: {
                               DateLessThan: {
-                                "AWS:EpochTime": Math.floor(Date.now() / 1000) + (24 * 60 * 60) // time in seconds
+                                "AWS:EpochTime": Math.floor(Date.now() / 1000) + (30*24 * 60 * 60) // time in seconds
                               },
                             },
                           },

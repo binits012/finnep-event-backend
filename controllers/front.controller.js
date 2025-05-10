@@ -14,6 +14,9 @@ import * as sendMail from '../util/sendMail.js'
 import Stripe from 'stripe'
 const stripe = new Stripe(process.env.STRIPE_KEY)
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET
+import { getSignedUrl } from "@aws-sdk/cloudfront-signer"; 
+const privateKey = process.env.CLOUDFRONT_PRIVATE_KEY;
+const keyPairId = process.env.CLOUDFRONT_KEY_PAIR;
 
 export const getDataForFront = async (req, res, next) => {
     const photo = await Photo.listPhoto()
@@ -37,15 +40,51 @@ export const getEventById = async (req, res, next) => {
         const event = await Event.getEventById(id)
         if (event) {
             const { otherInfo, ...restOfEvent } = event?._doc
+            
+
+            const photosWithCloudFrontUrls = restOfEvent?.eventPhoto?.map(photo => {
+                // Convert S3 URL to CloudFront URL first
+                const cloudFrontUrl = photo.replace(
+                    /https?:\/\/[^.]+\.s3\.[^.]+\.amazonaws\.com/,
+                    process.env.CLOUDFRONT_URL
+                );
+                // Encode spaces and special characters in the URL
+                const encodedCloudFrontUrl = encodeURI(cloudFrontUrl);
+                
+                const policy = {
+                    Statement: [
+                      {
+                        Resource: encodedCloudFrontUrl,
+                        Condition: {
+                          DateLessThan: {
+                            "AWS:EpochTime": Math.floor(Date.now() / 1000) + (30*24 * 60 * 60) // time in seconds
+                          },
+                        },
+                      },
+                    ],
+                  };
+                const policyString = JSON.stringify(policy);
+                // Create signed CloudFront URL
+                const signedUrl = getSignedUrl({  
+                    keyPairId, 
+                    privateKey,
+                    policy:policyString
+                }); 
+                return signedUrl
+            });
             const data = {
                 event: restOfEvent,
             }
+            data.event.eventPhoto = photosWithCloudFrontUrls
+
+            
             return res.status(consts.HTTP_STATUS_OK).json(data)
         } else {
             return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).send({ error: RESOURCE_NOT_FOUND });
         }
 
     } catch (err) {
+        error(err)
         if (!res.headersSent) {
             return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).send({ error: INTERNAL_SERVER_ERROR });
         }
