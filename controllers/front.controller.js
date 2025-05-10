@@ -20,6 +20,36 @@ const keyPairId = process.env.CLOUDFRONT_KEY_PAIR;
 
 export const getDataForFront = async (req, res, next) => {
     const photo = await Photo.listPhoto()
+    const photosWithCloudFrontUrls = photo.map(el => {
+        // Convert S3 URL to CloudFront URL first
+        const cloudFrontUrl = el.photoLink.replace(
+            /https?:\/\/[^.]+\.s3\.[^.]+\.amazonaws\.com/,
+            process.env.CLOUDFRONT_URL
+        );
+        const encodedCloudFrontUrl = encodeURI(cloudFrontUrl);
+        const policy = {
+            Statement: [
+              {
+                Resource: encodedCloudFrontUrl,
+                Condition: {
+                  DateLessThan: {
+                    "AWS:EpochTime": Math.floor(Date.now() / 1000) + (30*24 * 60 * 60) // time in seconds
+                  },
+                },
+              },
+            ],
+          };
+        const policyString = JSON.stringify(policy);
+        // Create signed CloudFront URL
+        const signedUrl = getSignedUrl({  
+            keyPairId, 
+            privateKey,
+            policy:policyString
+        });
+        
+        el.photoLink = signedUrl
+        return el
+    });
     const notification = await Notification.getAllNotification()
     let event = await Event.getEventsWithTicketCounts()
     if (event) {
@@ -27,7 +57,7 @@ export const getDataForFront = async (req, res, next) => {
     }
     const setting = await Setting.getSetting()
     const data = {
-        photo: photo?.filter(e => e.publish),
+        photo: photosWithCloudFrontUrls?.filter(e => e.publish),
         notification: notification,
         event: event,
         setting: setting
