@@ -3,11 +3,12 @@ import {error} from '../model/logger.js'
 import * as appText from'../applicationTexts.js'
 import * as consts from'../const.js'
 import * as Photo from'../model/photo.js'
-import * as PhotoType from'../model/photoType.js'
-import * as fs from 'fs/promises'
+import * as PhotoType from'../model/photoType.js' 
 import * as crypto from 'crypto'
 import {uploadToS3Bucket} from '../util/aws.js'
-
+import { getSignedUrl } from "@aws-sdk/cloudfront-signer"; 
+const privateKey = process.env.CLOUDFRONT_PRIVATE_KEY;
+const keyPairId = process.env.CLOUDFRONT_KEY_PAIR;
 export const createPhoto = async (req, res, next) => {
     const token = req.headers.authorization
     const position = req.body.position
@@ -38,8 +39,16 @@ export const createPhoto = async (req, res, next) => {
                         message: 'Sorry, something went wrong', error: err
                     })
                 })
+                //dateLessThan, dateGreaterThan, url, keyPairId, privateKey, ipAddress, policy, passphrase, 
+                const signedUrl = getSignedUrl({dateLessThan: Math.floor(Date.now() / 1000) + 3600*24, // Expires in 24 hour,
+                    dateGreaterThan:Date.now(),
+                    url:  process.env.CLOUDFRONT_URL+"/"+imageName,
+                    keyPairId, 
+                    privateKey
+                });
                 const linkToFile = "https://"+process.env.BUCKET_NAME+".s3."+process.env.BUCKET_REGION+".amazonaws.com/" +imageName
                 await Photo.uploadPhoto(linkToFile, true, position, photoType).then(data => { 
+                    data.photoLink = signedUrl
                     return res.status(consts.HTTP_STATUS_CREATED).json({ data: data })
                 }).catch(err => {
                     logger.error(err) 
@@ -73,13 +82,43 @@ export const getAllPhotos = async (req, res, next) => {
             }
             const photoType = await PhotoType.getPhotoTypes()
             await Photo.listPhoto().then(obj => {
-                const data= {
-                    photoType:photoType,
-                    photo:obj
+                const photosWithCloudFrontUrls = obj.map(photo => {
+                    // Convert S3 URL to CloudFront URL first
+                    const cloudFrontUrl = photo.photoLink.replace(
+                        /https?:\/\/[^.]+\.s3\.[^.]+\.amazonaws\.com/,
+                        process.env.CLOUDFRONT_URL
+                    );
+                    
+                    const policy = {
+                        Statement: [
+                          {
+                            Resource: cloudFrontUrl,
+                            Condition: {
+                              DateLessThan: {
+                                "AWS:EpochTime": Math.floor(Date.now() / 1000) + (24 * 60 * 60) // time in seconds
+                              },
+                            },
+                          },
+                        ],
+                      };
+                    const policyString = JSON.stringify(policy);
+                    // Create signed CloudFront URL
+                    const signedUrl = getSignedUrl({  
+                        keyPairId, 
+                        privateKey,
+                        policy:policyString
+                    });
+                    
+                    photo.photoLink = signedUrl
+                    return photo
+                });
+                
+                const data = {
+                    photoType: photoType,
+                    photo: photosWithCloudFrontUrls
                 }
                 return res.status(consts.HTTP_STATUS_OK).json(data)
-            }).catch(err => {
-                logger.error(err) 
+            }).catch(err => { 
                 return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
                     message: 'Sorry, something went wrong', error: err
                 })
@@ -105,6 +144,17 @@ export const getPhotoById = async (req, res, next) => {
                 })
             }
             await Photo.getPhotoById(photoId).then(data => {
+                const photoLink = data.photoLink.replace(
+                    /https?:\/\/[^.]+\.s3\.[^.]+\.amazonaws\.com/,
+                    process.env.CLOUDFRONT_URL
+                )
+                const signedUrl = getSignedUrl({
+                    url:  photoLink,
+                    keyPairId,
+                    dateLessThan: Math.floor(Date.now() / 1000) + 3600*24, // Expires in 24 hour,
+                    privateKey
+                });
+                data.photoLink = signedUrl
                 return res.status(consts.HTTP_STATUS_OK).json({ data: data })
             }).catch(err => {
                 logger.error(err)
@@ -139,6 +189,31 @@ export const updatePhotoById = async (req, res, next) => {
             const myPhoto = await Photo.getPhotoById(photoId)
             if (myPhoto !== null) {
                 await Photo.updatePhotoById(photoId, position, publish, photoType).then(data => { 
+
+                    const photoLink = data.photoLink.replace(
+                        /https?:\/\/[^.]+\.s3\.[^.]+\.amazonaws\.com/,
+                        process.env.CLOUDFRONT_URL
+                    )
+                    const policy = {
+                        Statement: [
+                          {
+                            Resource: photoLink,
+                            Condition: {
+                              DateLessThan: {
+                                "AWS:EpochTime": Math.floor(Date.now() / 1000) + (24 * 60 * 60) // time in seconds
+                              },
+                            },
+                          },
+                        ],
+                      }; 
+                    const policyString = JSON.stringify(policy);
+                    // Create signed CloudFront URL
+                    const signedUrl = getSignedUrl({  
+                        keyPairId, 
+                        privateKey,
+                        policy:policyString
+                    });
+                    data.photoLink = signedUrl  
                     return res.status(consts.HTTP_STATUS_OK).json({ data: data })
                 }).catch(err => {
                     logger.error(err) 
@@ -169,10 +244,17 @@ export const deletePhotoById = async (req, res, next) => {
             const myPhoto = await Photo.getPhotoById(photoId) 
             if (myPhoto !== null) {
                 await Photo.deletePhotoById(photoId).then(data => {
-                    /*
-                    const filePath = __dirname.replace('controllers', 'public/') + data.photoLink
-                    fs.unlink(filePath) 
-                    */
+                    const photoLink = data.photoLink.replace(
+                        /https?:\/\/[^.]+\.s3\.[^.]+\.amazonaws\.com/,
+                        process.env.CLOUDFRONT_URL
+                    )
+                    const signedUrl = getSignedUrl({
+                        url:  photoLink,
+                        keyPairId,
+                        dateLessThan: Math.floor(Date.now() / 1000) + 3600*24, // Expires in 24 hour,
+                        privateKey
+                    });
+                    data.photoLink = signedUrl 
                     return res.status(consts.HTTP_STATUS_OK).send()
                 }).catch(err => {
                     logger.error(err) 

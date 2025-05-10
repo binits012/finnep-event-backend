@@ -68,7 +68,11 @@ export const createEvent = async (eventTitle, eventDescription, eventDate,
 export const getEvents = async() =>{
     const today = new Date()
     today.setHours(0, 0, 0, 0)
-    return await model.Event.find({}).sort({eventDate:-1}).exec() 
+    const events = await model.Event.find({}).sort({eventDate:-1}).exec()
+    return events.map(event => ({
+        ...event.toObject(),
+        eventPhoto: []
+    }))
 }
 
 export const getEventById = async(id) =>{ 

@@ -5,6 +5,9 @@ import {error} from '../model/logger.js'
 import * as appText from '../applicationTexts.js'
 import * as commonUtil from '../util/common.js'
 import * as busboyFileUpload from '../util/busboyFileUpload.js'
+import { getSignedUrl } from "@aws-sdk/cloudfront-signer"; 
+const privateKey = process.env.CLOUDFRONT_PRIVATE_KEY
+const keyPairId = process.env.CLOUDFRONT_KEY_PAIR
 
 export const createEvent = async (req, res, next) =>{
     const token = req.headers.authorization
@@ -84,6 +87,7 @@ export const getEvents = async(req,res,next)=>{
             } 
              
             await Event.getEvents().then(data=>{
+                
                 return res.status(consts.HTTP_STATUS_OK).json({ data: data, timeZone:process.env.TIME_ZONE })
             }).catch(err=>{
                 error('error',err)
@@ -112,6 +116,35 @@ export const getEventById = async (req, res, next) => {
             } 
              
             await Event.getEventById(id).then(data=>{
+                const photosWithCloudFrontUrls = data?.eventPhoto?.map(photo => {
+                    // Convert S3 URL to CloudFront URL first
+                    const cloudFrontUrl = photo.replace(
+                        /https?:\/\/[^.]+\.s3\.[^.]+\.amazonaws\.com/,
+                        process.env.CLOUDFRONT_URL
+                    );
+                    
+                    const policy = {
+                        Statement: [
+                          {
+                            Resource: cloudFrontUrl,
+                            Condition: {
+                              DateLessThan: {
+                                "AWS:EpochTime": Math.floor(Date.now() / 1000) + (24 * 60 * 60) // time in seconds
+                              },
+                            },
+                          },
+                        ],
+                      };
+                    const policyString = JSON.stringify(policy);
+                    // Create signed CloudFront URL
+                    const signedUrl = getSignedUrl({  
+                        keyPairId, 
+                        privateKey,
+                        policy:policyString
+                    });
+                    return signedUrl
+                });
+                data.eventPhoto = photosWithCloudFrontUrls
                 return res.status(consts.HTTP_STATUS_OK).json({ data: data,  timeZone:process.env.TIME_ZONE })
             }).catch(err=>{
                 error('error',err)
