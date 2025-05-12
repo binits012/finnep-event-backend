@@ -117,11 +117,12 @@ export const getEventById = async (req, res, next) => {
              
             await Event.getEventById(id).then( async data=>{
                 const eventId = data.id
-                const photoWithCloudFrontUrls = await Promise.all(data?.eventPhoto?.map(async (photo,index) => {
+                const validPhotos = data?.eventPhoto?.filter(photo => photo && photo.trim() !== '') || [];
+                const photoWithCloudFrontUrls = await Promise.all(validPhotos?.map(async (photo,index) => {
                     const cacheKey = `signedUrl:${eventId}:${index}`;
                     const cached = await commonUtil.getCacheByKey(redisClient, cacheKey);
                     if (cached && cached.url && cached.expiresAt > Date.now()) {
-                        photo.photoLink = cached.url;
+                        return cached.url;
                     } else {
                         // Generate new signed URL
                         const expiresInSeconds = 29 * 24 * 60 * 60; // e.g., 29 days
@@ -133,9 +134,8 @@ export const getEventById = async (req, res, next) => {
                         await commonUtil.setCacheByKey(redisClient, cacheKey, { url: signedUrl, expiresAt });
                         redisClient.expire(cacheKey, expiresInSeconds);
 
-                        photo.photoLink = signedUrl
-                    }
-                    return photo
+                        return signedUrl
+                    } 
                 }))
                 /*
                 const photosWithCloudFrontUrls = data?.eventPhoto?.map(photo => {
