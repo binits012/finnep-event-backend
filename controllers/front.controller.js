@@ -30,7 +30,7 @@ export const getDataForFront = async (req, res, next) => {
             // Generate new signed URL
             const expiresInSeconds = 29 * 24 * 60 * 60; // e.g., 29 days
              
-            const signedUrl = await commonUtil.getCloudFrontUrl(photo.photoLink)
+            const signedUrl = await commonUtil.getCloudFrontUrl(el.photoLink)
             const expiresAt = Date.now() + expiresInSeconds * 1000;
 
             // Store in cache
