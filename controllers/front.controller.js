@@ -13,43 +13,34 @@ import * as ticketMaster from '../util/ticketMaster.js'
 import * as sendMail from '../util/sendMail.js'
 import Stripe from 'stripe'
 const stripe = new Stripe(process.env.STRIPE_KEY)
-const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET
-import { getSignedUrl } from "@aws-sdk/cloudfront-signer"; 
-const privateKey = process.env.CLOUDFRONT_PRIVATE_KEY;
-const keyPairId = process.env.CLOUDFRONT_KEY_PAIR;
+const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET 
+import redisClient from '../model/redisConnect.js'
+import * as commonUtil from '../util/common.js'  
 
 export const getDataForFront = async (req, res, next) => {
     const photo = await Photo.listPhoto()
-    const photosWithCloudFrontUrls = photo.map(el => {
-        // Convert S3 URL to CloudFront URL first
-        const cloudFrontUrl = el.photoLink.replace(
-            /https?:\/\/[^.]+\.s3\.[^.]+\.amazonaws\.com/,
-            process.env.CLOUDFRONT_URL
-        );
-        const encodedCloudFrontUrl = encodeURI(cloudFrontUrl);
-        const policy = {
-            Statement: [
-              {
-                Resource: encodedCloudFrontUrl,
-                Condition: {
-                  DateLessThan: {
-                    "AWS:EpochTime": Math.floor(Date.now() / 1000) + (30*24 * 60 * 60) // time in seconds
-                  },
-                },
-              },
-            ],
-          };
-        const policyString = JSON.stringify(policy);
-        // Create signed CloudFront URL
-        const signedUrl = getSignedUrl({  
-            keyPairId, 
-            privateKey,
-            policy:policyString
-        });
-        
-        el.photoLink = signedUrl
+    const photosWithCloudFrontUrls = await Promise.all(photo.map(async el => {
+                    
+        const cacheKey = `signedUrl:${el.id}`;
+        const cached = await commonUtil.getCacheByKey(redisClient, cacheKey);
+          
+        if (cached && cached.url && cached.expiresAt > Date.now()) {
+            el.photoLink = cached.url;
+        } else {
+            // Generate new signed URL
+            const expiresInSeconds = 29 * 24 * 60 * 60; // e.g., 29 days
+             
+            const signedUrl = await commonUtil.getCloudFrontUrl(photo.photoLink)
+            const expiresAt = Date.now() + expiresInSeconds * 1000;
+
+            // Store in cache
+            await commonUtil.setCacheByKey(redisClient, cacheKey, { url: signedUrl, expiresAt });
+            redisClient.expire(cacheKey, expiresInSeconds);
+
+            el.photoLink = signedUrl
+        }
         return el
-    });
+    }));
     const notification = await Notification.getAllNotification()
     let event = await Event.getEventsWithTicketCounts()
     if (event) {
@@ -71,41 +62,30 @@ export const getEventById = async (req, res, next) => {
         if (event) {
             const { otherInfo, ...restOfEvent } = event?._doc
             
+            const eventId = id
+            const photoWithCloudFrontUrls = await Promise.all(restOfEvent?.eventPhoto?.map(async (photo,index) => {
+                const cacheKey = `signedUrl:${eventId}:${index}`;
+                const cached = await commonUtil.getCacheByKey(redisClient, cacheKey);
+                if (cached && cached.url && cached.expiresAt > Date.now()) {
+                    return  cached.url;
+                } else {
+                    // Generate new signed URL
+                    const expiresInSeconds = 29 * 24 * 60 * 60; // e.g., 29 days
+                     
+                    const signedUrl = await commonUtil.getCloudFrontUrl(photo)
+                    const expiresAt = Date.now() + expiresInSeconds * 1000;
 
-            const photosWithCloudFrontUrls = restOfEvent?.eventPhoto?.map(photo => {
-                // Convert S3 URL to CloudFront URL first
-                const cloudFrontUrl = photo.replace(
-                    /https?:\/\/[^.]+\.s3\.[^.]+\.amazonaws\.com/,
-                    process.env.CLOUDFRONT_URL
-                );
-                // Encode spaces and special characters in the URL
-                const encodedCloudFrontUrl = encodeURI(cloudFrontUrl);
-                
-                const policy = {
-                    Statement: [
-                      {
-                        Resource: encodedCloudFrontUrl,
-                        Condition: {
-                          DateLessThan: {
-                            "AWS:EpochTime": Math.floor(Date.now() / 1000) + (30*24 * 60 * 60) // time in seconds
-                          },
-                        },
-                      },
-                    ],
-                  };
-                const policyString = JSON.stringify(policy);
-                // Create signed CloudFront URL
-                const signedUrl = getSignedUrl({  
-                    keyPairId, 
-                    privateKey,
-                    policy:policyString
-                }); 
-                return signedUrl
-            });
+                    // Store in cache
+                    await commonUtil.setCacheByKey(redisClient, cacheKey, { url: signedUrl, expiresAt });
+                    redisClient.expire(cacheKey, expiresInSeconds);
+
+                    return signedUrl
+                } 
+            }))
             const data = {
                 event: restOfEvent,
             }
-            data.event.eventPhoto = photosWithCloudFrontUrls
+            data.event.eventPhoto = photoWithCloudFrontUrls
 
             
             return res.status(consts.HTTP_STATUS_OK).json(data)

@@ -5,6 +5,9 @@ import { validationResult } from 'express-validator'
 import  {ObjectId} from 'mongodb'
 import moment from 'moment-timezone'
 import dotenv from 'dotenv'
+import { getSignedUrl } from "@aws-sdk/cloudfront-signer";
+const privateKey = process.env.CLOUDFRONT_PRIVATE_KEY
+const keyPairId = process.env.CLOUDFRONT_KEY_PAIR
 dotenv.config()
 
 export const manipulatePhoneNumber = async (phoneNumber) =>{
@@ -180,3 +183,30 @@ export  const loadEmailTemplate = async (fileLocation, eventTitle,eventPromotion
     return emailData
   }
  
+  export const getCloudFrontUrl = async (photoLink) =>{
+    const cloudFrontUrl = photoLink.replace(
+        /https?:\/\/[^.]+\.s3\.[^.]+\.amazonaws\.com/,
+        process.env.CLOUDFRONT_URL
+    );
+    const encodedCloudFrontUrl = encodeURI(cloudFrontUrl);
+    const policy = {
+        Statement: [
+            {
+            Resource: encodedCloudFrontUrl,
+            Condition: {
+                DateLessThan: {
+                "AWS:EpochTime": Math.floor(Date.now() / 1000) + (30*24 * 60 * 60) // time in 30 days
+                },
+            },
+            },
+        ],
+    };
+    const policyString = JSON.stringify(policy);
+    // Create signed CloudFront URL
+    const signedUrl = getSignedUrl({  
+        keyPairId, 
+        privateKey,
+        policy:policyString
+    });
+    return signedUrl
+  } 

@@ -4,10 +4,10 @@ import * as consts from '../const.js'
 import {error} from '../model/logger.js'
 import * as appText from '../applicationTexts.js'
 import * as commonUtil from '../util/common.js'
-import * as busboyFileUpload from '../util/busboyFileUpload.js'
-import { getSignedUrl } from "@aws-sdk/cloudfront-signer"; 
-const privateKey = process.env.CLOUDFRONT_PRIVATE_KEY
-const keyPairId = process.env.CLOUDFRONT_KEY_PAIR
+import * as busboyFileUpload from '../util/busboyFileUpload.js' 
+import redisClient from '../model/redisConnect.js'
+
+
 
 export const createEvent = async (req, res, next) =>{
     const token = req.headers.authorization
@@ -115,7 +115,29 @@ export const getEventById = async (req, res, next) => {
                 })
             } 
              
-            await Event.getEventById(id).then(data=>{
+            await Event.getEventById(id).then( async data=>{
+                const eventId = data.id
+                const photoWithCloudFrontUrls = await Promise.all(data?.eventPhoto?.map(async (photo,index) => {
+                    const cacheKey = `signedUrl:${eventId}:${index}`;
+                    const cached = await commonUtil.getCacheByKey(redisClient, cacheKey);
+                    if (cached && cached.url && cached.expiresAt > Date.now()) {
+                        photo.photoLink = cached.url;
+                    } else {
+                        // Generate new signed URL
+                        const expiresInSeconds = 29 * 24 * 60 * 60; // e.g., 29 days
+                         
+                        const signedUrl = await commonUtil.getCloudFrontUrl(photo)
+                        const expiresAt = Date.now() + expiresInSeconds * 1000;
+
+                        // Store in cache
+                        await commonUtil.setCacheByKey(redisClient, cacheKey, { url: signedUrl, expiresAt });
+                        redisClient.expire(cacheKey, expiresInSeconds);
+
+                        photo.photoLink = signedUrl
+                    }
+                    return photo
+                }))
+                /*
                 const photosWithCloudFrontUrls = data?.eventPhoto?.map(photo => {
                     // Convert S3 URL to CloudFront URL first
                     const cloudFrontUrl = photo.replace(
@@ -144,7 +166,8 @@ export const getEventById = async (req, res, next) => {
                     });
                     return signedUrl
                 });
-                data.eventPhoto = photosWithCloudFrontUrls
+                */
+                data.eventPhoto = photoWithCloudFrontUrls
                 return res.status(consts.HTTP_STATUS_OK).json({ data: data,  timeZone:process.env.TIME_ZONE })
             }).catch(err=>{
                 error('error',err)

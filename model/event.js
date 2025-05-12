@@ -93,6 +93,8 @@ export const getEventsWithTicketCounts = async() =>{
             active: true,      // Count only active tickets
             event:event._id
             })
+            event.eventPhoto = []
+                
             // Remove unwanted fields such as "otherInfo" -> destructuring 
             const { otherInfo, ...cleanedEvent } = event;
             return {

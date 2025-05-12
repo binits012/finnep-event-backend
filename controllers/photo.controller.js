@@ -6,9 +6,13 @@ import * as Photo from'../model/photo.js'
 import * as PhotoType from'../model/photoType.js' 
 import * as crypto from 'crypto'
 import {uploadToS3Bucket} from '../util/aws.js'
-import { getSignedUrl } from "@aws-sdk/cloudfront-signer"; 
+import { getSignedUrl } from "@aws-sdk/cloudfront-signer";   
+import * as commonUtil from '../util/common.js' 
+import redisClient from '../model/redisConnect.js'
+ 
 const privateKey = process.env.CLOUDFRONT_PRIVATE_KEY;
 const keyPairId = process.env.CLOUDFRONT_KEY_PAIR;
+
 export const createPhoto = async (req, res, next) => {
     const token = req.headers.authorization
     const position = req.body.position
@@ -48,7 +52,28 @@ export const createPhoto = async (req, res, next) => {
                 });
                 const linkToFile = "https://"+process.env.BUCKET_NAME+".s3."+process.env.BUCKET_REGION+".amazonaws.com/" +imageName
                 await Photo.uploadPhoto(linkToFile, true, position, photoType).then(data => { 
-                    data.photoLink = signedUrl
+                    const cacheKey = `signedUrl:${data.id}`;
+                    const cached = commonUtil.getCacheByKey(redisClient, cacheKey);
+
+                    if (cached && cached.url && cached.expiresAt > Date.now()) {
+                        // Use cached.url
+                        data.photoLink = cached.url;
+                    } else {
+                        // Generate new signed URL
+                        const expiresInSeconds = 7 * 24 * 60 * 60; // e.g., 7 days
+                        const signedUrl = getSignedUrl({  
+                            keyPairId, 
+                            privateKey,
+                            policy:policyString
+                        });
+                        const expiresAt = Date.now() + expiresInSeconds * 1000;
+
+                        // Store in cache
+                        commonUtil.setCacheByKey(redisClient, cacheKey, { url: signedUrl, expiresAt });
+                        redisClient.expire(cacheKey, expiresInSeconds);
+
+                        data.photoLink = signedUrl
+                    }
                     return res.status(consts.HTTP_STATUS_CREATED).json({ data: data })
                 }).catch(err => {
                     logger.error(err) 
@@ -81,41 +106,33 @@ export const getAllPhotos = async (req, res, next) => {
                 })
             }
             const photoType = await PhotoType.getPhotoTypes()
-            await Photo.listPhoto().then(obj => {
-                const photosWithCloudFrontUrls = obj.map(photo => {
-                    // Convert S3 URL to CloudFront URL first
-                    const cloudFrontUrl = photo.photoLink.replace(
-                        /https?:\/\/[^.]+\.s3\.[^.]+\.amazonaws\.com/,
-                        process.env.CLOUDFRONT_URL
-                    );
-                    const encodedCloudFrontUrl = encodeURI(cloudFrontUrl);
-                    const policy = {
-                        Statement: [
-                          {
-                            Resource: encodedCloudFrontUrl,
-                            Condition: {
-                              DateLessThan: {
-                                "AWS:EpochTime": Math.floor(Date.now() / 1000) + (30*24 * 60 * 60) // time in seconds
-                              },
-                            },
-                          },
-                        ],
-                      };
-                    const policyString = JSON.stringify(policy);
-                    // Create signed CloudFront URL
-                    const signedUrl = getSignedUrl({  
-                        keyPairId, 
-                        privateKey,
-                        policy:policyString
-                    });
+            await Photo.listPhoto().then( async obj => {
+                const photosWithCloudFrontUrls = await Promise.all(obj.map(async photo => {
                     
-                    photo.photoLink = signedUrl
+                    const cacheKey = `signedUrl:${photo.id}`;
+                    const cached = await commonUtil.getCacheByKey(redisClient, cacheKey);
+                      
+                    if (cached && cached.url && cached.expiresAt > Date.now()) {
+                        photo.photoLink = cached.url;
+                    } else {
+                        // Generate new signed URL
+                        const expiresInSeconds = 29 * 24 * 60 * 60; // e.g., 29 days
+                         
+                        const signedUrl = await commonUtil.getCloudFrontUrl(photo.photoLink)
+                        const expiresAt = Date.now() + expiresInSeconds * 1000;
+
+                        // Store in cache
+                        await commonUtil.setCacheByKey(redisClient, cacheKey, { url: signedUrl, expiresAt });
+                        redisClient.expire(cacheKey, expiresInSeconds);
+
+                        photo.photoLink = signedUrl
+                    }
                     return photo
-                });
-                
+                }));
+                console.log("photosWithCloudFrontUrls",  photosWithCloudFrontUrls)
                 const data = {
                     photoType: photoType,
-                    photo: photosWithCloudFrontUrls
+                    photo:  photosWithCloudFrontUrls
                 }
                 return res.status(consts.HTTP_STATUS_OK).json(data)
             }).catch(err => { 
@@ -188,33 +205,8 @@ export const updatePhotoById = async (req, res, next) => {
             }
             const myPhoto = await Photo.getPhotoById(photoId)
             if (myPhoto !== null) {
-                await Photo.updatePhotoById(photoId, position, publish, photoType).then(data => { 
-
-                    const photoLink = data.photoLink.replace(
-                        /https?:\/\/[^.]+\.s3\.[^.]+\.amazonaws\.com/,
-                        process.env.CLOUDFRONT_URL
-                    )
-                    const encodedCloudFrontUrl = encodeURI(photoLink);
-                    const policy = {
-                        Statement: [
-                          {
-                            Resource: encodedCloudFrontUrl,
-                            Condition: {
-                              DateLessThan: {
-                                "AWS:EpochTime": Math.floor(Date.now() / 1000) + (30*24 * 60 * 60) // time in seconds
-                              },
-                            },
-                          },
-                        ],
-                      }; 
-                    const policyString = JSON.stringify(policy);
-                    // Create signed CloudFront URL
-                    const signedUrl = getSignedUrl({  
-                        keyPairId, 
-                        privateKey,
-                        policy:policyString
-                    });
-                    data.photoLink = signedUrl  
+                await Photo.updatePhotoById(photoId, position, publish, photoType).then(async data => {  
+                
                     return res.status(consts.HTTP_STATUS_OK).json({ data: data })
                 }).catch(err => {
                     logger.error(err) 
