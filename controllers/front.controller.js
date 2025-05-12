@@ -63,11 +63,11 @@ export const getEventById = async (req, res, next) => {
             const { otherInfo, ...restOfEvent } = event?._doc
             
             const eventId = id
-            const photoWithCloudFrontUrls = await Promise.all(restOfEvent?.eventPhoto?.map(async (photo,index) => {
-                const cacheKey = `signedUrl:${eventId}:${index}`;
+            const photoWithCloudFrontUrls = (await Promise.all(restOfEvent?.eventPhoto?.map(async (photo,index) => {
+                const cacheKey = `signedUrl:${eventId}:${index}`; 
                 const cached = await commonUtil.getCacheByKey(redisClient, cacheKey);
                 if (cached && cached.url && cached.expiresAt > Date.now()) {
-                    return  cached.url;
+                    return cached.url;
                 } else {
                     // Generate new signed URL
                     const expiresInSeconds = 29 * 24 * 60 * 60; // e.g., 29 days
@@ -81,7 +81,7 @@ export const getEventById = async (req, res, next) => {
 
                     return signedUrl
                 } 
-            }))
+            }))).filter(url => url !== null);
             const data = {
                 event: restOfEvent,
             }
