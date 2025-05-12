@@ -63,7 +63,10 @@ export const getEventById = async (req, res, next) => {
             const { otherInfo, ...restOfEvent } = event?._doc
             
             const eventId = id
-            const photoWithCloudFrontUrls = (await Promise.all(restOfEvent?.eventPhoto?.map(async (photo,index) => {
+            // First ensure eventPhoto is a valid array with non-empty strings
+            const validPhotos = restOfEvent?.eventPhoto?.filter(photo => photo && photo.trim() !== '') || [];
+            
+            const photoWithCloudFrontUrls = await Promise.all(validPhotos.map(async (photo, index) => {
                 const cacheKey = `signedUrl:${eventId}:${index}`; 
                 const cached = await commonUtil.getCacheByKey(redisClient, cacheKey);
                 if (cached && cached.url && cached.expiresAt > Date.now()) {
@@ -81,7 +84,8 @@ export const getEventById = async (req, res, next) => {
 
                     return signedUrl
                 } 
-            }))).filter(url => url !== null);
+            }));
+
             const data = {
                 event: restOfEvent,
             }
