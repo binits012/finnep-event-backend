@@ -5,11 +5,12 @@ import { validationResult } from 'express-validator'
 import  {ObjectId} from 'mongodb'
 import moment from 'moment-timezone'
 import dotenv from 'dotenv'
+import crypto from 'crypto'
 import { getSignedUrl } from "@aws-sdk/cloudfront-signer";
 const privateKey = process.env.CLOUDFRONT_PRIVATE_KEY
 const keyPairId = process.env.CLOUDFRONT_KEY_PAIR
 dotenv.config()
-
+const CHARACTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz123456789';
 export const manipulatePhoneNumber = async (phoneNumber) =>{
     if(/[aA-zZ].*/.test(phoneNumber)){
         return null
@@ -210,3 +211,12 @@ export  const loadEmailTemplate = async (fileLocation, eventTitle,eventPromotion
     });
     return signedUrl
   } 
+
+  export const createCode = async (codeLength=10) =>{
+
+    let otp = '';
+    for (let i = 0; i < codeLength; i++) {
+        otp += CHARACTERS.charAt(crypto.randomInt(0, CHARACTERS.length));
+    }
+    return otp
+  }

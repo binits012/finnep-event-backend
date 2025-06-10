@@ -5,7 +5,7 @@ import * as Crypto from '../model/crypto.js'
 // Defining algorithm
 const algorithm = 'aes-256-cbc';
 
-export const createHashData = async (text, type) => { 
+export const createHashData = async (text, type) => {  
     const key =  crypto.scryptSync(process.env.CRYPTO_KEY,'salt',32)  
     const iv = crypto.randomBytes(16);
     const cipher = crypto.createCipheriv(algorithm, key, iv)
@@ -13,7 +13,7 @@ export const createHashData = async (text, type) => {
     let encrypted = cipher.update(text)
     // Using concatenation
     encrypted = Buffer.concat([encrypted, cipher.final()])
-    return await Crypto.createCrypto(iv.toString('hex'), type, encrypted.toString('hex'))
+    return await Crypto.createCrypto(iv.toString('hex'), type, encrypted.toString('hex'),text)
 
 }
 
@@ -51,3 +51,7 @@ export const updateHash = async (id, text) => {
 export const getCryptoByEmail = async (email) =>{
     return await Crypto.getCryptoByEmail(email)
 } 
+
+export const getCryptoBySearchIndex = async (data, dataType) =>{
+    return await Crypto.getCryptoBySearchIndex(data, dataType)
+}

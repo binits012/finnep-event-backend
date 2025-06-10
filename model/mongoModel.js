@@ -7,12 +7,153 @@ import {convertDateTimeWithTimeZone} from '../util/common.js'
 const Schema = mongoose.Schema
 mongoose.set('strict', true);
 
+// 1. First, define the audit plugin and schema
+const auditTrailSchema = new mongoose.Schema({
+	action: { 
+		type: String, 
+		enum: ['create', 'update', 'delete', 'restore', 'other'],
+		required: true 
+	},
+	documentId: { 
+		type: mongoose.Schema.Types.ObjectId, 
+		required: true 
+	},
+	collectionName: { 
+		type: String, 
+		required: true 
+	},
+	user: { 
+		type: mongoose.Schema.Types.ObjectId, 
+		ref: 'User',
+		required: false
+	},
+	before: mongoose.Schema.Types.Mixed,
+	after: mongoose.Schema.Types.Mixed,
+	createdAt: { type: Date, default: Date.now }
+});
+
+function auditPlugin(schema) {
+	const debug = true;
+	
+	// Add modifiedBy field to all schemas that use the audit plugin
+	schema.add({
+		modifiedBy: {
+			type: mongoose.Schema.Types.ObjectId,
+			ref: 'User',
+			required: false
+		}
+	});
+
+	// Add a method to set the user for the next operation
+	schema.statics.setAuditUser = function(userId) {
+		// Store the user ID in the model's options instead of a static property
+		this._auditUser = userId;
+		return this;
+	};
+
+	schema.pre('save', async function(next) {
+		if (debug) console.log('Audit pre-save triggered for:', this.constructor.modelName);
+		
+		try {
+			// Store the user ID from the model's options
+			this._auditUser = this.constructor._auditUser;
+			
+			if (this.isNew) {
+				if (debug) console.log('New document detected');
+				this._auditAction = 'create';
+				this._auditBefore = null;
+			} else {
+				if (debug) console.log('Existing document detected');
+				this._auditAction = 'update';
+				const originalDoc = await this.constructor.findById(this._id).lean();
+				this._auditBefore = originalDoc;
+			}
+			next();
+		} catch (err) {
+			console.error('Pre-save audit error:', err);
+			next(err);
+		}
+	});
+
+	schema.post('save', true, async function(doc, next) {
+		if (debug) console.log('Audit post-save triggered for:', doc.constructor.modelName);
+		
+		try {
+			const auditEntry = new AuditTrail({
+				action: this._auditAction || 'other',
+				documentId: doc._id,
+				collectionName: doc.constructor.modelName,
+				user: doc.modifiedBy || this._auditUser || null, // Try to get user from multiple sources
+				before: this._auditBefore,
+				after: doc.toObject()
+			});
+
+			await auditEntry.save();
+			if (debug) console.log('Audit entry created:', auditEntry._id);
+
+			delete this._auditAction;
+			delete this._auditBefore;
+			delete this._auditUser;
+			next();
+		} catch (err) {
+			console.error('Post-save audit error:', err);
+			next();
+		}
+	});
+
+	// Modify the update operations to handle user information
+	schema.pre(['updateOne', 'updateMany', 'findOneAndUpdate'], async function(next) {
+		if (debug) console.log('Audit pre-update triggered');
+		
+		try {
+			// Store the user ID from the model's options
+			this._auditUser = this.model._auditUser;
+			this._auditQuery = this.getQuery();
+			this._auditBefore = await this.model.find(this._auditQuery).lean();
+			next();
+		} catch (err) {
+			console.error('Pre-update audit error:', err);
+			next(err);
+		}
+	});
+
+	schema.post(['updateOne', 'updateMany', 'findOneAndUpdate'], async function(result) {
+		if (debug) console.log('Audit post-update triggered');
+		
+		try {
+			if (result && (result.modifiedCount > 0 || result._id)) {
+				const updatedDocs = await this.model.find(this._auditQuery).lean();
+				
+				const auditPromises = updatedDocs.map(doc => {
+					const beforeDoc = this._auditBefore?.find(d => 
+						d._id.toString() === doc._id.toString()
+					);
+					
+					return new AuditTrail({
+						action: 'update',
+						documentId: doc._id,
+						collectionName: this.model.modelName,
+						user: this.options?.modifiedBy || this._auditUser || null,
+						before: beforeDoc,
+						after: doc
+					}).save();
+				});
+
+				await Promise.all(auditPromises);
+				if (debug) console.log('Audit entries created for update');
+			}
+		} catch (err) {
+			console.error('Post-update audit error:', err);
+		}
+	});
+}
+
 const roleSchema = new Schema({
 	roleType: { type: String, unique: true },
 	createdAt: { type: Date, default: Date.now }
 })
 
-export const Role = mongoose.model('Role', roleSchema)
+
 
 const userSchema = new Schema({
 	name: { type: String, required: true, unique: true, immutable: true, trim: true },
@@ -51,16 +192,18 @@ userSchema.methods.hashPassword = async function (userPassword) {
 userSchema.methods.comparePassword = async function (pwd) {
 	return await bcrypt.compare(pwd, this.pwd);
 }
-export const User = mongoose.model('User', userSchema)
 
-const CryptoSchema = new mongoose.Schema({
+
+const cryptoSchema = new mongoose.Schema({
 	createdAt: { type: Date, default: Date.now },
 	iv: { type: String, required: true },
 	encryptedData: { type: String, required: true },
-	type: { type: String, required: true }
+	type: { type: String, required: true },
+	searchHash: { type: String, required: true },
 })
 
-export const Crypto = mongoose.model('Crypto', CryptoSchema)
+// Add compound index
+cryptoSchema.index({ searchHash: 1, type: 1 });
 
 const contactSchema = new Schema({
 	user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
@@ -68,7 +211,7 @@ const contactSchema = new Schema({
 	streetName: { type: String, required: true },
 	createdAt: { type: Date, default: Date.now }
 })
-export const Contact = mongoose.model('Contact', contactSchema)
+
 
 
 const socialMediaSchema = new mongoose.Schema({
@@ -77,7 +220,7 @@ const socialMediaSchema = new mongoose.Schema({
 	createdAt: { type: Date, default: Date.now }
 })
 
-export const SocialMedia = mongoose.model('SocialMedia', socialMediaSchema )
+
 
 const eventTypeSchema = new mongoose.Schema({
 
@@ -87,7 +230,7 @@ const eventTypeSchema = new mongoose.Schema({
 	createdAt: { type: Date, default: Date.now }
 })
 
-export const EventType = mongoose.model('EventType', eventTypeSchema)
+
 
 const timeBasedPriceSchema = new mongoose.Schema({
 	quantity:{ type: Number, required: true },
@@ -98,7 +241,7 @@ const timeBasedPriceSchema = new mongoose.Schema({
 	activeUntil: { type: Date, required:true },
 	createdAt: { type: Date, default: Date.now }
 })
-export const TimeBasedPrice = mongoose.model('TimeBasedPrice', timeBasedPriceSchema)
+
 
 const ticketInfoSchema = new mongoose.Schema({
 	name: {
@@ -186,23 +329,23 @@ eventSchema.post('find', async (docs, next) =>{
 })
 
 
-export const Event = mongoose.model('Event', eventSchema)
 
-const TokenSchema = new mongoose.Schema({
+
+const tokenSchema = new mongoose.Schema({
 	token:{ type: String, required: true },
 	userId:{type: String, required: true},
 	isValid:{ type: Boolean, default: true },
 	createdAt: { type: Date, default: Date.now }
 })
-export const JWTToken = mongoose.model('JWTToken', TokenSchema)
 
 
-const NotificationTypeSchema = new mongoose.Schema({
+
+const notificationTypeSchema = new mongoose.Schema({
 	name: {type:String, unique:true, required:true},
 	publish:{ type: Boolean, default: true },
 	createdAt: { type: Date, default: Date.now }
 }) 
-export const NotificationType = mongoose.model('NotificationType', NotificationTypeSchema)
+
 
 const notificationSchema = new mongoose.Schema({
 	notification: { type: String, required: true },
@@ -214,7 +357,7 @@ const notificationSchema = new mongoose.Schema({
 	createdAt: { type: Date, default: Date.now }	
 })
 
-export const Notification = mongoose.model('Notification', notificationSchema)
+
 
 
 const photoTypeSchema = new Schema({
@@ -222,7 +365,7 @@ const photoTypeSchema = new Schema({
 	publish:{ type: Boolean, default: true },
 	createdAt: { type: Date, default: Date.now }
 })
-export const PhotoType = mongoose.model('PhotoType', photoTypeSchema)
+
 
 const photoSchema = new mongoose.Schema({
 	createdAt: { type: Date, default: Date.now },
@@ -232,7 +375,7 @@ const photoSchema = new mongoose.Schema({
 	photoType:[{type: mongoose.Schema.Types.ObjectId, ref: 'PhotoType', required:true}]
 })
 
-export const Photo = mongoose.model('Photo', photoSchema)
+
 
 const messageReply = new mongoose.Schema({
 	createdAt: { type: Date, default: Date.now },
@@ -241,7 +384,7 @@ const messageReply = new mongoose.Schema({
 	replyFrom:{ type: mongoose.Schema.Types.ObjectId, ref: 'Crypto' }
 })
 
-export const Reply = new mongoose.model('Reply', messageReply)
+
 
 const messageSchema = new mongoose.Schema({
 	createdAt: { type: Date, default: Date.now },
@@ -251,7 +394,7 @@ const messageSchema = new mongoose.Schema({
 	active:{type:Boolean, default:true},
 	reply:[{type:mongoose.Schema.Types.ObjectId, ref:'Reply'}]
 })
-export const Message = mongoose.model('Message',messageSchema)
+
 
 const ticketSchema = new mongoose.Schema({
 	createdAt: { type: Date, default: Date.now },
@@ -269,7 +412,7 @@ const ticketSchema = new mongoose.Schema({
 	validUntil:{type:Date},
 	otp:{type:String, required:true}
 })
-export const Ticket = new mongoose.model('Ticket',ticketSchema)
+
 
 
 const settingSchema = new mongoose.Schema({
@@ -289,7 +432,7 @@ const settingSchema = new mongoose.Schema({
 	} 
 })
 
-export const Setting = mongoose.model('Setting', settingSchema)
+
 
 const paymentSchema = new mongoose.Schema({
 	createdAt: { type: Date, default: Date.now },
@@ -302,7 +445,7 @@ const paymentSchema = new mongoose.Schema({
 	updatedAt: { type: Date, default: Date.now },
 })
 
-export const Payment = mongoose.model('Payment', paymentSchema)
+
  
 const orderTicketSchema = mongoose.Schema({
 	createdAt: { type: Date, default: Date.now }, 
@@ -314,4 +457,37 @@ const orderTicketSchema = mongoose.Schema({
 	updatedAt: { type: Date, default: Date.now },
 })
 
+
+
+// 3. Apply the audit plugin to all schemas BEFORE creating any models
+const schemas = [
+	orderTicketSchema,paymentSchema,settingSchema,ticketSchema,messageSchema,photoSchema,photoTypeSchema,
+	notificationSchema,notificationTypeSchema,tokenSchema,eventSchema,timeBasedPriceSchema,eventTypeSchema,
+	socialMediaSchema,contactSchema,cryptoSchema,roleSchema, userSchema
+];
+
+schemas.forEach(schema => {
+	schema.plugin(auditPlugin);
+});
+
+// 4. Create the AuditTrail model first (since other models might reference it)
+export const AuditTrail = mongoose.model('AuditTrail', auditTrailSchema);
 export const OrderTicket = mongoose.model('OrderTicket',orderTicketSchema)
+export const Payment = mongoose.model('Payment', paymentSchema)
+export const Setting = mongoose.model('Setting', settingSchema)
+export const Ticket = new mongoose.model('Ticket',ticketSchema)
+export const Message = mongoose.model('Message',messageSchema)
+export const Reply = new mongoose.model('Reply', messageReply)
+export const Photo = mongoose.model('Photo', photoSchema)
+export const PhotoType = mongoose.model('PhotoType', photoTypeSchema)
+export const Notification = mongoose.model('Notification', notificationSchema)
+export const NotificationType = mongoose.model('NotificationType', notificationTypeSchema)
+export const JWTToken = mongoose.model('JWTToken', tokenSchema)
+export const Event = mongoose.model('Event', eventSchema)
+export const TimeBasedPrice = mongoose.model('TimeBasedPrice', timeBasedPriceSchema)
+export const EventType = mongoose.model('EventType', eventTypeSchema)
+export const SocialMedia = mongoose.model('SocialMedia', socialMediaSchema )
+export const Contact = mongoose.model('Contact', contactSchema)
+export const Crypto = mongoose.model('Crypto', cryptoSchema)
+export const Role = mongoose.model('Role', roleSchema)
+export const User = mongoose.model('User', userSchema)

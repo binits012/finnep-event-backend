@@ -4,15 +4,14 @@ import * as consts from '../const.js'
 import dotenv from 'dotenv'
 dotenv.config()
 import {uploadToS3Bucket,streamBasedParallelUpload} from './aws.js'
-import * as Event from '../model/event.js'
-import {TicketReport} from '../model/reporting.js'
-import * as hash from './createHash.js'
-import * as ticketMaster from './ticketMaster.js'
-import * as Ticket from '../model/ticket.js'
-import * as sendMail from '../util/sendMail.js'
+import * as Event from '../model/event.js' 
+import * as hash from './createHash.js' 
+import * as Ticket from '../model/ticket.js' 
 import * as Excel from 'exceljs'
+import {createCode} from '../util/common.js'
+import {createOrderTicket} from '../model/orderTicket.js'
 const workbook = new Excel.default.Workbook()
-
+const SYTEM_GENERATED_EMAIL = "system-generated-ticket@weyellowbridge.com"
 
 const worker = new Worker(consts.PHOTO_ARRIVAL_QUEUE, async job => {
     //get the information of the job 
@@ -82,43 +81,52 @@ const ticketViaFileUpload = new Worker(consts.CREATE_TICKET_FROM_FILE_UPLOAD, as
     const dataFromFile = await readFile(jobData.fileLocation)
     const event = await Event.getEventById(jobData.eventId)
     
-    
     dataFromFile.forEach( async e=>{
-      const ticketFor = e.emailId
+      const ticketFor = e.contactData
+      let code = e.code
       let typeOfTicket = e.type
-      const emailCrypto = await hash.getCryptoByEmail(ticketFor)
-      let emailHash = null
-      if (emailCrypto.length == 0) {
-        //new email which is not yet in the system
-        let tempEmailHash = await hash.createHashData(ticketFor, 'email')
-        emailHash = tempEmailHash._id
-      } else {
-        emailHash = emailCrypto[0]._id
-      }
-      if (typeOfTicket === 'undefined' || typeOfTicket === '' || typeOfTicket === null) typeOfTicket = 'normal'
-      // create a ticket
-      const ticket = await Ticket.createTicket(null, emailHash, event,typeOfTicket) 
-      const emailPayload = await ticketMaster.createEmailPayload(event, ticket, ticketFor) 
-      await sendMail.forward(emailPayload).then(async data => {
-        //all good let's update the ticket model once more
-        console.log("email sent data \n", data)
-        await Ticket.updateTicketById(ticket.id, { isSend: true }) 
-        
-      }).catch(err => {
-        //let's not dump the hard work, we will try to send the mail in a while later
-        error('error', err.stack)
-
-        if(ticket !== null || ticket !=='undefined'){
-          const reportStatus = {
-            ticketId: ticket.id,
-            isSend:false,
-            retryCount:0
-          }
-          const reporting = TicketReport(reportStatus)
-          reporting.save()
+      
+      const getOrCreateHash = async (value, type = 'email') => {
+        const crypto = await hash.getCryptoBySearchIndex(value, type)
+        if (crypto.length === 0) {
+          const tempHash = await hash.createHashData(value, type)
+          return tempHash._id
         }
-        
-      })
+        return crypto[0]._id
+      }
+
+      const phoneHash = await getOrCreateHash(ticketFor, 'phone')
+      const emailHash = await getOrCreateHash(SYTEM_GENERATED_EMAIL, 'email')
+      if(code !== 'undefined' || code !==""){
+        //system should not have the same code, duplicate codes shall not be entertained
+        const ticket = await Ticket.genericSearch({otp:code})
+        if(ticket){
+          info(' duplicate codes %s for %s ', code, jobData.eventId,)
+          return null
+        }
+      }
+      if (typeof typeOfTicket === 'undefined' || typeOfTicket === '' || typeOfTicket === null) typeOfTicket = 'system generated'
+       
+      if(typeof code === 'undefined' || code === '' ) {
+        code = await createCode(10) 
+      }
+
+      const eventPrice = event.ticketInfo.filter(e => typeOfTicket === e.name).map(e => e.price)  
+      const tempTicketOrderObj = {
+          eventName: event.eventTitle,
+          eventId: jobData.eventId,
+          price: eventPrice?.[0] || 1.0,
+          quantity: 1,
+          ticketType: typeOfTicket,
+          totalPrice: eventPrice?.[0] || 1.0,
+          phone: phoneHash,
+          email: emailHash
+      } 
+      const ticketOrder = await createOrderTicket(code, tempTicketOrderObj) 
+      // create a ticket
+      const ticket = await Ticket.createTicket(null, phoneHash, event,typeOfTicket,ticketOrder.ticketInfo, code) 
+      await Ticket.updateTicketById(ticket.id, { isSend: true }) 
+       
     })
   } catch (err) {
     console.log(err)
@@ -149,13 +157,18 @@ const readFile = async (fileLocation) =>{
   await workbook.xlsx
 		.readFile(fileLocation)
 		.then(() => {
-			let worksheet = workbook.getWorksheet('Sheet1');
+			let worksheet = workbook.getWorksheet('Tickets')
+      if (!worksheet) {
+        error('error', 'Worksheet not found')
+        return idSet
+      };
 			worksheet.eachRow({ includeEmpty: true }, function(row, rowNumber) {
 				if (rowNumber > 1 && row.values.length > 0) {
           const val = row.values 
           const fileData = {
-            emailId:val[2],
-            type:val[3]
+            contactData:val[2],
+            code:val[3],
+            type:val[4]
           }
           idSet.push(fileData);
         }

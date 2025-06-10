@@ -67,7 +67,7 @@ export const createSingleTicket = async(req,res,next) =>{
                         email: emailHash
                     } 
                     //create order
-                    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+                    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz123456789';
                     let otp = '';
                     for (let i = 0; i < 10; i++) {
                         otp += characters.charAt(crypto.randomInt(0, characters.length));
@@ -191,8 +191,12 @@ export const getAllTicketByEventId = async(req,res,next) =>{
                         //email is still in encrypted state
                         // decrypt them 
                         data = data.map(async e=>{ 
-                            const email= await  getEmail(e.ticketFor.id)   
-                            const ticketType = e?.event?.ticketInfo.filter(el =>e.type === el.id)?.map(el=>el.name)
+                             
+                            const email= await  getEmail(e?.ticketFor?.id)  
+                            
+                            let ticketType = e?.event?.ticketInfo.filter(el =>e.type === el.name)?.map(el=>el.name) 
+                             
+                            if(ticketType.length == 0) ticketType = e?.event?.ticketInfo.filter(el =>e.type === el.id)?.map(el=>el.name)
                             const data = {
                                 id: e.id,
                                 ticketFor: email,
