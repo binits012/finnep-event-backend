@@ -465,7 +465,8 @@ export const searchTicket = async (req, res, next) => {
                         quantity: ticket.ticketInfo.get("quantity"),
                         ticketType: ticketTypeId,
                         totalPrice: ticket.ticketInfo.get("totalPrice")
-                    }
+                    },
+                    readBy: typeof ticket.readBy !== 'undefined' ? ticket.readBy.name : null,
                 }
 
                 return res.status(consts.HTTP_STATUS_OK).json({ data: response })

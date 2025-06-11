@@ -58,5 +58,5 @@ export const getAllTickets = async() =>{
 }
 
 export const genericSearch = async (filter) =>{
-    return await model.Ticket.findOne(filter).select('-qrCode -ics').exec()
+    return await model.Ticket.findOne(filter).select('-qrCode -ics').populate('readBy').exec()
 }
