@@ -12,6 +12,7 @@ import * as  fs from 'fs/promises'
 import * as OrderTicket from '../model/orderTicket.js'
 import crypto from 'crypto'
 import { dirname } from 'path'
+import {manipulatePhoneNumber} from '../util/common.js'
 const __dirname = dirname(import.meta.url).slice(7) 
 
 export const createSingleTicket = async(req,res,next) =>{
@@ -341,7 +342,13 @@ export const ticketCheckIn = async(req, res, next) =>{
         }
 
         //check ticket info
-        const emailCrypto = await hash.getCryptoByEmail(ticketFor) 
+       
+        const manipulatedNumber = await manipulatePhoneNumber(ticketFor)
+        const dataType = manipulatedNumber === null ? 'email' : 'phone'
+        let emailCrypto = await hash.getCryptoBySearchIndex(ticketFor, dataType) 
+        if(emailCrypto.length == 0){
+            emailCrypto = await hash.getCryptoByEmail(ticketFor)
+        }
         if(emailCrypto[0]._id.toString() === ticket.ticketFor.id && ticket.event.id === eventId){
 
             await jwtToken.verifyJWT(token, async (err, data) => {
