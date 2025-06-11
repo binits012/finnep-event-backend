@@ -418,7 +418,7 @@ export const searchTicket = async (req, res, next) => {
                 if (!code && !phone) {
                     return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
                         message: 'Please provide either ticket code or phone number',
-                        error: appText.INVALID_PARAMETERS
+                        error: appText.TICKET_SEARCH_PARAMS_REQUIRED
                     })
                 }
 

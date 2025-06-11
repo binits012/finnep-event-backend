@@ -42,3 +42,6 @@ export const SETTING_NOT_ALLOWED = 'This operation is not allowed. Consider upda
 
 // dashboard
 export const DASHBOARD_DATA_FAILED = "Something went wrong on fetching dashboard data.";
+
+// Ticket search
+export const TICKET_SEARCH_PARAMS_REQUIRED = 'Please provide either a ticket code or phone number to search for tickets.';
