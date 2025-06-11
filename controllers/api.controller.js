@@ -404,5 +404,27 @@ export const ticketCheckIn = async(req,res,next) =>{
         await ticket.ticketCheckIn(req,res,next)
     }))
 }
+
+export const searchTicket = async(req, res, next) => {
+    const id = req.params.id
+    const {code, phone} = req.query
+    
+    // Validate event ID
+    param(id).custom(common.validateParam(id).then(async data => {
+        if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            message: 'Invalid Event Id.', error: appText.INVALID_ID
+        })
+        
+        // Validate search parameters
+        if (!code && !phone) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                message: 'Please provide either ticket code or phone number',
+                error: appText.INVALID_PARAMETERS
+            })
+        }
+        await ticket.searchTicket(req,res,next)
+         
+    }))
+}
 /** Ticket Ends  */
  

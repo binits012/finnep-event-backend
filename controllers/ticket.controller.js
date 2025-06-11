@@ -1,4 +1,3 @@
- 
 import * as jwtToken from '../util/jwtToken.js'
 import * as consts from '../const.js'
 import * as appText from '../applicationTexts.js'
@@ -396,8 +395,88 @@ export const getAllTickets = async (req, res,next) =>{
     
 }
 
+export const searchTicket = async (req, res, next) => {
+    const token = req.headers.authorization
+    const id = req.params.id
+    const { code, phone } = req.query
+    
+    try {
+        await jwtToken.verifyJWT(token, async (err, data) => { 
+            if (err || data === null) { 
+                return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({
+                    message: 'Please, provide valid token', error: appText.TOKEN_NOT_VALID
+                })
+            } else { 
+                const userRoleFromToken = data.role
+                if (consts.ROLE_MEMBER === userRoleFromToken) { 
+                    return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
+                        message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
+                    })
+                }  
+
+                // Validate search parameters
+                if (!code && !phone) {
+                    return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                        message: 'Please provide either ticket code or phone number',
+                        error: appText.INVALID_PARAMETERS
+                    })
+                }
+
+                // Create search filter
+                let filter = { event: id }
+                if (code) {
+                    filter.otp = code
+                } else if (phone) {
+                    // Add '+' back if the phone number starts with numbers (country code)
+                    const decodedPhone = phone.match(/^\d/) ? `+${phone}` : phone 
+                    const phoneHash = await hash.getCryptoBySearchIndex(decodedPhone, 'phone')
+                    filter.ticketFor = phoneHash[0]?._id
+                }
+
+                // Search for ticket
+                const ticket = await Ticket.genericSearch(filter) 
+                if (!ticket) {
+                    return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+                        message: 'Ticket not found',
+                        error: appText.RESOURCE_NOT_FOUND
+                    })
+                }
+
+                // Format response
+                const ticketTypeId = ticket.ticketInfo.get("ticketType")
+                const response = {
+                    id: ticket.id,
+                    ticketFor: await getEmail(ticket.ticketFor._id),
+                    event: ticket.event._id,
+                    isSend: ticket.isSend,
+                    active: ticket.active,
+                    isRead: ticket.isRead,
+                    type: ticket.type,
+                    createdAt: ticket.createdAt,
+                    ticketCode: ticket.otp,
+                    ticketInfo: {
+                        quantity: ticket.ticketInfo.get("quantity"),
+                        ticketType: ticketTypeId,
+                        totalPrice: ticket.ticketInfo.get("totalPrice")
+                    }
+                }
+
+                return res.status(consts.HTTP_STATUS_OK).json({ data: response })
+            }
+        })
+    } catch(err) {
+        error('error', err.stack)
+        if (!res.headersSent) {
+            return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
+                message: 'Sorry, ticket search failed',
+                error: appText.INTERNAL_SERVER_ERROR
+            })
+        }
+    }
+}
+
 //private
-const getEmail = async(id)=>{
+const getEmail = async(id)=>{ 
     const emailObj =  await hash.readHash(id)  
     return emailObj.data
 } 

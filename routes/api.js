@@ -72,6 +72,10 @@ router.route('/multipleTicket')
     .post(api.createMultipleTicket)
 router.route('/event/:id/ticket')
     .get(api.getAllTicketByEventId)
+
+router.route('/event/:id/searchTicket')
+    .get(api.searchTicket)
+
 router.route('/ticket/:id')
     .get(api.getTicketById)
 
