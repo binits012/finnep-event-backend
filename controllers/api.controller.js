@@ -13,6 +13,7 @@ import * as setting from '../controllers/setting.controller.js'
 import * as ticket from '../controllers/ticket.controller.js'
 import * as NotificationType from '../model/notificationType.js'
 import {error} from '../model/logger.js'
+import * as merchantController from './merchant.controller.js'
 
 
 /** USER STUFF BEGINGS */
@@ -242,7 +243,27 @@ export const updateEventById = async(req,res,next) =>{
         }
     })
 }
- 
+
+export const updateEventStatusById = async(req,res,next) =>{
+    await common.validate([
+        body('active').isBoolean().withMessage('Active must be true or false')
+    ], req).then(async data => {
+        if(data.errors.length === 0) {
+            const id = req.params.id
+            param(id).custom(common.validateParam(id).then(async data=>{
+                if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                    message: 'Invalid Id.', error: appText.INVALID_ID
+                })
+                await event.updateEventStatusById(req,res,next)
+            }))
+        } else {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                message: 'Please check the payload.', error: data.errors
+            })
+        }
+    })
+}
+
 export const uploadPhotosForParticularEvent = async(req,res,next) =>{
     const id = req.params.id 
     param(id).custom(common.validateParam(id).then(async data=>{
@@ -426,5 +447,77 @@ export const searchTicket = async(req, res, next) => {
          
     }))
 }
+
+/** Merchant API functions */
+export const getAllMerchants = async (req, res, next) => {
+    
+    try {
+        // Input validation can be added here
+        await merchantController.getAllMerchants(req, res, next);
+    } catch (error) {
+        next(error);
+    }
+}
+
+export const getMerchantById = async (req, res, next) => {
+    const id = req.params.id 
+    param(id).custom(common.validateParam(id).then(async data => {
+        if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            message: 'Invalid Event Id.', error: appText.INVALID_ID
+        }) 
+        await merchantController.getMerchantById(req, res, next);    
+    }))
+    
+     
+}
+
+export const getMerchantByMerchantId = async (req, res, next) => {
+    try {
+        // Validate merchantId parameter
+        if (!req.params.merchantId) {
+            return res.status(400).json({
+                message: 'Merchant ID is required'
+            });
+        }
+        await merchantController.getMerchantByMerchantId(req, res, next);
+    } catch (error) {
+        next(error);
+    }
+}
+
+export const updateMerchantById = async (req, res, next) => {
+    await common.validate([
+        body('status').optional().isIn(['active', 'inactive', 'suspended'])
+            .withMessage('Status must be one of: active, inactive, suspended')
+    ], req).then(async data => {
+        if(data.errors.length === 0) {
+            const id = req.params.id 
+            param(id).custom(common.validateParam(id).then(async data => {
+                if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                    message: 'Invalid Event Id.', error: appText.INVALID_ID
+                }) 
+                await merchantController.updateMerchantById(req, res, next); 
+            }))
+        } else {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                message: 'Please check the payload.', error: data.errors
+            })
+        }
+    })
+}
+
+export const deleteMerchantById = async (req, res, next) => {
+    try {
+        // Validate ID parameter
+        if (!req.params.id) {
+            return res.status(400).json({
+                message: 'Merchant ID is required'
+            });
+        }
+        await merchantController.deleteMerchantById(req, res, next);
+    } catch (error) {
+        next(error);
+    }
+}
 /** Ticket Ends  */
- 
+

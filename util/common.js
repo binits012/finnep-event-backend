@@ -176,47 +176,57 @@ export  const generateICS = async(event, ticketId)=>{
 }
 
 export  const loadEmailTemplate = async (fileLocation, eventTitle,eventPromotionalPhoto, qrCode, otp) => { 
-    const emailData = (await fs.readFile(fileLocation,'utf8')).replace('$eventTitle',eventTitle).replace('$eventTitle',eventTitle)
+    const emailData = (await fs.readFile(fileLocation,'utf8'))
+    .replace('$eventTitle',eventTitle)
+    .replace('$eventTitle',eventTitle)
     .replace('$eventTitle',eventTitle)
     .replace('$eventPromotionalPhoto',eventPromotionalPhoto)
     .replace('$qrcodeData',qrCode) 
     .replace('$ticketCode',otp) 
     return emailData
   }
- 
-  export const getCloudFrontUrl = async (photoLink) =>{
-    const cloudFrontUrl = photoLink.replace(
-        /https?:\/\/[^.]+\.s3\.[^.]+\.amazonaws\.com/,
-        process.env.CLOUDFRONT_URL
-    );
-    const encodedCloudFrontUrl = encodeURI(cloudFrontUrl);
-    const policy = {
-        Statement: [
-            {
-            Resource: encodedCloudFrontUrl,
-            Condition: {
-                DateLessThan: {
-                "AWS:EpochTime": Math.floor(Date.now() / 1000) + (30*24 * 60 * 60) // time in 30 days
-                },
-            },
-            },
-        ],
-    };
-    const policyString = JSON.stringify(policy);
-    // Create signed CloudFront URL
-    const signedUrl = getSignedUrl({  
-        keyPairId, 
-        privateKey,
-        policy:policyString
-    });
-    return signedUrl
-  } 
 
-  export const createCode = async (codeLength=10) =>{
+export const loadEmailTemplateForMerchant = async (fileLocation, orgName, dashboardUrl) => {
+    const emailData = (await fs.readFile(fileLocation,'utf8'))
+    .replace('$orgName',orgName)
+    .replace('$dashboardUrl',dashboardUrl)
+    
+    return emailData
+}  
+
+export const getCloudFrontUrl = async (photoLink) =>{
+const cloudFrontUrl = photoLink.replace(
+    /https?:\/\/[^.]+\.s3\.[^.]+\.amazonaws\.com/,
+    process.env.CLOUDFRONT_URL
+);
+const encodedCloudFrontUrl = encodeURI(cloudFrontUrl);
+const policy = {
+    Statement: [
+        {
+        Resource: encodedCloudFrontUrl,
+        Condition: {
+            DateLessThan: {
+            "AWS:EpochTime": Math.floor(Date.now() / 1000) + (30*24 * 60 * 60) // time in 30 days
+            },
+        },
+        },
+    ],
+};
+const policyString = JSON.stringify(policy);
+// Create signed CloudFront URL
+const signedUrl = getSignedUrl({  
+    keyPairId, 
+    privateKey,
+    policy:policyString
+});
+return signedUrl
+} 
+
+export const createCode = async (codeLength=10) =>{
 
     let otp = '';
     for (let i = 0; i < codeLength; i++) {
         otp += CHARACTERS.charAt(crypto.randomInt(0, CHARACTERS.length));
     }
     return otp
-  }
+}

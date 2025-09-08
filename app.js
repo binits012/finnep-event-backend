@@ -1,17 +1,18 @@
 import express from 'express'
 import dotenv from 'dotenv'
 dotenv.config()
-import cors from 'cors'
-//import cookieParser from 'cookie-parser'
+import cors from 'cors' 
 import './model/dbConnect.js'
 import './util/uploadQueueProcess.js'
 import * as adminRole from './util/adminUser.js'
 import api from './routes/api.js'
 import front from './routes/front.js'
-import './util/schedular.js'
-import path from 'path'
+import './util/schedular.js' 
 import Stripe from 'stripe'
 import {checkoutSuccess} from './util/paymentActions.js'
+import { setupQueues } from './rabbitMQ/services/queueSetup.js';
+import { messageConsumer } from './rabbitMQ/services/messageConsumer.js';
+import { rabbitMQ } from './util/rabbitmq.js';
 const stripe = new Stripe(process.env.STRIPE_KEY)
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET
 var app = express();
@@ -74,7 +75,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (request, 
     response.send();
 });
 
-app.use(express.json({ limit: '2gb', extended: false }))
+app.use(express.json({ limit: '300mb', extended: false }))
 app.use(express.urlencoded({ extended: false }))
 //app.use(cookieParser())
 app.use('/api', api)
@@ -85,14 +86,39 @@ var server = app.listen(app.get('port'), function () {
     console.log('Express server listening on port ' + server.address().port);
 })
 // create remaining roles
-adminRole.createRoles()
+await adminRole.createRoles()
 //add admin role and  user if not present 
-adminRole.createAdmin()
+await adminRole.createAdmin()
 // create photoTypes
-adminRole.photoTypes()
+await adminRole.photoTypes()
 //create notificationTypes
-adminRole.notificationTypes()
+await adminRole.notificationTypes()
 //create socialMedia
-adminRole.socialMedia()
+await adminRole.socialMedia()
+
+// Initialize and start queue consumers
+try {
+    console.log('Initializing RabbitMQ connection...');
+    await rabbitMQ.connect();
+    console.log('RabbitMQ connected, setting up queues...');
+    await setupQueues();
+    console.log('Queue setup completed successfully');
+} catch (error) {
+    console.error('Failed to setup RabbitMQ/queues:', error);
+    console.log('Application will continue without RabbitMQ functionality');
+}
+
+process.on('SIGINT', async () => {
+    console.log('Shutting down gracefully...');
+    try {
+        if (messageConsumer.channel) {
+            await messageConsumer.channel.close();
+        }
+        await rabbitMQ.disconnect();
+    } catch (error) {
+        console.error('Error during shutdown:', error);
+    }
+    process.exit(0);
+});
 
 export default app

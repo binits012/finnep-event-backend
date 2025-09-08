@@ -257,7 +257,27 @@ const ticketInfoSchema = new mongoose.Schema({
 	  type: Number,
 	  required: true, // Quantity is required
 	  min: [1, 'Quantity must be at least 1']
-	}
+	},
+	available: {
+		type: Number, 
+		min: [0, 'Available quantity cannot be negative']
+	},
+	serviceFee:{
+		type: Number,
+		default: 0,
+		min: [0, 'Service fee cannot be negative']
+	},
+	vat:{
+		type: Number,
+		default: 0,
+		min: [0, 'VAT cannot be negative']
+	},
+	status: {
+		type: String,
+		enum: ['available', 'low_stock', 'sold_out'],
+		default: 'available'
+	},
+	createdAt: { type: Date, default: Date.now }
 })
 
 const eventSchema = new mongoose.Schema({
@@ -290,15 +310,25 @@ const eventSchema = new mongoose.Schema({
 	eventPromotionPhoto:{type:String},
 	eventPhoto:[{type:String}],
 	transportLink:{type:String},
-	active:{type:Boolean, default:true},
+	active:{type:Boolean, default:false},
 	eventName:{type:String,  unique:true},
 	videoUrl:{type:String},
 	status:{type:String, enum:['up-coming', 'on-going', 'completed'], default:'up-coming' },
 	otherInfo:{
 		type: mongoose.Schema.Types.Mixed
 	},
+	eventTimezone: { type: String },  
+	city: { type: String },           
+	country: { type: String },        
+	venueInfo: {                      
+		type: mongoose.Schema.Types.Mixed
+	},
+	externalMerchantId: { type: String, required: true, index: true },
+	merchant:{ type: mongoose.Schema.Types.ObjectId, ref: 'Merchant', required:true },
+	externalEventId: { type: String, required: true, index: true },
 	createdAt: { type: Date, default: Date.now }
 })
+eventSchema.index({ externalMerchantId: 1, externalEventId: 1 }, { unique: true });
 
 eventSchema.pre('findOneAndUpdate', function(next) {
 	const update = this.getUpdate() 
@@ -318,6 +348,19 @@ eventSchema.pre('save', function(next){
 	this.eventDate =  moment.utc(this.eventDate)
 	next()
 })
+
+// Add pre-save hook to auto-increment position
+eventSchema.pre('save', async function(next) {
+  if (!this.position) {
+    try {
+      const lastEvent = await this.constructor.findOne().sort({ position: -1 });
+      this.position = lastEvent ? lastEvent.position + 1 : 1;
+    } catch (error) {
+      return next(error);
+    }
+  }
+  next();
+});
 
 eventSchema.post('find', async (docs, next) =>{
 	if(docs !== null && docs.length > 0){
@@ -457,10 +500,83 @@ const orderTicketSchema = mongoose.Schema({
 	updatedAt: { type: Date, default: Date.now },
 })
 
+const merchantSchema = new mongoose.Schema({
+	createdAt: { type: Date, default: Date.now },
+	merchantId: { type: String, required: true, unique: true, index: true }, 
+	name: { type: String, required: true },
+	orgName: { type: String, unique: true },  
+	country: { type: String },
+	code: { type: String },
+	email: { type: String },
+	companyEmail: { type: String },  
+	phone: { type: String },
+	companyPhoneNumber: { type: String },  
+	address: { type: String },
+	companyAddress: { type: String },  
+	schemaName: { type: String },  
+	status: { type: String, enum: ["active", "inactive", "pending", "suspended"], default: "pending" },
+	updatedAt: { type: Date, default: Date.now }
+});
 
+// Additional indexes for common search patterns
+merchantSchema.index({ merchantId: 1 }); // Index on country code for filtering 
+
+const outboxMessageSchema = new mongoose.Schema({
+	createdAt: { type: Date, default: Date.now },
+	messageId: { type: String, required: true, unique: true, index: true },
+	exchange: { type: String, required: true },
+	routingKey: { type: String, required: true },
+	messageBody: { type: mongoose.Schema.Types.Mixed, required: true },
+	headers: { type: Map, of: String },
+	status: { 
+		type: String, 
+		enum: ["pending", "sent", "failed", "retrying"], 
+		default: "pending" 
+	},
+	attempts: { type: Number, default: 0 },
+	maxRetries: { type: Number, default: 3 },
+	nextRetryAt: { type: Date },
+	lastError: { type: String },
+	sentAt: { type: Date },
+	processedAt: { type: Date },
+	correlationId: { type: String },
+	eventType: { type: String, required: true },
+	aggregateId: { type: String },
+	version: { type: Number, default: 1 },
+	updatedAt: { type: Date, default: Date.now }
+});
+
+// Indexes for efficient querying
+outboxMessageSchema.index({ status: 1, nextRetryAt: 1 });
+outboxMessageSchema.index({ eventType: 1, createdAt: -1 });
+outboxMessageSchema.index({ correlationId: 1 });
+
+const inboxMessageSchema = new mongoose.Schema({
+  messageId: { type: String, required: true, unique: true, index: true }, // message_id
+  eventType: { type: String },                                            // event_type
+  aggregateId: { type: String },                                          // aggregate_id
+  data: { type: mongoose.Schema.Types.Mixed },                            // data (jsonb)
+  metadata: { type: mongoose.Schema.Types.Mixed },                        // metadata (jsonb)
+  retryCount: { type: Number, default: 0 },                               // retry_count
+  processed: { type: Boolean, default: false },                           // processed
+  errorInfo: { type: String },                                            // error_info
+  receivedAt: { type: Date, default: Date.now },                          // received_at
+  processedAt: { type: Date },                                            // processed_at
+  lastAttemptAt: { type: Date }                                           // last_attempt_at
+});
+
+// Indexes for efficient querying
+inboxMessageSchema.index({ processed: 1, processedAt: 1 });
+inboxMessageSchema.index({ eventType: 1, receivedAt: -1 });
+inboxMessageSchema.index({ aggregateId: 1 });
+
+inboxMessageSchema.plugin(auditPlugin);
 
 // 3. Apply the audit plugin to all schemas BEFORE creating any models
 const schemas = [
+	inboxMessageSchema,
+	outboxMessageSchema,
+	merchantSchema, 
 	orderTicketSchema,paymentSchema,settingSchema,ticketSchema,messageSchema,photoSchema,photoTypeSchema,
 	notificationSchema,notificationTypeSchema,tokenSchema,eventSchema,timeBasedPriceSchema,eventTypeSchema,
 	socialMediaSchema,contactSchema,cryptoSchema,roleSchema, userSchema
@@ -472,6 +588,8 @@ schemas.forEach(schema => {
 
 // 4. Create the AuditTrail model first (since other models might reference it)
 export const AuditTrail = mongoose.model('AuditTrail', auditTrailSchema);
+export const InboxMessage = mongoose.model('InboxMessage', inboxMessageSchema);
+export const OutboxMessage = mongoose.model('OutboxMessage', outboxMessageSchema);
 export const OrderTicket = mongoose.model('OrderTicket',orderTicketSchema)
 export const Payment = mongoose.model('Payment', paymentSchema)
 export const Setting = mongoose.model('Setting', settingSchema)
@@ -491,3 +609,4 @@ export const Contact = mongoose.model('Contact', contactSchema)
 export const Crypto = mongoose.model('Crypto', cryptoSchema)
 export const Role = mongoose.model('Role', roleSchema)
 export const User = mongoose.model('User', userSchema)
+export const Merchant = mongoose.model('Merchant', merchantSchema);

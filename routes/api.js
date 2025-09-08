@@ -54,6 +54,7 @@ router.route('/event')
 router.route('/event/:id')
     .get( api.getEventById)
     .put(api.updateEventById) 
+    .patch(api.updateEventStatusById)
     
 router.route('/event/:id/eventPhoto')
     .post(api.uploadPhotosForParticularEvent)
@@ -86,5 +87,13 @@ router.route('/dashboard')
     .get(api.dashboard)
 router.route('/logout')
     .get(api.logout)
+
+/** merchant calls */
+router.route('/merchant')
+    .get(api.getAllMerchants)
+
+router.route('/merchant/:id')
+    .get(api.getMerchantById)
+    .patch(api.updateMerchantById) 
 
 export default router

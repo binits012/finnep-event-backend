@@ -2,9 +2,14 @@ import * as model from '../model/mongoModel.js'
 import {error} from './logger.js'
 import { Ticket } from '../model/mongoModel.js'
 export class Event {
+    
     constructor(eventTitle, eventDescription, eventDate,  
-        occupancy,ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
-        socialMedia, lang, position, active, eventName, videoUrl, otherInfo) {
+        occupancy,ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, 
+        eventLocationGeoCode, transportLink,
+        socialMedia, lang, position, active, eventName, videoUrl, otherInfo,
+        eventTimezone, city, country, venueInfo, externalMerchantId, merchant,
+        externalEventId
+    ) {
         this.eventTitle = eventTitle
         this.eventDescription = eventDescription
         this.eventDate = eventDate 
@@ -22,7 +27,13 @@ export class Event {
         this.eventName = eventName
         this.videoUrl = videoUrl
         this.otherInfo = otherInfo
-
+        this.eventTimezone = eventTimezone
+        this.city = city
+        this.country = country
+        this.venueInfo = venueInfo
+        this.externalMerchantId = externalMerchantId
+        this.merchant = merchant
+        this.externalEventId = externalEventId
     }
     async saveToDB() {
         try {
@@ -44,7 +55,14 @@ export class Event {
                 active: this.active,
                 eventName: this.eventName,
                 videoUrl: this.videoUrl,
-                otherInfo: this.otherInfo
+                otherInfo: this.otherInfo,
+                eventTimezone: this.eventTimezone,
+                city: this.city,       
+                country: this.country,
+                venueInfo: this.venueInfo,  
+                externalMerchantId: this.externalMerchantId,
+                merchant: this.merchant,
+                externalEventId: this.externalEventId
             })
             return await event.save()
         } catch (err) {
@@ -57,11 +75,14 @@ export class Event {
 
 export const createEvent = async (eventTitle, eventDescription, eventDate,  
     occupancy, ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
-    socialMedia, lang, position, active, eventName, videoUrl, otherInfo) =>{
+    socialMedia, lang, position, active, eventName, videoUrl, otherInfo,
+    eventTimezone, city, country, venueInfo, externalMerchantId, merchant, externalEventId
+    ) =>{
         
     const event = new Event(eventTitle, eventDescription, eventDate,  
         occupancy, ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
-        socialMedia, lang, position, active, eventName, videoUrl, otherInfo)
+        socialMedia, lang, position, active, eventName, videoUrl, otherInfo,   
+        eventTimezone, city, country, venueInfo, externalMerchantId, merchant, externalEventId)
     return await event.saveToDB()
 }
 
@@ -78,6 +99,10 @@ export const getEvents = async() =>{
 export const getEventById = async(id) =>{ 
     return await model.Event.findById({_id:id}).exec()
 }
+
+export const getEventByExternalEventId = async(externalEventId) =>{
+    return await model.Event.findOne({externalEventId:externalEventId}).exec()
+}
 export const updateEventById = async (id, obj) =>{
     return await model.Event.findByIdAndUpdate(id, {
         $set: obj
@@ -86,7 +111,7 @@ export const updateEventById = async (id, obj) =>{
 
 export const getEventsWithTicketCounts = async() =>{
     try{ 
-        const events = await model.Event.find({}).sort({'position':1}).lean()  // `.lean()` for plain JS objects instead of Mongoose models
+        const events = await model.Event.find({}).sort({'position':-1}).lean()  // `.lean()` for plain JS objects instead of Mongoose models
         const eventsWithTicketCounts = await Promise.all(
         events.map(async (event) => {
             const ticketsSold = await Ticket.countDocuments({ 
@@ -108,4 +133,8 @@ export const getEventsWithTicketCounts = async() =>{
         throw err
     }
 }
- 
+
+export const deleteEventById = async(id) =>{
+    // Update to delete only if active is false
+    return await model.Event.findOneAndDelete({ _id: id, active: false });
+}

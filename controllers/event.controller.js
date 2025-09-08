@@ -1,13 +1,14 @@
 import * as jwtToken from '../util/jwtToken.js'
 import * as Event from '../model/event.js'
 import * as consts from '../const.js'
-import {error} from '../model/logger.js'
+import {info, error} from '../model/logger.js'
 import * as appText from '../applicationTexts.js'
 import * as commonUtil from '../util/common.js'
 import * as busboyFileUpload from '../util/busboyFileUpload.js' 
 import redisClient from '../model/redisConnect.js'
-
-
+import { v4 as uuidv4 } from 'uuid'
+import * as OutboxMessage from '../model/outboxMessage.js'
+import { messageConsumer } from '../rabbitMQ/services/messageConsumer.js'
 
 export const createEvent = async (req, res, next) =>{
     const token = req.headers.authorization
@@ -28,7 +29,11 @@ export const createEvent = async (req, res, next) =>{
     const eventName=req.body.eventName
     const videoUrl = req.body.videoUrl
     const otherInfo = req.body.otherInfo
-
+    //const convertDateTime = await commonUtil.convertDateTimeWithTimeZone(eventDate)
+    const eventTimezone = req.body.eventTimezone
+    const city = req.body.city
+    const country = req.body.country
+    const venueInfo = req.body.venueInfo
     if(lang === 'undefined' || lang === ""){
         lang = "en"
     }   
@@ -50,7 +55,9 @@ export const createEvent = async (req, res, next) =>{
                 } 
                 await Event.createEvent(eventTitle, eventDescription, eventDate, 
                     occupancy, ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
-                    socialMedia, lang, position, active, eventName, videoUrl, otherInfo).then(data=>{
+                    socialMedia, lang, position, active, eventName, videoUrl, otherInfo,
+                    eventTimezone, city, country, venueInfo
+                ).then(data=>{
                     return res.status(consts.HTTP_STATUS_CREATED).json({ data: data })
                 }).catch(err=>{
                     error("error", err.stack)
@@ -87,7 +94,6 @@ export const getEvents = async(req,res,next)=>{
             } 
              
             await Event.getEvents().then(data=>{
-                
                 return res.status(consts.HTTP_STATUS_OK).json({ data: data, timeZone:process.env.TIME_ZONE })
             }).catch(err=>{
                 error('error',err)
@@ -121,7 +127,7 @@ export const getEventById = async (req, res, next) => {
                 const photoWithCloudFrontUrls = await Promise.all(validPhotos?.map(async (photo,index) => {
                     const cacheKey = `signedUrl:${eventId}:${index}`;
                     const cached = await commonUtil.getCacheByKey(redisClient, cacheKey);
-                    if (cached && cached.url && cached.expiresAt > Date.now()) {
+                    if (cached && cached?.url && cached.expiresAt > Date.now()) {
                         return cached.url;
                     } else {
                         // Generate new signed URL
@@ -201,6 +207,10 @@ export const updateEventById = async (req,res,next) =>{
     const convertDateTime = await commonUtil.convertDateTimeWithTimeZone(eventDate)
     const otherInfo = req.body.otherInfo
     //const timeInMinutes =  commonUtil.timeInMinutes(eventTime)
+    const eventTimezone = req.body.eventTimezone
+    const city = req.body.city  
+    const country = req.body.country
+    const venueInfo = req.body.venueInfo
     if(lang === 'undefined' || lang === ""){
         lang = "en"
     } 
@@ -220,7 +230,11 @@ export const updateEventById = async (req,res,next) =>{
         active:active,
         eventName:eventName,
         videoUrl:videoUrl,
-        otherInfo:otherInfo
+        otherInfo:otherInfo,
+        eventTimezone:eventTimezone,
+        city:city,
+        country:country,
+        venueInfo:venueInfo 
 
     }
     await jwtToken.verifyJWT(token, async (err, data) => {
@@ -248,6 +262,111 @@ export const updateEventById = async (req,res,next) =>{
     })
 }
 
+export const updateEventStatusById = async (req,res,next) =>{
+    const token = req.headers.authorization 
+    const id = req.params.id
+    const active = req.body.active  
+
+    await jwtToken.verifyJWT(token, async (err, data) => {
+        if (err || data === null) { 
+            return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({
+                message: 'Please, provide valid token', error: appText.TOKEN_NOT_VALID
+            })
+        } else { 
+            const userRoleFromToken = data.role
+            if (consts.ROLE_MEMBER ===userRoleFromToken) { 
+                return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
+                    message: 'Sorry, You do not have rights.', error: appText.INSUFFICENT_ROLE
+                })
+            } 
+            const originalEvent = await Event.getEventById(id)
+            if(originalEvent === null || originalEvent === '' || originalEvent === 'undefined'){
+                return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({ })
+            }
+            const updatedEvent =  await Event.updateEventById(id,{active:active}) 
+            try {
+                // 2. Create outbox message entry
+                const correlationId = uuidv4()
+                const messageId = uuidv4()
+
+                // Determine routing key and event type based on status
+                const routingKey = 'external.event.status.updated'
+                const eventType = active === true ? 'EventActivated' : 'EventDeactivated'
+                console.log(eventType, active)
+                const outboxMessageData = {
+                    messageId: messageId,
+                    exchange: 'event-merchant-exchange',   
+                    routingKey: routingKey,
+                    messageBody: {
+                        eventType: eventType,
+                        aggregateId: updatedEvent._id.toString(),
+                        data: {
+                            merchantId: updatedEvent.externalMerchantId,
+                            eventId: updatedEvent.externalEventId,
+                            before: originalEvent,
+                            after: updatedEvent,
+                            updatedBy: data.userId,
+                            updatedAt: new Date()
+                        },
+                        metadata: {
+                            correlationId: correlationId,
+                            causationId: messageId,
+                            timestamp: new Date().toISOString(),
+                            version: 1
+                        }
+                    },
+                    headers: {
+                        'content-type': 'application/json',
+                        'message-type': eventType,
+                        'correlation-id': correlationId
+                    },
+                    correlationId: correlationId,
+                    eventType: eventType,
+                    aggregateId: updatedEvent._id.toString(),
+                    status: 'pending',
+                    exchangeType: 'topic'
+                }
+
+                const outboxMessage = await OutboxMessage.createOutboxMessage(outboxMessageData)
+                info('Outbox message created for event update:', outboxMessage._id)
+
+                // 3. Publish to RabbitMQ exchange
+                await messageConsumer.publishToExchange(
+                    outboxMessageData.exchange,
+                    outboxMessageData.routingKey,
+                    outboxMessageData.messageBody,
+                    {
+                        exchangeType: 'topic',
+                        publishOptions: {
+                            correlationId: outboxMessageData.correlationId,
+                            contentType: 'application/json',
+                            persistent: true,
+                            headers: outboxMessageData.headers
+                        }
+                    }
+                ).catch(publishError => {
+                    error('Error publishing event update:', publishError)
+                    throw publishError
+                }
+                )
+
+                info('Published event update to exchange: %s', outboxMessageData.exchange)
+
+            } catch (publishError) {
+                error('Failed to create outbox message or publish merchant update event:', publishError)
+                // Continue with response even if publishing fails
+            }
+
+           return res.status(consts.HTTP_STATUS_OK).json({ data: updatedEvent })
+
+        }
+    }).catch(err=>{
+        error('error',err)
+        return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            message: 'Sorry, update event failed.', error: err.stack
+        })
+    }) 
+}
 
 export const uploadPhotosForParticularEvent = async (req,res,next) =>{
     const token = req.headers.authorization

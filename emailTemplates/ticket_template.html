@@ -14,7 +14,7 @@
  <meta name="format-detection" content="email=no" />
  <meta name="x-apple-disable-message-reformatting" />
  <link href="https://fonts.googleapis.com/css?family=Fira+Sans:ital,wght@0,100;1,100;0,200;1,200;0,300;1,300;0,400;1,400;0,500;1,500;0,600;1,600;0,700;1,700;0,800;1,800;0,900;1,900" rel="stylesheet" />
- <title>Untitled</title>
+ <title>Your Event Ticket - $eventTitle</title>
  <!-- Made with Postcards by Designmodo https://designmodo.com/postcards -->
  <!--[if !mso]><! -->
  <style>
@@ -226,6 +226,71 @@
              display: none;
              display: none !important;
          }
+
+         .ticket-header {
+             background: linear-gradient(135deg, #F59E0B, #D97706);
+             border-radius: 12px 12px 0 0;
+             padding: 20px;
+             text-align: center;
+         }
+
+         .event-image-container {
+             position: relative;
+             border-radius: 12px;
+             overflow: hidden;
+             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+             margin: 20px 0;
+         }
+
+         .ticket-info-box {
+             background: rgba(255, 255, 255, 0.08);
+             border-radius: 12px;
+             padding: 20px;
+             margin: 20px 0;
+             border-left: 4px solid #F59E0B;
+         }
+
+         .qr-container {
+             background: white;
+             border-radius: 12px;
+             padding: 20px;
+             margin: 20px 0;
+             text-align: center;
+             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+         }
+
+         .ticket-code-display {
+             background: linear-gradient(135deg, #1F2937, #374151);
+             border: 2px solid #F59E0B;
+             border-radius: 8px;
+             padding: 15px;
+             margin: 15px 0;
+             text-align: center;
+         }
+
+         .important-note {
+             background: rgba(239, 68, 68, 0.1);
+             border-left: 4px solid #EF4444;
+             border-radius: 8px;
+             padding: 15px;
+             margin: 20px 0;
+         }
+
+         .social-icons {
+             display: flex;
+             justify-content: center;
+             align-items: center;
+             gap: 15px;
+             margin-top: 20px;
+         }
+
+         .social-icon {
+             transition: transform 0.3s ease;
+         }
+
+         .social-icon:hover {
+             transform: scale(1.1);
+         }
  
          @media (min-width: 621px) {
              .pc-lg-hide {
@@ -251,6 +316,22 @@
  .pc-w620-fontSize-16 {font-size: 16px !important;}
  .pc-w620-lineHeight-26 {line-height: 26px !important;}
  .pc-w620-padding-30-30-100-30 {padding: 30px 30px 100px 30px !important;}
+
+ .ticket-info-box {
+     padding: 15px;
+ }
+
+ .qr-container {
+     padding: 15px;
+ }
+
+ .ticket-code-display {
+     padding: 10px;
+ }
+
+ .important-note {
+     padding: 10px;
+ }
  
  .pc-w620-gridCollapsed-1 > tbody,.pc-w620-gridCollapsed-1 > tbody > tr,.pc-w620-gridCollapsed-1 > tr {display: inline-block !important;}
  .pc-w620-gridCollapsed-1.pc-width-fill > tbody,.pc-w620-gridCollapsed-1.pc-width-fill > tbody > tr,.pc-w620-gridCollapsed-1.pc-width-fill > tr {width: 100% !important;}
@@ -296,8 +377,8 @@
     <![endif]-->
 </head>
 
-<body class="pc-font-alt" style="width: 100% !important;min-height: 100% !important;margin: 0 !important;padding: 0 !important;line-height: 1.5;color: #2D3A41;mso-line-height-rule: exactly;-webkit-font-smoothing: antialiased;-webkit-text-size-adjust: 100%;-ms-text-size-adjust: 100%;font-variant-ligatures: normal;text-rendering: optimizeLegibility;-moz-osx-font-smoothing: grayscale;background-color: #ffffff;" bgcolor="#ffffff">
- <table class="pc-project-body" style="table-layout: fixed;min-width: 600px;background-color:#ffffff;" bgcolor="#ffffff" width="100%" border="0" cellspacing="0" cellpadding="0" role="presentation">
+<body class="pc-font-alt" style="width: 100% !important;min-height: 100% !important;margin: 0 !important;padding: 0 !important;line-height: 1.5;color: #2D3A41;mso-line-height-rule: exactly;-webkit-font-smoothing: antialiased;-webkit-text-size-adjust: 100%;-ms-text-size-adjust: 100%;font-variant-ligatures: normal;text-rendering: optimizeLegibility;-moz-osx-font-smoothing: grayscale;background: linear-gradient(135deg, #1F2937, #111827);" bgcolor="#1F2937">
+ <table class="pc-project-body" style="table-layout: fixed;min-width: 600px;background: linear-gradient(135deg, #1F2937, #111827);" bgcolor="#1F2937" width="100%" border="0" cellspacing="0" cellpadding="0" role="presentation">
   <tr>
    <td align="center" valign="top">
     <table class="pc-project-container" style="width: 600px; max-width: 600px;" width="600" align="center" border="0" cellpadding="0" cellspacing="0" role="presentation">
@@ -312,170 +393,166 @@
             <td class="pc-w620-spacing-0-0-0-0" style="padding: 0px 0px 0px 0px;">
              <table width="100%" border="0" cellspacing="0" cellpadding="0" role="presentation">
               <tr>
-               <td valign="top" class="pc-w620-padding-30-30-100-30" style="padding: 0px 40px 40px 40px;border-radius: 0px;background-color: #1B1B1B;" bgcolor="#1B1B1B">
+               <td valign="top" class="pc-w620-padding-30-30-100-30" style="padding: 0px 40px 40px 40px;border-radius: 16px;background: linear-gradient(135deg, #1F2937, #111827);box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);" bgcolor="#1F2937">
+                
+                <!-- Logo Section -->
                 <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
                  <tr>
-                  <td class="pc-w620-spacing-0-0-0-0" align="center" valign="top" style="padding: 0px 0px 0px 0px;">
-                   <img src="https://weyellowbridge.s3.eu-central-1.amazonaws.com/Other/yellowBridge.png" class="" width="200" height="200" alt="" style="display: block;border: 0;outline: 0;line-height: 100%;-ms-interpolation-mode: bicubic;width:200px;height: auto;max-width: 100%;" />
+                  <td class="pc-w620-spacing-0-0-0-0" align="center" valign="top" style="padding: 30px 0px 20px 0px;">
+                   <div style="background: rgba(255, 255, 255, 0.1); border-radius: 50%; padding: 20px; display: inline-block; margin-bottom: 20px;">
+                    <img src="https://weyellowbridge.s3.eu-central-1.amazonaws.com/Other/yellowBridge.png" class="" width="120" height="120" alt="Yellow Bridge Logo" style="display: block;border: 0;outline: 0;line-height: 100%;-ms-interpolation-mode: bicubic;width:120px;height: auto;max-width: 100%;border-radius: 50%;" />
+                   </div>
                   </td>
                  </tr>
                 </table>
-                <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
-                 <tr>
-                  <td align="center" valign="top" style="padding: 0px 0px 17px 0px;">
-                   <table border="0" cellpadding="0" cellspacing="0" role="presentation" align="center">
-                    <tr>
-                     <td valign="top" class="pc-font-alt" align="center" style="padding: 0px 0px 0px 0px;mso-line-height: exactly;line-height: 121%;font-family: Fira Sans, Arial, Helvetica, sans-serif;font-size: 14px;font-weight: 500;color: #40be65;text-align: center;text-align-last: center;font-variant-ligatures: normal;">
-                      <div><span>Presents</span>
-                      </div>
-                     </td>
-                    </tr>
-                   </table>
-                  </td>
-                 </tr>
-                </table>
-                <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
-                 <tr>
-                  <td align="center" valign="top" style="padding: 0px 0px 30px 0px;">
-                   <table border="0" cellpadding="0" cellspacing="0" role="presentation" align="center">
-                    <tr>
-                     <td valign="top" class="pc-font-alt pc-w620-fontSize-30 pc-w620-lineHeight-40" align="center" style="mso-line-height: exactly;line-height: 128%;letter-spacing: -0.6px;font-family: Fira Sans, Arial, Helvetica, sans-serif;font-size: 36px;font-weight: 800;color: #ffffff;text-align: center;text-align-last: center;font-variant-ligatures: normal;">
-                      <div><span>$eventTitle</span>
-                      </div>
-                      
-                     </td>
-                    </tr>
-                   </table>
-                  </td>
-                 </tr>
-                </table>
-                <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
-                 <tr>
-                  <td align="center" valign="top" style="padding: 0px 0px 30px 0px;">
-                   <img src="$eventPromotionalPhoto" class="" width="285" height="380" alt="" style="display: block;border: 0;outline: 0;line-height: 100%;-ms-interpolation-mode: bicubic;width:285px;height: auto;max-width: 100%;" />
-                  </td>
-                 </tr>
-                </table>
-                <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
-                 <tr>
-                  <td align="center" valign="top" style="padding: 0px 0px 29px 0px;">
-                   <table border="0" cellpadding="0" cellspacing="0" role="presentation" align="center">
-                    <tr>
-                     <td valign="top" class="pc-font-alt pc-w620-fontSize-16 pc-w620-lineHeight-26" align="center" style="padding: 10px 0px 0px 0px;mso-line-height: exactly;line-height: 156%;letter-spacing: -0.2px;font-family: Fira Sans, Arial, Helvetica, sans-serif;font-size: 18px;font-weight: 300;color: #ffffff;text-align: left;text-align-last: left;font-variant-ligatures: normal;">
-                      <div style="text-align: left;">
-                        <h3>Hi there,</h3>
-                        <p>I hope this email finds you well.</p>
-                        <p> We are thrilled to confirm your ticket purchase for the upcoming <b><i style="color:yellow;">$eventTitle</i></b>. 
-                            Your order has been successfully processed, and your ticket is now reserved for the event. 
-                        </p>
-                        <p>Please keep this email as your proof of purchase, as you will be required to present it at the event entrance.</p>
-                        <p> If you have any questions or concerns regarding your ticket purchase, feel free to reply to this email, and our support team will be more than happy to assist you.</p>
 
-                        <p>Thank you for choosing to be a part of <b><i style="color:yellow;">$eventTitle</i></b>. We look forward to seeing you there and hope you have a fantastic time!</span>
-                         
-                            <table>
-                                <tbody>
-                                  <tr>
-                                    <td>Best Regards,</td>    
-                                  </tr>
-                                  <tr>
-                                    <td>yellow bridge</td>
-                                  </tr>
-                                  <tr> 
-                                    <td><a href="mailto:info@weyellowbridge.com">info@weyellowbridge.com</a></td>
-                                  </tr>
-                                </tbody>
-                              </table>
-                         
-                        </div>
-                      <div><span>&#xFEFF;</span>
-                      </div>
-                     </td>
-                    </tr>
-                   </table>
-                  </td>
-                 </tr>
-                </table>
-                <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width: 100%;">
-                 <tr>
-                  <td valign="top" style="padding: 0px 0px 5px 0px;">
-                   <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
-                    <tr>
-                     <!--[if gte mso 9]>
-                    <td height="1" valign="top" style="line-height: 1px; font-size: 1px; border-bottom: 2px solid #D9D9D9;">&nbsp;</td>
-                <![endif]-->
-                     <!--[if !gte mso 9]><! -->
-                     <td height="1" valign="top" style="line-height: 1px; font-size: 1px; border-bottom: 2px solid #D9D9D9;">&nbsp;</td>
-                     <!--<![endif]-->
-                    </tr>
-                   </table>
-                  </td>
-                 </tr>
-                </table>
+                <!-- Ticket Header -->
                 <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
                  <tr>
-                  <td valign="top">
-                   <img id="myQRCODE" src="$qrcodeData" class="center" width="100" height="auto" alt="" style=" margin-left: auto;
-                   margin-right: auto;display: block;border: 0;outline: 0;line-height: 50%;-ms-interpolation-mode: bicubic;width:auto;height: auto;" />
+                  <td align="center" valign="top" style="padding: 0px 0px 10px 0px;">
+                   <div style="background: linear-gradient(135deg, #F59E0B, #D97706); padding: 15px 30px; border-radius: 25px; display: inline-block; margin-bottom: 15px;">
+                    <span style="color: white; font-weight: 700; font-size: 16px; letter-spacing: 1px;">🎫 YOUR TICKET</span>
+                   </div>
                   </td>
                  </tr>
                 </table>
+
+                <!-- Event Title -->
+                <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
+                 <tr>
+                  <td align="center" valign="top" style="padding: 0px 0px 25px 0px;">
+                   <h1 style="font-size: 32px; font-weight: 800; margin: 0; background: linear-gradient(135deg, #F59E0B, #FBBF24); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; text-align: center; line-height: 1.2;">$eventTitle</h1>
+                  </td>
+                 </tr>
+                </table>
+
+                <!-- Event Image -->
+                <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
+                 <tr>
+                  <td align="center" valign="top" style="padding: 0px 0px 30px 0px;">
+                   <div class="event-image-container" style="border-radius: 15px; overflow: hidden; box-shadow: 0 15px 35px rgba(0, 0, 0, 0.3); border: 3px solid rgba(245, 158, 11, 0.3);">
+                    <img src="$eventPromotionalPhoto" class="" width="320" height="400" alt="Event Image" style="display: block;border: 0;outline: 0;line-height: 100%;-ms-interpolation-mode: bicubic;width:320px;height: auto;max-width: 100%;" />
+                   </div>
+                  </td>
+                 </tr>
+                </table>
+
+                <!-- Welcome Message -->
+                <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
+                 <tr>
+                  <td align="center" valign="top" style="padding: 0px 0px 30px 0px;">
+                   <div class="ticket-info-box" style="background: rgba(255, 255, 255, 0.08); border-radius: 15px; padding: 25px; border-left: 4px solid #F59E0B;">
+                    <h2 style="color: #F59E0B; font-size: 24px; font-weight: 700; margin: 0 0 15px 0; text-align: center;">🎉 Congratulations!</h2>
+                    <p style="color: #E5E7EB; font-size: 16px; line-height: 1.6; margin: 0 0 15px 0; text-align: center;">Your ticket for <strong style="color: #FBBF24;">$eventTitle</strong> has been confirmed!</p>
+                    <p style="color: #D1D5DB; font-size: 14px; line-height: 1.5; margin: 0; text-align: center;">Please save this email as your digital ticket. You'll need to present it at the event entrance.</p>
+                   </div>
+                  </td>
+                 </tr>
+                </table>
+
+                <!-- QR Code Section -->
+                <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
+                 <tr>
+                  <td align="center" valign="top" style="padding: 0px 0px 20px 0px;">
+                   <div class="qr-container" style="background: white; border-radius: 15px; padding: 25px; box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15); border: 2px solid #F59E0B;">
+                    <h3 style="color: #1F2937; font-size: 18px; font-weight: 600; margin: 0 0 15px 0; text-align: center;">Scan at Entry</h3>
+                    <img id="myQRCODE" src="$qrcodeData" class="center" width="120" height="120" alt="QR Code" style="margin: 0 auto; display: block; border: 2px solid #F3F4F6; border-radius: 8px;" />
+                   </div>
+                  </td>
+                 </tr>
+                </table>
+
                 <!-- Ticket Code Display -->
                 <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
-                  <tr>
-                    <td align="center" valign="top" style="padding: 10px 0px 10px 0px;">
-                      <table border="0" cellpadding="0" cellspacing="0" role="presentation" align="center">
-                        <tr>
-                          <td valign="top" class="pc-font-alt" align="center" style="mso-line-height: exactly;line-height: 24px;font-family: Fira Sans, Arial, Helvetica, sans-serif;font-size: 18px;font-weight: 500;color: #ffffff;text-align: center;text-align-last: center;">
-                            <div>Ticket Code: <span style="color: yellow;font-weight: 700;letter-spacing: 1px;">$ticketCode</span></div>
-                          </td>
-                        </tr>
-                      </table>
-                    </td>
-                  </tr>
+                 <tr>
+                  <td align="center" valign="top" style="padding: 0px 0px 30px 0px;">
+                   <div class="ticket-code-display" style="background: linear-gradient(135deg, #1F2937, #374151); border: 2px solid #F59E0B; border-radius: 12px; padding: 20px;">
+                    <p style="color: #9CA3AF; font-size: 14px; margin: 0 0 8px 0; text-align: center; text-transform: uppercase; letter-spacing: 1px;">Ticket Code</p>
+                    <p style="color: #FBBF24; font-size: 24px; font-weight: 700; margin: 0; text-align: center; letter-spacing: 2px; font-family: 'Courier New', monospace;">$ticketCode</p>
+                   </div>
+                  </td>
+                 </tr>
                 </table>
+
+                <!-- Important Information -->
+                <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
+                 <tr>
+                  <td align="center" valign="top" style="padding: 0px 0px 30px 0px;">
+                   <div class="important-note" style="background: rgba(239, 68, 68, 0.1); border-left: 4px solid #EF4444; border-radius: 8px; padding: 20px;">
+                    <h4 style="color: #FCA5A5; font-size: 16px; font-weight: 600; margin: 0 0 10px 0;">⚠️ Important</h4>
+                    <ul style="color: #E5E7EB; margin: 0; padding-left: 20px; font-size: 14px; line-height: 1.5;">
+                     <li>Arrive 30 minutes before the event starts</li>
+                     <li>Bring a valid ID for verification</li>
+                     <li>This ticket is non-transferable and non-refundable</li>
+                     <li>Screenshots of this email are acceptable</li>
+                    </ul>
+                   </div>
+                  </td>
+                 </tr>
+                </table>
+
+                <!-- Contact Section -->
+                <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
+                 <tr>
+                  <td align="center" valign="top" style="padding: 0px 0px 30px 0px;">
+                   <div style="text-align: center; padding: 20px; background: rgba(255, 255, 255, 0.05); border-radius: 12px;">
+                    <p style="color: #D1D5DB; font-size: 16px; line-height: 1.6; margin: 0 0 15px 0;">Have questions? We're here to help!</p>
+                    <p style="color: #9CA3AF; margin: 0 0 5px 0; font-size: 16px;">Contact us:</p>
+                    <p style="color: #F59E0B; margin: 0 0 5px 0; font-size: 18px; font-weight: 600;">Yellow Bridge Team</p>
+                    <a href="mailto:info@weyellowbridge.com" style="color: #60A5FA; text-decoration: none; font-size: 16px;">info@weyellowbridge.com</a>
+                   </div>
+                  </td>
+                 </tr>
+                </table>
+
+                <!-- Divider -->
                 <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation" style="width: 100%;">
                  <tr>
-                  <td valign="top" style="padding: 0px 0px 5px 0px;">
+                  <td valign="top" style="padding: 20px 0px 20px 0px;">
                    <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
                     <tr>
-                     <!--[if gte mso 9]>
-                    <td height="1" valign="top" style="line-height: 1px; font-size: 1px; border-bottom: 2px solid #D9D9D9;">&nbsp;</td>
-                <![endif]-->
-                     <!--[if !gte mso 9]><! -->
-                     <td height="1" valign="top" style="line-height: 1px; font-size: 1px; border-bottom: 2px solid #D9D9D9;">&nbsp;</td>
-                     <!--<![endif]-->
+                     <td height="1" valign="top" style="line-height: 1px; font-size: 1px; border-bottom: 1px solid rgba(255, 255, 255, 0.2);">&nbsp;</td>
                     </tr>
                    </table>
                   </td>
                  </tr>
                 </table>
+
+                <!-- Footer -->
                 <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
                  <tr>
-                  <td align="center" valign="top" style="padding: 20px 0px 0px 0px;">
+                  <td align="center" valign="top" style="padding: 10px 0px 0px 0px;">
                    <table border="0" cellpadding="0" cellspacing="0" role="presentation" width="100%" align="center">
                     <tr>
-                     <td valign="top" class="pc-font-alt" align="center" style="padding: 0px 0px 0px 0px;mso-line-height: exactly;line-height: 21px;font-family: Fira Sans, Arial, Helvetica, sans-serif;font-size: 16px;font-weight: normal;color: #ffffff;text-align: center;text-align-last: center;font-variant-ligatures: normal;">
-                      <div><span>Business-Id:  </span><span style="font-weight: 500;font-style: normal;">3416145-1</span>
-                      </div>
-                      <div><span style="font-weight: 500;font-style: normal;">Email: </span><span style="font-weight: 400;font-style: normal;color: rgb(255, 255, 255);">info@weyellowbridge.com</span>
+                     <td valign="top" class="pc-font-alt" align="center" style="padding: 0px 0px 15px 0px;mso-line-height: exactly;line-height: 21px;font-family: Fira Sans, Arial, Helvetica, sans-serif;font-size: 14px;font-weight: normal;color: #9CA3AF;text-align: center;">
+                      <div>
+                        <span style="color: #D1D5DB;">Business ID: </span>
+                        <span style="font-weight: 600; color: #F59E0B;">3416145-1</span>
                       </div>
                      </td>
-                     <td valign="top" class="pc-font-alt" align="center" style="padding: 0px 10px 0px 0px;mso-line-height: exactly;line-height: 21px;font-family: Fira Sans, Arial, Helvetica, sans-serif;font-size: 16px;font-weight: normal;color: #ffffff;text-align: center;text-align-last: center;font-variant-ligatures: normal;">
-                        <a href="https://www.facebook.com/profile.php?id=61555986183672" target="_blank" style="color:#FFFFFF;text-decoration: none; overflow: hidden; border-radius: 2px; display: inline-block;">
-                         <img src="https://cdn4.iconfinder.com/data/icons/social-media-icons-the-circle-set/48/facebook_circle-512.png" alt="Facebook" width="32" height="32" style="display: block; border: 0; outline: none;">
-                        </a>  
-                       </td>
-                       <td valign="top" class="pc-font-alt" align="center" style="padding: 0px 10px 0px 0px;mso-line-height: exactly;line-height: 21px;font-family: Fira Sans, Arial, Helvetica, sans-serif;font-size: 16px;font-weight: normal;color: #ffffff;text-align: center;text-align-last: center;font-variant-ligatures: normal;">
-                        <a href="https://www.instagram.com/weyellowbridge/" target="_blank" style="color:#FFFFFF;text-decoration: none; overflow: hidden; border-radius: 2px; display: inline-block;">
-                         <img src="https://cdn4.iconfinder.com/data/icons/social-media-icons-the-circle-set/48/instagram_circle-512.png" alt="Instagram" width="32" height="32" style="display: block; border: 0; outline: none;">
-                        </a>  
-                       </td>
-                       <td valign="top" class="pc-font-alt" align="center" style="padding: 0px 0px 0px 0px;mso-line-height: exactly;line-height: 21px;font-family: Fira Sans, Arial, Helvetica, sans-serif;font-size: 16px;font-weight: normal;color: #ffffff;text-align: center;text-align-last: center;font-variant-ligatures: normal;">
-                        <a href="https://www.facebook.com/profile.php?id=61555986183672" target="_blank" style="color:#FFFFFF;text-decoration: none; overflow: hidden; border-radius: 2px; display: inline-block;">
-                         <img src="https://cdn4.iconfinder.com/data/icons/social-media-icons-the-circle-set/48/linkedin_circle-512.png" alt="LinkedIn" width="32" height="32" style="display: block; border: 0; outline: none;">
-                        </a>  
-                       </td>
+                    </tr>
+                    <tr>
+                     <td align="center" style="padding: 0px;">
+                      <table border="0" cellpadding="0" cellspacing="0" role="presentation" align="center">
+                       <tr>
+                        <td valign="top" class="pc-font-alt social-icon" align="center" style="padding: 0px 10px 0px 0px;">
+                         <a href="https://www.facebook.com/profile.php?id=61555986183672" target="_blank" style="color:#FFFFFF;text-decoration: none; display: inline-block;">
+                          <img src="https://cdn4.iconfinder.com/data/icons/social-media-icons-the-circle-set/48/facebook_circle-512.png" alt="Facebook" width="36" height="36" style="display: block; border: 0; outline: none; border-radius: 50%; filter: brightness(0.9);">
+                         </a>  
+                        </td>
+                        <td valign="top" class="pc-font-alt social-icon" align="center" style="padding: 0px 10px 0px 0px;">
+                         <a href="https://www.instagram.com/weyellowbridge/" target="_blank" style="color:#FFFFFF;text-decoration: none; display: inline-block;">
+                          <img src="https://cdn4.iconfinder.com/data/icons/social-media-icons-the-circle-set/48/instagram_circle-512.png" alt="Instagram" width="36" height="36" style="display: block; border: 0; outline: none; border-radius: 50%; filter: brightness(0.9);">
+                         </a>  
+                        </td>
+                        <td valign="top" class="pc-font-alt social-icon" align="center" style="padding: 0px 0px 0px 0px;">
+                         <a href="https://www.linkedin.com/company/yellow-bridge" target="_blank" style="color:#FFFFFF;text-decoration: none; display: inline-block;">
+                          <img src="https://cdn4.iconfinder.com/data/icons/social-media-icons-the-circle-set/48/linkedin_circle-512.png" alt="LinkedIn" width="36" height="36" style="display: block; border: 0; outline: none; border-radius: 50%; filter: brightness(0.9);">
+                         </a>  
+                        </td>
+                       </tr>
+                      </table>
+                     </td>
                     </tr>
                    </table>
                   </td>
@@ -498,8 +575,7 @@
   </tr>
  </table>
  <!-- Fix for Gmail on iOS -->
- <div class="pc-gmail-fix" style="white-space: nowrap; font: 15px courier; line-height: 0;">&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;
- </div>
+ <div class="pc-gmail-fix" style="white-space: nowrap; font: 15px courier; line-height: 0;">&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;</div>
 </body>
 
 </html>
