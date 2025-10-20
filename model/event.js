@@ -8,7 +8,7 @@ export class Event {
         eventLocationGeoCode, transportLink,
         socialMedia, lang, position, active, eventName, videoUrl, otherInfo,
         eventTimezone, city, country, venueInfo, externalMerchantId, merchant,
-        externalEventId
+        externalEventId,venue,
     ) {
         this.eventTitle = eventTitle
         this.eventDescription = eventDescription
@@ -34,6 +34,7 @@ export class Event {
         this.externalMerchantId = externalMerchantId
         this.merchant = merchant
         this.externalEventId = externalEventId
+        this.venue = venue
     }
     async saveToDB() {
         try {
@@ -62,7 +63,8 @@ export class Event {
                 venueInfo: this.venueInfo,  
                 externalMerchantId: this.externalMerchantId,
                 merchant: this.merchant,
-                externalEventId: this.externalEventId
+                externalEventId: this.externalEventId,
+                venue: this.venue,
             })
             return await event.save()
         } catch (err) {
@@ -76,13 +78,13 @@ export class Event {
 export const createEvent = async (eventTitle, eventDescription, eventDate,  
     occupancy, ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
     socialMedia, lang, position, active, eventName, videoUrl, otherInfo,
-    eventTimezone, city, country, venueInfo, externalMerchantId, merchant, externalEventId
+    eventTimezone, city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue
     ) =>{
         
     const event = new Event(eventTitle, eventDescription, eventDate,  
         occupancy, ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
         socialMedia, lang, position, active, eventName, videoUrl, otherInfo,   
-        eventTimezone, city, country, venueInfo, externalMerchantId, merchant, externalEventId)
+        eventTimezone, city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue)
     return await event.saveToDB()
 }
 
@@ -97,7 +99,7 @@ export const getEvents = async() =>{
 }
 
 export const getEventById = async(id) =>{ 
-    return await model.Event.findById({_id:id}).exec()
+    return await model.Event.findById({_id:id}).populate('merchant').exec() 
 }
 
 export const getEventByExternalEventId = async(externalEventId) =>{
@@ -106,27 +108,21 @@ export const getEventByExternalEventId = async(externalEventId) =>{
 export const updateEventById = async (id, obj) =>{
     return await model.Event.findByIdAndUpdate(id, {
         $set: obj
-    }, { new: true })  
+    }, { new: true }).lean().exec()  
 }
 
 export const getEventsWithTicketCounts = async() =>{
     try{ 
-        const events = await model.Event.find({}).sort({'position':-1}).lean()  // `.lean()` for plain JS objects instead of Mongoose models
-        const eventsWithTicketCounts = await Promise.all(
-        events.map(async (event) => {
-            const ticketsSold = await Ticket.countDocuments({ 
-            active: true,      // Count only active tickets
-            event:event._id
-            })
-            event.eventPhoto = []
-                
-            // Remove unwanted fields such as "otherInfo" -> destructuring 
+        // Use the new positioning system
+        const events = await getEventsWithPositioning();
+        // Clean up the events (ticket counts already included from getEventsWithPositioning)
+        const eventsWithTicketCounts = events.map(event => {
             const { otherInfo, ...cleanedEvent } = event;
             return {
-            ...cleanedEvent,
-            ticketsSold  // Add ticket count info to the event
-            }
-        }))
+                ...cleanedEvent,
+                eventPhoto: [] // Remove event photos for performance
+            };
+        });
 
         return eventsWithTicketCounts;
     }catch(err){
@@ -138,3 +134,211 @@ export const deleteEventById = async(id) =>{
     // Update to delete only if active is false
     return await model.Event.findOneAndDelete({ _id: id, active: false });
 }
+
+
+export const listEvent = async(filter) =>{
+    return await model.Event.find({}).populate('merchant').sort({'position':-1}).lean()
+}
+
+export const listEventFiltered = async({ city, country, page = 1, limit = 12 } = {}) => {
+    const q = {}
+    if (city) {
+        q.city = city
+    }
+    if (country) {
+        q.country = country
+    }
+    // Active only by default
+    q.active = { $ne: false }
+
+    const numericPage = Math.max(parseInt(String(page), 10) || 1, 1)
+    const numericLimit = Math.min(Math.max(parseInt(String(limit), 10) || 12, 1), 100)
+
+    const total = await model.Event.countDocuments(q)
+    const items = await model.Event.find(q)
+        .populate('merchant')
+        .sort({ position: -1, eventDate: 1 })
+        .skip((numericPage - 1) * numericLimit)
+        .limit(numericLimit)
+        .lean()
+
+    // append ticketsSold like getEventsWithTicketCounts does
+    const itemsWithCounts = await Promise.all(items.map(async (event) => {
+        const ticketsSold = await Ticket.countDocuments({ active: true, event: event._id })
+        const { otherInfo, ...cleaned } = event
+        return { ...cleaned, ticketsSold }
+    }))
+
+    return { items: itemsWithCounts, total }
+}
+
+// Featured events methods
+export const getFeaturedEvents = async() => {
+    try {
+        const now = new Date();
+        const featuredEvents = await model.Event.find({
+            'featured.isFeatured': true,
+            $or: [
+                { 'featured.featuredType': 'sticky' },
+                { 
+                    'featured.featuredType': 'temporary',
+                    'featured.startDate': { $lte: now },
+                    'featured.endDate': { $gte: now }
+                }
+            ],
+            active: true,
+            eventDate: { $gte: now } // Only future events
+        })
+        .populate('merchant')
+        .sort({ 
+            'featured.priority': -1, 
+            'featured.position': 1, 
+            'featured.featuredAt': -1 
+        })
+        .lean();
+
+        return featuredEvents;
+    } catch (error) {
+        console.error('Error getting featured events:', error);
+        return [];
+    }
+}
+
+export const getRegularEvents = async(skipFeaturedIds = []) => {
+    try {
+        const now = new Date();
+        const regularEvents = await model.Event.find({
+            $or: [
+                { 'featured.isFeatured': false },
+                { 'featured.isFeatured': { $exists: false } }
+            ],
+            active: true,
+            eventDate: { $gte: now },
+            _id: { $nin: skipFeaturedIds }
+        })
+        .populate('merchant')
+        .sort({ position: -1, createdAt: -1 })
+        .lean();
+
+        return regularEvents;
+    } catch (error) {
+        console.error('Error getting regular events:', error);
+        return [];
+    }
+}
+
+export const getEventsWithPositioning = async() => {
+    try {
+        const [featuredEvents, regularEvents] = await Promise.all([
+            getFeaturedEvents(),
+            getRegularEvents()
+        ]);
+
+        // Combine and sort: featured first, then regular
+        const allEvents = [...featuredEvents, ...regularEvents];
+        
+        // Add ticket counts
+        const eventsWithTicketCounts = await Promise.all(
+            allEvents.map(async (event) => {
+                const ticketsSold = await Ticket.countDocuments({ 
+                    active: true,
+                    event: event._id
+                });
+                
+                return {
+                    ...event,
+                    ticketsSold
+                };
+            })
+        );
+
+        return eventsWithTicketCounts;
+    } catch (error) {
+        console.error('Error getting events with positioning:', error);
+        return [];
+    }
+}
+
+export const featureEvent = async(eventId, featuredData, userId) => {
+    try {
+        const updateData = {
+            'featured.isFeatured': true,
+            'featured.featuredType': featuredData.type || 'temporary',
+            'featured.priority': featuredData.priority || 0,
+            'featured.reason': featuredData.reason,
+            'featured.createdBy': userId,
+            'featured.featuredAt': new Date()
+        };
+
+        // Add time-based fields for temporary featuring
+        if (featuredData.type === 'temporary') {
+            updateData['featured.startDate'] = featuredData.startDate;
+            updateData['featured.endDate'] = featuredData.endDate;
+        }
+
+        const event = await model.Event.findByIdAndUpdate(
+            eventId,
+            { $set: updateData },
+            { new: true }
+        ).populate('merchant');
+
+        return event;
+    } catch (error) {
+        console.error('Error featuring event:', error);
+        throw error;
+    }
+}
+
+export const unfeatureEvent = async(eventId) => {
+    try {
+        const event = await model.Event.findByIdAndUpdate(
+            eventId,
+            { 
+                $set: { 
+                    'featured.isFeatured': false,
+                    'featured.featuredType': 'temporary',
+                    'featured.priority': 0,
+                    'featured.reason': null,
+                    'featured.startDate': null,
+                    'featured.endDate': null
+                }
+            },
+            { new: true }
+        ).populate('merchant');
+
+        return event;
+    } catch (error) {
+        console.error('Error unfeaturing event:', error);
+        throw error;
+    }
+}
+
+export const cleanupExpiredFeatures = async() => {
+    try {
+        const now = new Date();
+        const result = await model.Event.updateMany(
+            {
+                'featured.isFeatured': true,
+                'featured.featuredType': 'temporary',
+                'featured.endDate': { $lt: now }
+            },
+            {
+                $set: {
+                    'featured.isFeatured': false,
+                    'featured.featuredType': 'temporary',
+                    'featured.priority': 0,
+                    'featured.reason': 'Expired temporary feature',
+                    'featured.endDate': null
+                }
+            }
+        );
+
+        console.log(`Cleaned up ${result.modifiedCount} expired featured events`);
+        return result.modifiedCount;
+    } catch (error) {
+        console.error('Error cleaning up expired features:', error);
+        throw error;
+    }
+}
+
+

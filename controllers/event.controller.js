@@ -204,10 +204,11 @@ export const updateEventById = async (req,res,next) =>{
     const active = req.body.active
     const eventName = req.body.eventName
     const videoUrl = req.body.videoUrl
-    const convertDateTime = await commonUtil.convertDateTimeWithTimeZone(eventDate)
+    const eventTimezone = req.body.eventTimezone
+    const convertDateTime = await commonUtil.convertDateTimeWithTimeZone(eventDate, eventTimezone)
     const otherInfo = req.body.otherInfo
     //const timeInMinutes =  commonUtil.timeInMinutes(eventTime)
-    const eventTimezone = req.body.eventTimezone
+    
     const city = req.body.city  
     const country = req.body.country
     const venueInfo = req.body.venueInfo
@@ -266,6 +267,9 @@ export const updateEventStatusById = async (req,res,next) =>{
     const token = req.headers.authorization 
     const id = req.params.id
     const active = req.body.active  
+    const featured = req.body.featured
+    
+    console.log('updateEventStatusById payload:', { active, featured })
 
     await jwtToken.verifyJWT(token, async (err, data) => {
         if (err || data === null) { 
@@ -283,7 +287,7 @@ export const updateEventStatusById = async (req,res,next) =>{
             if(originalEvent === null || originalEvent === '' || originalEvent === 'undefined'){
                 return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({ })
             }
-            const updatedEvent =  await Event.updateEventById(id,{active:active}) 
+            const updatedEvent =  await Event.updateEventById(id,{active:active, featured:featured}) 
             try {
                 // 2. Create outbox message entry
                 const correlationId = uuidv4()
@@ -292,7 +296,7 @@ export const updateEventStatusById = async (req,res,next) =>{
                 // Determine routing key and event type based on status
                 const routingKey = 'external.event.status.updated'
                 const eventType = active === true ? 'EventActivated' : 'EventDeactivated'
-                console.log(eventType, active)
+                console.log(eventType, active, "========",updatedEvent, updatedEvent?.externalMerchantId, "\n", updatedEvent?.eventTitle)
                 const outboxMessageData = {
                     messageId: messageId,
                     exchange: 'event-merchant-exchange',   
@@ -327,6 +331,17 @@ export const updateEventStatusById = async (req,res,next) =>{
                     exchangeType: 'topic'
                 }
 
+                console.log('=== OUTBOX MESSAGE DATA ===');
+                console.log('messageBody.data.merchantId:', outboxMessageData.messageBody.data.merchantId);
+                console.log('Full messageBody structure:', JSON.stringify(outboxMessageData.messageBody, null, 2));
+
+                // Validate before serialization
+                if (!outboxMessageData.messageBody.data.merchantId) {
+                console.error('❌ CRITICAL: merchantId is missing in messageBody.data!');
+                console.log('updatedEvent keys:', Object.keys(updatedEvent));
+                console.log('updatedEvent.externalMerchantId:', updatedEvent.externalMerchantId);
+                throw new Error('merchantId missing in message construction');
+                }
                 const outboxMessage = await OutboxMessage.createOutboxMessage(outboxMessageData)
                 info('Outbox message created for event update:', outboxMessage._id)
 

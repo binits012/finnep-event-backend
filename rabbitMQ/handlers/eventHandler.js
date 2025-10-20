@@ -9,13 +9,37 @@ export const handleEventMessage = async (message) => {
         error('Invalid message format - not an object %s', { message });
         throw new Error('Message must be an object');
     }
-    await inboxModel.saveMessage({
-        messageId: message?.metaData?.causationId,
-        eventType: message.type || message.routingKey,
-        aggregateId: message.merchantId,
-        data: message,
-        metadata: message?.metaData || { receivedAt: new Date() }
-    });
+    
+    const messageId = message?.metaData?.causationId;
+    
+    // Check if message has already been processed (idempotency)
+    if (messageId && await inboxModel.isProcessed(messageId)) {
+        console.log(`Message ${messageId} already processed, skipping...`);
+        return;
+    }
+    
+    // Try to save message, but handle duplicate key error gracefully
+    try {
+        await inboxModel.saveMessage({
+            messageId,
+            eventType: message.type || message.routingKey,
+            aggregateId: message.merchantId,
+            data: message,
+            metadata: message?.metaData || { receivedAt: new Date() }
+        });
+    } catch (saveError) {
+        // If it's a duplicate key error, check if the message was already processed
+        if (saveError.code === 11000 && messageId) {
+            const isAlreadyProcessed = await inboxModel.isProcessed(messageId);
+            if (isAlreadyProcessed) {
+                console.log(`Message ${messageId} already processed, skipping...`);
+                return;
+            }
+        }
+        // Re-throw if it's not a duplicate key error or message wasn't processed
+        throw saveError;
+    }
+    
     try {
         switch (message.routingKey) {
             case 'event.created':
@@ -37,6 +61,7 @@ export const handleEventMessage = async (message) => {
 };
 
 async function handleEventCreated(message) {  
+    console.log(message, 'creating event:');
     const externalMerchantId = message.merchantId;
     const merchant = await getMerchantByMerchantId(externalMerchantId)
     if (!merchant) {
@@ -57,7 +82,7 @@ async function handleEventCreated(message) {
     const lang = message?.lang;
     const position = message?.position;
     const active = message?.active;
-    const eventName = message.id;
+    const eventName =externalMerchantId+'_'+ message.id;
     const videoUrl = message?.video_url;
     const otherInfo = message?.other_info;
     const eventTimezone = message?.event_timezone;
@@ -65,13 +90,14 @@ async function handleEventCreated(message) {
     const country = message?.country;
     const venueInfo = message?.venue_info; 
     const externalEventId = message?.id;
+    const venue = message?.venue; 
     
     await Event.createEvent(
         eventTitle, eventDescription, eventDate, occupancy,
         ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress,
         eventLocationGeoCode, transportLink, socialMedia, lang, position,
         active, eventName, videoUrl, otherInfo, eventTimezone,
-        city, country, venueInfo, externalMerchantId, merchant, externalEventId
+        city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue
     );
 
     await inboxModel.markProcessed(message?.metaData?.causationId); 
@@ -99,7 +125,7 @@ async function handleEventUpdated(message) {
     const lang = message?.lang;
     const position = message?.position;
     const active = message?.active;
-    const eventName = message.id;
+    const eventName =externalMerchantId+'_'+ message.id;
     const videoUrl = message?.video_url;
     const otherInfo = message?.other_info;
     const eventTimezone = message?.event_timezone;
@@ -108,6 +134,7 @@ async function handleEventUpdated(message) {
     const venueInfo = message?.venue_info; 
     const externalEventId = message?.id;
     const existingEvent = await Event.getEventByExternalEventId(externalEventId);
+    const venue = existingEvent?.venue;
     if (!existingEvent) {
         throw new Error(`Event with ID ${externalEventId} not found`);
     }
@@ -116,7 +143,7 @@ async function handleEventUpdated(message) {
         ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress,
         eventLocationGeoCode, transportLink, socialMedia, lang, position,
         active, eventName, videoUrl, otherInfo, eventTimezone,
-        city, country, venueInfo}
+        city, country, venueInfo, venue}
     );
     await inboxModel.markProcessed(message?.metaData?.causationId); 
 }

@@ -59,9 +59,21 @@ class MessageConsumer {
     async consumeQueue(queueName, handler, options = {}) {
         await this.ensureChannelsReady();
 
-        const { durable = true, prefetch = 1 } = options;
+        const { durable = true, prefetch = 1, deadLetterExchange, deadLetterRoutingKey } = options;
         
-        await this.consumeChannel.assertQueue(queueName, { durable });
+        // Configure queue options with dead letter exchange if provided
+        const queueOptions = { durable };
+        if (deadLetterExchange) {
+            queueOptions.arguments = {
+                'x-dead-letter-exchange': deadLetterExchange
+            };
+            if (deadLetterRoutingKey) {
+                queueOptions.arguments['x-dead-letter-routing-key'] = deadLetterRoutingKey;
+            }
+        }
+        
+        info(`Creating queue ${queueName} with options:`, queueOptions);
+        await this.consumeChannel.assertQueue(queueName, queueOptions);
         await this.consumeChannel.prefetch(prefetch);
 
         info(`Starting to consume queue: ${queueName}`);
@@ -162,6 +174,15 @@ class MessageConsumer {
         await this.consumeChannel.prefetch(prefetch);
 
         info(`Queue ${queueName} set up with options`, { durable, prefetch });
+    }
+
+    async createExchange(exchangeName, exchangeType = 'direct', options = {}) {
+        await this.ensureChannelsReady();
+
+        const { durable = true } = options;
+        
+        await this.publishChannel.assertExchange(exchangeName, exchangeType, { durable });
+        info(`Exchange ${exchangeName} created with type ${exchangeType}`);
     }
 }
 

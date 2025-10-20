@@ -3,17 +3,23 @@ import { InboxMessage } from './mongoModel.js';
 export class InboxModel {
 
   async saveMessage({ messageId, eventType, aggregateId, data, metadata }) {
-    const doc = new InboxMessage({
-        messageId,
-        eventType,
-        aggregateId,
-        data,
-        metadata,
-        receivedAt: new Date(),
-        processed: false,
-        retryCount: 0
-      });
-      await doc.save(); 
+    // Use upsert to handle duplicate key errors gracefully
+    await InboxMessage.updateOne(
+      { messageId },
+      {
+        $setOnInsert: {
+          messageId,
+          eventType,
+          aggregateId,
+          data,
+          metadata,
+          receivedAt: new Date(),
+          processed: false,
+          retryCount: 0
+        }
+      },
+      { upsert: true }
+    );
   }
 
   async markProcessed(messageId) {

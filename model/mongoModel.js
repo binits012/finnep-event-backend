@@ -310,7 +310,7 @@ const eventSchema = new mongoose.Schema({
 	eventPromotionPhoto:{type:String},
 	eventPhoto:[{type:String}],
 	transportLink:{type:String},
-	active:{type:Boolean, default:false},
+	active:{type:Boolean, default:true},
 	eventName:{type:String,  unique:true},
 	videoUrl:{type:String},
 	status:{type:String, enum:['up-coming', 'on-going', 'completed'], default:'up-coming' },
@@ -326,9 +326,29 @@ const eventSchema = new mongoose.Schema({
 	externalMerchantId: { type: String, required: true, index: true },
 	merchant:{ type: mongoose.Schema.Types.ObjectId, ref: 'Merchant', required:true },
 	externalEventId: { type: String, required: true, index: true },
+	venue:{                      
+		type: mongoose.Schema.Types.Mixed
+	},
+	// Featured and positioning system
+	featured: {
+		isFeatured: { type: Boolean, default: false },
+		featuredType: { 
+			type: String, 
+			enum: ['sticky', 'temporary'], 
+			default: 'temporary' 
+		},
+		priority: { type: Number, default: 0 }, // Higher number = higher priority
+		startDate: { type: Date }, // When featuring starts (for temporary)
+		endDate: { type: Date }, // When featuring ends (for temporary)
+		featuredAt: { type: Date, default: Date.now }
+	},
 	createdAt: { type: Date, default: Date.now }
 })
 eventSchema.index({ externalMerchantId: 1, externalEventId: 1 }, { unique: true });
+// Featured events indexes
+eventSchema.index({ 'featured.isFeatured': 1, 'featured.priority': -1});
+eventSchema.index({ 'featured.isFeatured': 1, 'featured.featuredType': 1, 'featured.startDate': 1, 'featured.endDate': 1 });
+eventSchema.index({ 'featured.isFeatured': 1, 'featured.endDate': 1 }); // For cleanup of expired temporary features
 
 eventSchema.pre('findOneAndUpdate', function(next) {
 	const update = this.getUpdate() 
@@ -348,30 +368,6 @@ eventSchema.pre('save', function(next){
 	this.eventDate =  moment.utc(this.eventDate)
 	next()
 })
-
-// Add pre-save hook to auto-increment position
-eventSchema.pre('save', async function(next) {
-  if (!this.position) {
-    try {
-      const lastEvent = await this.constructor.findOne().sort({ position: -1 });
-      this.position = lastEvent ? lastEvent.position + 1 : 1;
-    } catch (error) {
-      return next(error);
-    }
-  }
-  next();
-});
-
-eventSchema.post('find', async (docs, next) =>{
-	if(docs !== null && docs.length > 0){
-		docs.forEach(async element => {
-			element.eventDate =  new Date(await convertDateTimeWithTimeZone(element.eventDate)+'.000+00:00')
-		});
-	} 
-	next()
-})
-
-
 
 
 const tokenSchema = new mongoose.Schema({
@@ -453,6 +449,8 @@ const ticketSchema = new mongoose.Schema({
 	type:{type:String, default:'normal'},
 	ticketInfo:{type:Map, of: mongoose.Schema.Types.Mixed},
 	validUntil:{type:Date},
+	merchant:{type: mongoose.Schema.Types.ObjectId, ref: 'Merchant', required:true},
+	externalMerchantId:{type:String, required:true},
 	otp:{type:String, required:true}
 })
 
@@ -515,6 +513,9 @@ const merchantSchema = new mongoose.Schema({
 	companyAddress: { type: String },  
 	schemaName: { type: String },  
 	status: { type: String, enum: ["active", "inactive", "pending", "suspended"], default: "pending" },
+	website: { type: String },
+	logo: { type: String },
+	stripeAccount: { type: String, required: true },
 	updatedAt: { type: Date, default: Date.now }
 });
 
@@ -572,6 +573,33 @@ inboxMessageSchema.index({ aggregateId: 1 });
 
 inboxMessageSchema.plugin(auditPlugin);
 
+
+const ticketAnalyticsSchema = new mongoose.Schema({
+	merchant: { type: mongoose.Schema.Types.ObjectId, ref: 'Merchant', required: true },
+	externalMerchantId: { type: String, required: true },
+	event: { type: mongoose.Schema.Types.ObjectId, ref: 'Event', required: true },
+  
+	totalTickets: { type: Number, default: 0 },
+	totalRevenue: { type: Number, default: 0 }, // Derived from ticketInfo.price
+  
+	ticketTypes: [{
+	  type: { type: String }, // From ticket.type
+	  count: { type: Number },
+	  revenue: { type: Number }
+	}],
+  
+	ticketInfoStats: {
+	  categories: { type: Map, of: Number }, // e.g., { 'VIP': 12, 'General': 88 }
+	  extras: { type: Map, of: Number },     // e.g., { 'meal': 45, 'parking': 30 }
+	  seatsSold: { type: Number }            // If seat info is present in ticketInfo
+	},
+  
+	processedTicketIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Ticket' }], // Track processed tickets
+  
+	firstSale: { type: Date },
+	lastSale: { type: Date },
+	lastUpdated: { type: Date, default: Date.now }
+  });
 // 3. Apply the audit plugin to all schemas BEFORE creating any models
 const schemas = [
 	inboxMessageSchema,
@@ -579,7 +607,7 @@ const schemas = [
 	merchantSchema, 
 	orderTicketSchema,paymentSchema,settingSchema,ticketSchema,messageSchema,photoSchema,photoTypeSchema,
 	notificationSchema,notificationTypeSchema,tokenSchema,eventSchema,timeBasedPriceSchema,eventTypeSchema,
-	socialMediaSchema,contactSchema,cryptoSchema,roleSchema, userSchema
+	socialMediaSchema,contactSchema,cryptoSchema,roleSchema, userSchema, ticketAnalyticsSchema
 ];
 
 schemas.forEach(schema => {
@@ -610,3 +638,4 @@ export const Crypto = mongoose.model('Crypto', cryptoSchema)
 export const Role = mongoose.model('Role', roleSchema)
 export const User = mongoose.model('User', userSchema)
 export const Merchant = mongoose.model('Merchant', merchantSchema);
+export const TicketAnalytics = mongoose.model('TicketAnalytics', ticketAnalyticsSchema);

@@ -211,7 +211,8 @@ export const updateMerchantById = async (req, res, next) => {
                             const fileLocation = __dirname.replace('controllers', '') + (status === 'active' ? '/emailTemplates/merchant_activated.html'
                                 : '/emailTemplates/merchant_suspended.html')
                             console.log('File location:', status, fileLocation)
-                            const loadedData = await loadEmailTemplateForMerchant(fileLocation, updatedMerchant?.orgName)
+                            const dashboardUrl = process.env.DASHBOARD_URL+updatedMerchant?.merchantId+'/login'
+                            const loadedData = await loadEmailTemplateForMerchant(fileLocation, updatedMerchant?.orgName, dashboardUrl)
                             const message = {
                                 from: process.env.EMAIL_USERNAME,
                                 to: updatedMerchant?.companyEmail,
@@ -219,7 +220,7 @@ export const updateMerchantById = async (req, res, next) => {
                                 html: loadedData.toString(),
 
                             }
-                            //await forward(message)
+                            await forward(message)
                         }).catch(publishError => {
                             error('Error publishing merchant update event:', publishError)
                             throw publishError

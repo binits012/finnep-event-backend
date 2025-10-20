@@ -291,6 +291,21 @@
          .social-icon:hover {
              transform: scale(1.1);
          }
+
+         @keyframes pulse {
+             0%, 100% { opacity: 0.3; transform: scale(1); }
+             50% { opacity: 0.6; transform: scale(1.1); }
+         }
+
+         @keyframes float {
+             0%, 100% { transform: translateY(0px); }
+             50% { transform: translateY(-10px); }
+         }
+
+         @keyframes glow {
+             0%, 100% { box-shadow: 0 0 20px rgba(139, 92, 246, 0.3); }
+             50% { box-shadow: 0 0 30px rgba(139, 92, 246, 0.6); }
+         }
  
          @media (min-width: 621px) {
              .pc-lg-hide {
@@ -399,29 +414,35 @@
                 <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
                  <tr>
                   <td class="pc-w620-spacing-0-0-0-0" align="center" valign="top" style="padding: 30px 0px 20px 0px;">
-                   <div style="background: rgba(255, 255, 255, 0.1); border-radius: 50%; padding: 20px; display: inline-block; margin-bottom: 20px;">
-                    <img src="https://weyellowbridge.s3.eu-central-1.amazonaws.com/Other/yellowBridge.png" class="" width="120" height="120" alt="Yellow Bridge Logo" style="display: block;border: 0;outline: 0;line-height: 100%;-ms-interpolation-mode: bicubic;width:120px;height: auto;max-width: 100%;border-radius: 50%;" />
+                   <div style="background: rgba(255, 255, 255, 0.1); border-radius: 16px; padding: 25px; display: inline-block; margin-bottom: 20px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);">
+                    <img src="https://finnep.s3.eu-central-1.amazonaws.com/Other/finnep_logo.png" class="" 
+                    width="200" height="auto" alt="Finnep Logo" style="display: block;border: 0;outline: 0;line-height: 100%;-ms-interpolation-mode: bicubic;max-width: 100%;" />
                    </div>
                   </td>
                  </tr>
                 </table>
 
-                <!-- Ticket Header -->
+                <!-- Modern Ticket Header -->
                 <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
                  <tr>
-                  <td align="center" valign="top" style="padding: 0px 0px 10px 0px;">
-                   <div style="background: linear-gradient(135deg, #F59E0B, #D97706); padding: 15px 30px; border-radius: 25px; display: inline-block; margin-bottom: 15px;">
-                    <span style="color: white; font-weight: 700; font-size: 16px; letter-spacing: 1px;">🎫 YOUR TICKET</span>
+                  <td align="center" valign="top" style="padding: 0px 0px 20px 0px;">
+                   <div style="background: linear-gradient(135deg, #8B5CF6, #A855F7, #C084FC); padding: 20px 40px; border-radius: 30px; display: inline-block; margin-bottom: 20px; box-shadow: 0 10px 30px rgba(139, 92, 246, 0.3); position: relative; overflow: hidden;">
+                    <div style="position: absolute; top: -10px; left: -10px; width: 20px; height: 20px; background: rgba(255, 255, 255, 0.2); border-radius: 50%; animation: pulse 2s infinite;"></div>
+                    <div style="position: absolute; bottom: -5px; right: -5px; width: 15px; height: 15px; background: rgba(255, 255, 255, 0.3); border-radius: 50%; animation: pulse 2s infinite 1s;"></div>
+                    <span style="color: white; font-weight: 800; font-size: 18px; letter-spacing: 2px; text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);">🎫 YOUR DIGITAL TICKET</span>
                    </div>
                   </td>
                  </tr>
                 </table>
 
-                <!-- Event Title -->
+                <!-- Modern Event Title -->
                 <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
                  <tr>
-                  <td align="center" valign="top" style="padding: 0px 0px 25px 0px;">
-                   <h1 style="font-size: 32px; font-weight: 800; margin: 0; background: linear-gradient(135deg, #F59E0B, #FBBF24); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; text-align: center; line-height: 1.2;">$eventTitle</h1>
+                  <td align="center" valign="top" style="padding: 0px 0px 30px 0px;">
+                   <div style="background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05)); border-radius: 20px; padding: 30px; margin: 20px 0; border: 1px solid rgba(255, 255, 255, 0.2); backdrop-filter: blur(10px);">
+                    <h1 style="font-size: 28px; font-weight: 800; margin: 0; background: linear-gradient(135deg, #F59E0B, #FBBF24, #FCD34D); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; text-align: center; line-height: 1.3; text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);">$eventTitle</h1>
+                    <div style="margin-top: 15px; height: 3px; background: linear-gradient(90deg, #F59E0B, #FBBF24, #FCD34D); border-radius: 2px; width: 60%; margin-left: auto; margin-right: auto;"></div>
+                   </div>
                   </td>
                  </tr>
                 </table>
@@ -430,8 +451,14 @@
                 <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
                  <tr>
                   <td align="center" valign="top" style="padding: 0px 0px 30px 0px;">
-                   <div class="event-image-container" style="border-radius: 15px; overflow: hidden; box-shadow: 0 15px 35px rgba(0, 0, 0, 0.3); border: 3px solid rgba(245, 158, 11, 0.3);">
-                    <img src="$eventPromotionalPhoto" class="" width="320" height="400" alt="Event Image" style="display: block;border: 0;outline: 0;line-height: 100%;-ms-interpolation-mode: bicubic;width:320px;height: auto;max-width: 100%;" />
+                   <div style="position: relative; border-radius: 25px; overflow: hidden; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4); margin: 20px 0; border: 3px solid rgba(255, 255, 255, 0.2);">
+                    <div style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(168, 85, 247, 0.1)); z-index: 1;"></div>
+                    <img src="$eventPromotionalPhoto" class="" width="320" height="400" alt="Event Image" style="display: block;border: 0;outline: 0;line-height: 100%;-ms-interpolation-mode: bicubic;width:320px;height: auto;max-width: 100%; position: relative; z-index: 2;" />
+                    <div style="position: absolute; bottom: 0; left: 0; right: 0; background: linear-gradient(transparent, rgba(0, 0, 0, 0.7)); padding: 20px; z-index: 3;">
+                      <div style="color: white; text-align: center;">
+                        <p style="margin: 0; font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;">🎉 You're Going!</p>
+                      </div>
+                    </div>
                    </div>
                   </td>
                  </tr>
@@ -441,34 +468,57 @@
                 <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
                  <tr>
                   <td align="center" valign="top" style="padding: 0px 0px 30px 0px;">
-                   <div class="ticket-info-box" style="background: rgba(255, 255, 255, 0.08); border-radius: 15px; padding: 25px; border-left: 4px solid #F59E0B;">
-                    <h2 style="color: #F59E0B; font-size: 24px; font-weight: 700; margin: 0 0 15px 0; text-align: center;">🎉 Congratulations!</h2>
-                    <p style="color: #E5E7EB; font-size: 16px; line-height: 1.6; margin: 0 0 15px 0; text-align: center;">Your ticket for <strong style="color: #FBBF24;">$eventTitle</strong> has been confirmed!</p>
-                    <p style="color: #D1D5DB; font-size: 14px; line-height: 1.5; margin: 0; text-align: center;">Please save this email as your digital ticket. You'll need to present it at the event entrance.</p>
+                   <div style="background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05)); border-radius: 25px; padding: 35px; margin: 20px 0; border: 1px solid rgba(255, 255, 255, 0.2); backdrop-filter: blur(10px); position: relative; overflow: hidden;">
+                    <div style="position: absolute; top: -50px; right: -50px; width: 100px; height: 100px; background: radial-gradient(circle, rgba(139, 92, 246, 0.1), transparent); border-radius: 50%;"></div>
+                    <div style="position: absolute; bottom: -30px; left: -30px; width: 60px; height: 60px; background: radial-gradient(circle, rgba(245, 158, 11, 0.1), transparent); border-radius: 50%;"></div>
+                    <h2 style="color: #F59E0B; font-size: 28px; font-weight: 800; margin: 0 0 20px 0; text-align: center; text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);">🎉 Congratulations!</h2>
+                    <p style="color: #E5E7EB; font-size: 18px; line-height: 1.6; margin: 0 0 20px 0; text-align: center; font-weight: 500;">Your ticket for <strong style="color: #FBBF24; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);">$eventTitle</strong> has been confirmed!</p>
+                    <div style="background: rgba(139, 92, 246, 0.1); border-radius: 15px; padding: 20px; margin-top: 20px; border-left: 4px solid #8B5CF6;">
+                      <p style="color: #D1D5DB; font-size: 16px; line-height: 1.5; margin: 0; text-align: center; font-weight: 400;">💾 Save this email as your digital ticket. You'll need to present it at the event entrance.</p>
+                    </div>
                    </div>
                   </td>
                  </tr>
                 </table>
 
                 <!-- QR Code Section -->
+                 <!--
                 <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
                  <tr>
                   <td align="center" valign="top" style="padding: 0px 0px 20px 0px;">
-                   <div class="qr-container" style="background: white; border-radius: 15px; padding: 25px; box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15); border: 2px solid #F59E0B;">
-                    <h3 style="color: #1F2937; font-size: 18px; font-weight: 600; margin: 0 0 15px 0; text-align: center;">Scan at Entry</h3>
-                    <img id="myQRCODE" src="$qrcodeData" class="center" width="120" height="120" alt="QR Code" style="margin: 0 auto; display: block; border: 2px solid #F3F4F6; border-radius: 8px;" />
+                   <div style="background: linear-gradient(135deg, #FFFFFF, #F8FAFC); border-radius: 25px; padding: 35px; box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2); border: 3px solid transparent; background-clip: padding-box; position: relative; overflow: hidden;">
+                    <div style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(135deg, #8B5CF6, #A855F7, #C084FC); border-radius: 25px; padding: 3px; z-index: -1;"></div>
+                    <div style="text-align: center;">
+                      <div style="background: linear-gradient(135deg, #8B5CF6, #A855F7); color: white; padding: 12px 25px; border-radius: 20px; display: inline-block; margin-bottom: 25px; font-weight: 700; font-size: 16px; letter-spacing: 1px; box-shadow: 0 5px 15px rgba(139, 92, 246, 0.3);">
+                        📱 SCAN AT ENTRY
+                      </div>
+                      <div style="background: white; border-radius: 20px; padding: 25px; margin: 20px 0; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1); border: 2px solid #F3F4F6;">
+                        <img id="myQRCODE" src="cid:qrcode@ticket" class="center" width="140" height="140" alt="QR Code for Ticket Verification" style="margin: 0 auto; display: block; border-radius: 12px;" />
+                      </div>
+                      <p style="color: #6B7280; font-size: 14px; margin: 15px 0 0 0; font-weight: 500;">Present this QR code at the event entrance</p>
+                    </div>
                    </div>
                   </td>
                  </tr>
                 </table>
+            -->
 
                 <!-- Ticket Code Display -->
                 <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
                  <tr>
                   <td align="center" valign="top" style="padding: 0px 0px 30px 0px;">
-                   <div class="ticket-code-display" style="background: linear-gradient(135deg, #1F2937, #374151); border: 2px solid #F59E0B; border-radius: 12px; padding: 20px;">
-                    <p style="color: #9CA3AF; font-size: 14px; margin: 0 0 8px 0; text-align: center; text-transform: uppercase; letter-spacing: 1px;">Ticket Code</p>
-                    <p style="color: #FBBF24; font-size: 24px; font-weight: 700; margin: 0; text-align: center; letter-spacing: 2px; font-family: 'Courier New', monospace;">$ticketCode</p>
+                   <div style="background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05)); border: 2px solid rgba(139, 92, 246, 0.3); border-radius: 20px; padding: 30px; margin: 20px 0; backdrop-filter: blur(10px); position: relative; overflow: hidden;">
+                    <div style="position: absolute; top: -20px; right: -20px; width: 40px; height: 40px; background: radial-gradient(circle, rgba(139, 92, 246, 0.2), transparent); border-radius: 50%;"></div>
+                    <div style="position: absolute; bottom: -15px; left: -15px; width: 30px; height: 30px; background: radial-gradient(circle, rgba(245, 158, 11, 0.2), transparent); border-radius: 50%;"></div>
+                    <div style="text-align: center;">
+                      <div style="background: linear-gradient(135deg, #8B5CF6, #A855F7); color: white; padding: 8px 20px; border-radius: 15px; display: inline-block; margin-bottom: 20px; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 1px;">
+                        🎫 TICKET CODE
+                      </div>
+                      <div style="background: rgba(0, 0, 0, 0.2); border-radius: 15px; padding: 20px; margin: 15px 0;">
+                        <p style="color: #FBBF24; font-size: 28px; font-weight: 800; margin: 0; text-align: center; letter-spacing: 3px; font-family: 'Courier New', monospace; text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);">$ticketCode</p>
+                      </div>
+                      <p style="color: #9CA3AF; font-size: 14px; margin: 15px 0 0 0; font-weight: 500;">Keep this code safe as a backup</p>
+                    </div>
                    </div>
                   </td>
                  </tr>
@@ -478,14 +528,21 @@
                 <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
                  <tr>
                   <td align="center" valign="top" style="padding: 0px 0px 30px 0px;">
-                   <div class="important-note" style="background: rgba(239, 68, 68, 0.1); border-left: 4px solid #EF4444; border-radius: 8px; padding: 20px;">
-                    <h4 style="color: #FCA5A5; font-size: 16px; font-weight: 600; margin: 0 0 10px 0;">⚠️ Important</h4>
-                    <ul style="color: #E5E7EB; margin: 0; padding-left: 20px; font-size: 14px; line-height: 1.5;">
-                     <li>Arrive 30 minutes before the event starts</li>
-                     <li>Bring a valid ID for verification</li>
-                     <li>This ticket is non-transferable and non-refundable</li>
-                     <li>Screenshots of this email are acceptable</li>
-                    </ul>
+                   <div style="background: linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(220, 38, 38, 0.05)); border: 2px solid rgba(239, 68, 68, 0.3); border-radius: 20px; padding: 30px; margin: 20px 0; position: relative; overflow: hidden;">
+                    <div style="position: absolute; top: -10px; right: -10px; width: 20px; height: 20px; background: radial-gradient(circle, rgba(239, 68, 68, 0.2), transparent); border-radius: 50%;"></div>
+                    <div style="text-align: center; margin-bottom: 25px;">
+                      <div style="background: linear-gradient(135deg, #EF4444, #DC2626); color: white; padding: 10px 25px; border-radius: 20px; display: inline-block; font-weight: 700; font-size: 14px; letter-spacing: 1px; box-shadow: 0 5px 15px rgba(239, 68, 68, 0.3);">
+                        ⚠️ IMPORTANT INFORMATION
+                      </div>
+                    </div>
+                    <div style="background: rgba(0, 0, 0, 0.1); border-radius: 15px; padding: 25px;">
+                      <ul style="color: #E5E7EB; margin: 0; padding-left: 20px; font-size: 16px; line-height: 1.8;">
+                       <li style="margin: 12px 0; font-weight: 500;">🕐 Arrive 30 minutes before the event starts</li>
+                       <li style="margin: 12px 0; font-weight: 500;">🆔 Bring a valid ID for verification</li>
+                       <li style="margin: 12px 0; font-weight: 500;">🚫 This ticket is non-transferable and non-refundable</li>
+                       <li style="margin: 12px 0; font-weight: 500;">📱 Screenshots of this email are acceptable</li>
+                      </ul>
+                    </div>
                    </div>
                   </td>
                  </tr>
@@ -495,11 +552,18 @@
                 <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
                  <tr>
                   <td align="center" valign="top" style="padding: 0px 0px 30px 0px;">
-                   <div style="text-align: center; padding: 20px; background: rgba(255, 255, 255, 0.05); border-radius: 12px;">
-                    <p style="color: #D1D5DB; font-size: 16px; line-height: 1.6; margin: 0 0 15px 0;">Have questions? We're here to help!</p>
-                    <p style="color: #9CA3AF; margin: 0 0 5px 0; font-size: 16px;">Contact us:</p>
-                    <p style="color: #F59E0B; margin: 0 0 5px 0; font-size: 18px; font-weight: 600;">Yellow Bridge Team</p>
-                    <a href="mailto:info@weyellowbridge.com" style="color: #60A5FA; text-decoration: none; font-size: 16px;">info@weyellowbridge.com</a>
+                   <div style="text-align: center; padding: 35px; background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05)); border-radius: 25px; border: 1px solid rgba(255, 255, 255, 0.2); backdrop-filter: blur(10px); position: relative; overflow: hidden;">
+                    <div style="position: absolute; top: -30px; left: -30px; width: 60px; height: 60px; background: radial-gradient(circle, rgba(59, 130, 246, 0.1), transparent); border-radius: 50%;"></div>
+                    <div style="position: absolute; bottom: -20px; right: -20px; width: 40px; height: 40px; background: radial-gradient(circle, rgba(139, 92, 246, 0.1), transparent); border-radius: 50%;"></div>
+                    <div style="background: linear-gradient(135deg, #3B82F6, #2563EB); color: white; padding: 15px 30px; border-radius: 25px; display: inline-block; margin-bottom: 25px; font-weight: 700; font-size: 16px; letter-spacing: 1px; box-shadow: 0 8px 20px rgba(59, 130, 246, 0.3);">
+                      💬 HAVE QUESTIONS?
+                    </div>
+                    <p style="color: #D1D5DB; font-size: 18px; line-height: 1.6; margin: 0 0 20px 0; font-weight: 500;">We're here to help!</p>
+                    <div style="background: rgba(0, 0, 0, 0.1); border-radius: 15px; padding: 20px; margin: 15px 0;">
+                      <p style="color: #9CA3AF; margin: 0 0 8px 0; font-size: 16px; font-weight: 500;">Contact us:</p>
+                      <p style="color: #F59E0B; margin: 0 0 8px 0; font-size: 20px; font-weight: 700;">The Finnep Team</p>
+                      <a href="mailto:info@finnep.fi" style="color: #60A5FA; text-decoration: none; font-size: 18px; font-weight: 600; background: rgba(96, 165, 250, 0.1); padding: 8px 16px; border-radius: 10px; display: inline-block;">info@finnep.fi</a>
+                    </div>
                    </div>
                   </td>
                  </tr>
@@ -527,7 +591,7 @@
                      <td valign="top" class="pc-font-alt" align="center" style="padding: 0px 0px 15px 0px;mso-line-height: exactly;line-height: 21px;font-family: Fira Sans, Arial, Helvetica, sans-serif;font-size: 14px;font-weight: normal;color: #9CA3AF;text-align: center;">
                       <div>
                         <span style="color: #D1D5DB;">Business ID: </span>
-                        <span style="font-weight: 600; color: #F59E0B;">3416145-1</span>
+                        <span style="font-weight: 600; color: #F59E0B;">2589566-4</span>
                       </div>
                      </td>
                     </tr>
@@ -536,17 +600,19 @@
                       <table border="0" cellpadding="0" cellspacing="0" role="presentation" align="center">
                        <tr>
                         <td valign="top" class="pc-font-alt social-icon" align="center" style="padding: 0px 10px 0px 0px;">
-                         <a href="https://www.facebook.com/profile.php?id=61555986183672" target="_blank" style="color:#FFFFFF;text-decoration: none; display: inline-block;">
+                         <a href="https://www.facebook.com/profile.php?id=61565375592900" target="_blank" style="color:#FFFFFF;text-decoration: none; display: inline-block;">
                           <img src="https://cdn4.iconfinder.com/data/icons/social-media-icons-the-circle-set/48/facebook_circle-512.png" alt="Facebook" width="36" height="36" style="display: block; border: 0; outline: none; border-radius: 50%; filter: brightness(0.9);">
                          </a>  
                         </td>
+                        <!--
                         <td valign="top" class="pc-font-alt social-icon" align="center" style="padding: 0px 10px 0px 0px;">
                          <a href="https://www.instagram.com/weyellowbridge/" target="_blank" style="color:#FFFFFF;text-decoration: none; display: inline-block;">
                           <img src="https://cdn4.iconfinder.com/data/icons/social-media-icons-the-circle-set/48/instagram_circle-512.png" alt="Instagram" width="36" height="36" style="display: block; border: 0; outline: none; border-radius: 50%; filter: brightness(0.9);">
                          </a>  
                         </td>
+                        -->
                         <td valign="top" class="pc-font-alt social-icon" align="center" style="padding: 0px 0px 0px 0px;">
-                         <a href="https://www.linkedin.com/company/yellow-bridge" target="_blank" style="color:#FFFFFF;text-decoration: none; display: inline-block;">
+                         <a href="https://www.linkedin.com/company/105069196/admin/dashboard/" target="_blank" style="color:#FFFFFF;text-decoration: none; display: inline-block;">
                           <img src="https://cdn4.iconfinder.com/data/icons/social-media-icons-the-circle-set/48/linkedin_circle-512.png" alt="LinkedIn" width="36" height="36" style="display: block; border: 0; outline: none; border-radius: 50%; filter: brightness(0.9);">
                          </a>  
                         </td>

@@ -11,7 +11,7 @@ import * as Excel from 'exceljs'
 import {createCode} from '../util/common.js'
 import {createOrderTicket} from '../model/orderTicket.js'
 const workbook = new Excel.default.Workbook()
-const SYTEM_GENERATED_EMAIL = "system-generated-ticket@weyellowbridge.com"
+const SYTEM_GENERATED_EMAIL = "system-generated-ticket@finnep.fi"
 
 const worker = new Worker(consts.PHOTO_ARRIVAL_QUEUE, async job => {
     //get the information of the job 

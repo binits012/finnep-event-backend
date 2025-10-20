@@ -57,7 +57,7 @@ export const getCryptoByEmail = async (email) =>{
     return emailCryptos.map(element => {
         const encryptedData = element.encryptedData
         const iv = element.iv
-        const key =  CryptoLibrary.scryptSync(process.env.CRYPTO_KEY,'salt',32)   
+        const key =  CryptoLibrary.scryptSync(process.env.CRYPTO_KEY, process.env.CRYPTO_SALT || 'finnep-default-salt-2024', 32)   
         let decipher = CryptoLibrary.createDecipheriv(algorithm, key, Buffer.from(iv,'hex'))
         let decrypted = decipher.update(encryptedData, 'hex', 'utf8')
         decrypted += decipher.final('utf8')  
@@ -92,7 +92,7 @@ export const getCryptoBySearchIndex = async (data, dataType) => {
         }
 
         // Decrypt the actual data only for the matching record
-        const key = CryptoLibrary.scryptSync(process.env.CRYPTO_KEY, 'salt', 32);
+        const key = CryptoLibrary.scryptSync(process.env.CRYPTO_KEY, process.env.CRYPTO_SALT || 'finnep-default-salt-2024', 32);
         const decipher = CryptoLibrary.createDecipheriv(
             algorithm, 
             key, 

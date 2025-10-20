@@ -9,22 +9,16 @@ import dotenv from 'dotenv'
 dotenv.config()
 export const createAdmin = async () => {
 
-    //check whether it already exists or not 
-    const roles = await Role.getAllRole();
-    if (roles.length > 0) {
-    } else {
-        //let's create a role
-        try {
-            await Role.createRole(consts.ROLE_SUPER_ADMIN)
-            const adminRole = await Role.getRoleByRoleType(consts.ROLE_SUPER_ADMIN)
-            await User.createUser(process.env.ADMIN_USER, process.env.ADMIN_PWD,
-                adminRole._id, true, false)
-        } catch (e) {
-            //something went wrong roll back 
-            error('error on admin %s',e.stack)
-            await Role.deleteRole(consts.ROLE_SUPER_ADMIN)
-            await User.deleteUserByname(consts.ROLE_SUPER_ADMIN)
-        }
+    try {
+        await Role.createRole(consts.ROLE_SUPER_ADMIN)
+        const adminRole = await Role.getRoleByRoleType(consts.ROLE_SUPER_ADMIN)
+        await User.createUser(process.env.ADMIN_USER, process.env.ADMIN_PWD,
+            adminRole._id, true, false)
+    } catch (e) {
+        //something went wrong roll back 
+        error('error on admin %s',e.stack)
+        await Role.deleteRole(consts.ROLE_SUPER_ADMIN)
+        await User.deleteUserByname(consts.ROLE_SUPER_ADMIN)
     }
 }
 
@@ -37,6 +31,7 @@ export const createRoles = async () => {
             await Role.createRole(consts.ROLE_ADMIN)
             await Role.createRole(consts.ROLE_STAFF)
             await Role.createRole(consts.ROLE_MEMBER)
+            await createAdmin();
         } catch (error) {
             error('error on roles %s ',error.stack)
             await Role.deleteRole(consts.ROLE_ADMIN)

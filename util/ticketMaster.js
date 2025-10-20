@@ -22,12 +22,13 @@ export const createEmailPayload = async (event,ticketInfo, ticketFor, otp) =>{
         if(emailTemplate ){
             loadedData = emailTemplate.replace('$eventTitle',event.eventTitle)
             .replace('$eventPromotionalPhoto',event.eventPromotionalPhoto)
-            .replace('$qrcodeData', qrData) 
+            .replace('$qrcodeData', 'cid:qrcode@ticket') 
             .replace('$ticketCode',otp)
         }else{
             const fileLocation = __dirname.replace('util', '') +'/emailTemplates/ticket_template.html'
-            loadedData = await  loadEmailTemplate(fileLocation, event.eventTitle, event.eventPromotionPhoto, qrData, otp)
+            loadedData = await  loadEmailTemplate(fileLocation, event.eventTitle, event.eventPromotionPhoto, 'cid:qrcode@ticket', otp)
         }
+        const qrBase64 = qrData.split(',')[1]; // Remove the data URI prefix
         const message = {
             from:process.env.EMAIL_USERNAME,
             to:ticketFor,
@@ -38,7 +39,14 @@ export const createEmailPayload = async (event,ticketInfo, ticketFor, otp) =>{
                 filename: 'event-ticket.ics',
                 method: 'request',
                 content: icsData
-            }
+            },
+            attachments: [
+                {
+                    filename: 'ticket-qrcode.png',
+                    content: qrBase64,
+                    encoding: 'base64',
+                }
+            ]
         }
         return message
          

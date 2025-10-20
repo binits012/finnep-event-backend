@@ -13,9 +13,28 @@ import {checkoutSuccess} from './util/paymentActions.js'
 import { setupQueues } from './rabbitMQ/services/queueSetup.js';
 import { messageConsumer } from './rabbitMQ/services/messageConsumer.js';
 import { rabbitMQ } from './util/rabbitmq.js';
+import redisClient from './model/redisConnect.js'; // Ensure Redis client is imported early
 const stripe = new Stripe(process.env.STRIPE_KEY)
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET
 var app = express();
+
+// Add this block right after app initialization to test Redis early
+(async () => {
+    console.log('Testing Redis connection...');
+    console.log('REDIS_HOST:', process.env.REDIS_HOST);
+    console.log('REDIS_PORT:', process.env.REDIS_PORT);
+    console.log('REDIS_PWD set:', !!process.env.REDIS_PWD);
+    
+    try {
+        await redisClient.ping(); // Simple ping to test connection
+        console.log('Redis connection successful');
+    } catch (error) {
+        console.error('Redis connection failed:', error.message);
+        // Optionally, exit or handle gracefully
+        process.exit(1);
+    }
+})();
+
 app.use(cors())
 app.options('*', cors())
 //app.use(logger('dev'));
@@ -88,13 +107,13 @@ var server = app.listen(app.get('port'), function () {
 // create remaining roles
 await adminRole.createRoles()
 //add admin role and  user if not present 
-await adminRole.createAdmin()
+//await adminRole.createAdmin()
 // create photoTypes
 await adminRole.photoTypes()
 //create notificationTypes
 await adminRole.notificationTypes()
 //create socialMedia
-await adminRole.socialMedia()
+//await adminRole.socialMedia()
 
 // Initialize and start queue consumers
 try {

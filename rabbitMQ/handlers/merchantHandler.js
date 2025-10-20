@@ -1,6 +1,12 @@
 import {info, error, warn} from '../../model/logger.js'; // Adjust path as needed
 import { createMerchant, getMerchantByMerchantId, updateMerchantById } from '../../model/merchant.js';
 import { inboxModel } from '../../model/inboxMessage.js'; 
+import { loadEmailTemplateForMerchant } from '../../util/common.js';
+import { forward } from '../../util/sendMail.js';
+import dotenv from 'dotenv'
+dotenv.config()
+import { dirname } from 'path'
+const __dirname = dirname(import.meta.url).slice(7)
 
 export const handleMerchantMessage = async (message) => {
     // Add message validation and better logging
@@ -18,13 +24,36 @@ export const handleMerchantMessage = async (message) => {
         error('Invalid message format - not an object %s', { message });
         throw new Error('Message must be an object');
     }
-    await inboxModel.saveMessage({
-        messageId: message?.metaData?.causationId,
-        eventType: message.type || message.routingKey,
-        aggregateId: message.merchantId,
-        data: message,
-        metadata: message.data?.metaData || { receivedAt: new Date() }
-    });
+    
+    const messageId = message?.metaData?.causationId;
+    
+    // Check if message has already been processed (idempotency)
+    if (messageId && await inboxModel.isProcessed(messageId)) {
+        console.log(`Message ${messageId} already processed, skipping...`);
+        return;
+    }
+    
+    // Try to save message, but handle duplicate key error gracefully
+    try {
+        await inboxModel.saveMessage({
+            messageId,
+            eventType: message.type || message.routingKey,
+            aggregateId: message.merchantId,
+            data: message,
+            metadata: message.data?.metaData || { receivedAt: new Date() }
+        });
+    } catch (saveError) {
+        // If it's a duplicate key error, check if the message was already processed
+        if (saveError.code === 11000 && messageId) {
+            const isAlreadyProcessed = await inboxModel.isProcessed(messageId);
+            if (isAlreadyProcessed) {
+                console.log(`Message ${messageId} already processed, skipping...`);
+                return;
+            }
+        }
+        // Re-throw if it's not a duplicate key error or message wasn't processed
+        throw saveError;
+    }
 
     // Handle both 'type' and 'routingKey' fields for compatibility
     const messageType = message.type || message.routingKey;
@@ -89,11 +118,15 @@ async function handleMerchantCreated(message) {
             companyPhoneNumber: message.companyPhoneNumber,
             address: message.address,
             companyAddress: message.companyAddress,
-            schemaName: message.schemaName
+            schemaName: message.schemaName,
+            website: message.website,
+            logo: message.logo,
+            stripeAccount: message.stripeAccount
         };
         
         await createMerchant(merchantData);
-        
+        //now its time to send the email to the merchant
+        await sendMerchantArrivalEmail(message.orgName, message.merchantId, message.email, message.companyEmail);
         info('Merchant created successfully', { merchantId: message.merchantId });
         await inboxModel.markProcessed(message?.metaData?.causationId);
     } catch (err) {
@@ -182,6 +215,21 @@ async function handleMerchantDeactivated(message) {
         });
         throw err;
     }
+}
+
+async function sendMerchantArrivalEmail(orgName, merchantId, merchantEmail, companyEmail) { 
+    const fileLocation = __dirname.replace('rabbitMQ/handlers', '') +'/emailTemplates/merchant_arrival.html';
+    const dashboardUrl = process.env.DASHBOARD_URL  + merchantId + '/login';
+    const emailPayload = await loadEmailTemplateForMerchant(fileLocation, orgName, dashboardUrl);
+    const message = {
+        from:process.env.EMAIL_USERNAME,
+        to:merchantEmail,
+        cc:companyEmail,
+        subject:'Welcome to the Finnep',
+        html:emailPayload.toString(),
+         
+    }
+    await forward(message);
 }
 
 export { handleMerchantCreated, handleMerchantUpdated, handleMerchantActivated, handleMerchantDeactivated };

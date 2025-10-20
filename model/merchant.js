@@ -2,7 +2,8 @@ import * as model from '../model/mongoModel.js';
 import { error, info } from './logger.js';
 
 export class Merchant {
-  constructor(merchantId, name, orgName, country, code, email, companyEmail, phone, companyPhoneNumber, address, companyAddress, schemaName, status) {
+  constructor(merchantId, name, orgName, country, code, email, companyEmail, phone, companyPhoneNumber, address, companyAddress, 
+    schemaName, status, website, logo, stripeAccount) {
     this.merchantId = merchantId;
     this.name = name;
     this.orgName = orgName;
@@ -16,6 +17,9 @@ export class Merchant {
     this.companyAddress = companyAddress;
     this.schemaName = schemaName;
     this.status = status || 'pending';
+    this.website = website;
+    this.logo = logo;
+    this.stripeAccount = stripeAccount;
   }
 
   async saveToDB() {
@@ -33,7 +37,10 @@ export class Merchant {
         address: this.address,
         companyAddress: this.companyAddress,
         schemaName: this.schemaName,
-        status: this.status
+        status: this.status,
+        website: this.website,
+        logo: this.logo,
+        stripeAccount: this.stripeAccount
       });
       const savedMerchant = await merchant.save();
       info('Merchant created successfully: %s', savedMerchant._id);
@@ -114,6 +121,40 @@ export async function deleteMerchantById(id) {
     return deletedMerchant;
   } catch (err) {
     error('Error deleting merchant:', err);
+    throw err;
+  }
+}
+
+export async function genericSearchMerchant(...searchTerms) {
+  try {
+    // Filter out null, undefined, and empty string values
+    const validSearchTerms = searchTerms.filter(term => term != null && term !== '');
+    
+    if (validSearchTerms.length === 0) {
+      return [];
+    }
+    
+    // Build the $or query with all valid search terms
+    const orConditions = [];
+    
+    for (const term of validSearchTerms) {
+      orConditions.push(
+        { merchantId: term },
+        { name: term },
+        { orgName: term },
+        { email: term },
+        { companyEmail: term },
+        { phone: term },
+        { companyPhoneNumber: term },
+        { address: term },
+        { companyAddress: term }
+      );
+    }
+    
+    const merchants = await model.Merchant.find({ $or: orConditions });
+    return merchants;
+  } catch (err) {
+    error('Error fetching merchant by generic search:', err);
     throw err;
   }
 }

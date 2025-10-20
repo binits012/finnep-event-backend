@@ -13,8 +13,8 @@
  <meta name="format-detection" content="address=no" />
  <meta name="format-detection" content="email=no" />
  <meta name="x-apple-disable-message-reformatting" />
- <link href="https://fonts.googleapis.com/css?family=Fira+Sans:ital,wght@0,100;1,100;0,200;1,200;0,300;1,300;0,400;1,400;0,500;1,500;0,600;1,600;0,700;1,700;0,800;1,800;0,900;1,900" rel="stylesheet" />
- <title>Merchant Status Updated</title>
+ <link href="https://fonts.googleapis.com/css?family=Inter:wght@100;200;300;400;500;600;700;800;900&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+ <title>Welcome to Yellow Bridge - Your Event Empire Awaits!</title>
  <!-- Made with Postcards by Designmodo https://designmodo.com/postcards -->
  <!--[if !mso]><! -->
  <style>
@@ -227,70 +227,169 @@
              display: none !important;
          }
 
-         .success-badge {
-             background: linear-gradient(135deg, #10B981, #059669);
+         .welcome-badge {
+             background: linear-gradient(135deg, #8B5CF6, #A855F7, #C084FC);
              color: white;
-             padding: 8px 16px;
-             border-radius: 20px;
-             font-weight: 600;
-             font-size: 14px;
-             display: inline-block;
-             margin: 15px 0;
-         }
-
-         .feature-list {
-             background: rgba(255, 255, 255, 0.05);
-             border-radius: 12px;
-             padding: 20px;
-             margin: 20px 0;
-             border-left: 4px solid #F59E0B;
-         }
-
-         .feature-list ul {
-             margin: 0;
-             padding-left: 20px;
-         }
-
-         .feature-list li {
-             margin: 8px 0;
-             color: #E5E7EB;
+             padding: 12px 24px;
+             border-radius: 50px;
+             font-weight: 700;
              font-size: 16px;
+             display: inline-block;
+             margin: 20px 0;
+             box-shadow: 0 8px 32px rgba(139, 92, 246, 0.3);
+             animation: pulse 2s infinite;
+         }
+
+         @keyframes pulse {
+             0%, 100% { transform: scale(1); }
+             50% { transform: scale(1.05); }
+         }
+
+         .hero-section {
+             background: linear-gradient(135deg, #1E1B4B, #312E81, #1E40AF);
+             border-radius: 20px;
+             padding: 40px;
+             margin: 30px 0;
+             position: relative;
+             overflow: hidden;
+         }
+
+         .hero-section::before {
+             content: '';
+             position: absolute;
+             top: 0;
+             left: 0;
+             right: 0;
+             bottom: 0;
+             background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grain" width="100" height="100" patternUnits="userSpaceOnUse"><circle cx="25" cy="25" r="1" fill="rgba(255,255,255,0.1)"/><circle cx="75" cy="75" r="1" fill="rgba(255,255,255,0.1)"/><circle cx="50" cy="10" r="0.5" fill="rgba(255,255,255,0.05)"/></pattern></defs><rect width="100" height="100" fill="url(%23grain)"/></svg>');
+             opacity: 0.3;
+         }
+
+         .feature-grid {
+             display: grid;
+             grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+             gap: 20px;
+             margin: 30px 0;
+         }
+
+         .feature-card {
+             background: rgba(255, 255, 255, 0.08);
+             border-radius: 16px;
+             padding: 25px;
+             border: 1px solid rgba(255, 255, 255, 0.1);
+             backdrop-filter: blur(10px);
+             transition: all 0.3s ease;
+             position: relative;
+             overflow: hidden;
+         }
+
+         .feature-card::before {
+             content: '';
+             position: absolute;
+             top: 0;
+             left: 0;
+             right: 0;
+             height: 3px;
+             background: linear-gradient(90deg, #F59E0B, #EF4444, #8B5CF6, #10B981);
+         }
+
+         .feature-card:hover {
+             transform: translateY(-5px);
+             box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+         }
+
+         .stats-section {
+             background: linear-gradient(135deg, #F59E0B, #EF4444);
+             border-radius: 20px;
+             padding: 30px;
+             margin: 30px 0;
+             text-align: center;
+             position: relative;
+             overflow: hidden;
+         }
+
+         .stats-section::before {
+             content: '';
+             position: absolute;
+             top: -50%;
+             left: -50%;
+             width: 200%;
+             height: 200%;
+             background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+             animation: rotate 20s linear infinite;
+         }
+
+         @keyframes rotate {
+             from { transform: rotate(0deg); }
+             to { transform: rotate(360deg); }
          }
 
          .cta-section {
-             background: linear-gradient(135deg, #F59E0B, #D97706);
-             border-radius: 12px;
-             padding: 25px;
-             margin: 25px 0;
+             background: linear-gradient(135deg, #10B981, #059669);
+             border-radius: 20px;
+             padding: 40px;
+             margin: 40px 0;
              text-align: center;
+             position: relative;
+             overflow: hidden;
          }
 
          .cta-button {
-             background: white;
-             color: #D97706;
-             padding: 12px 30px;
-             border-radius: 25px;
+             background: linear-gradient(135deg, #FFFFFF, #F8FAFC);
+             color: #059669;
+             padding: 16px 40px;
+             border-radius: 50px;
              text-decoration: none;
-             font-weight: 600;
+             font-weight: 700;
              display: inline-block;
-             margin-top: 15px;
+             margin-top: 20px;
              transition: all 0.3s ease;
+             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+             position: relative;
+             z-index: 2;
+         }
+
+         .cta-button:hover {
+             transform: translateY(-3px);
+             box-shadow: 0 15px 40px rgba(0, 0, 0, 0.3);
          }
 
          .social-icons {
              display: flex;
              justify-content: center;
              align-items: center;
-             gap: 15px;
-             margin-top: 20px;
+             gap: 20px;
+             margin-top: 30px;
          }
 
          .social-icon {
-             transition: transform 0.3s ease;
+             transition: all 0.3s ease;
+             filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.2));
          }
 
          .social-icon:hover {
-             transform: scale(1.1);
+             transform: scale(1.2) rotate(5deg);
+         }
+
+         .floating-elements {
+             position: absolute;
+             top: 0;
+             left: 0;
+             right: 0;
+             bottom: 0;
+             pointer-events: none;
+             overflow: hidden;
+         }
+
+         .floating-element {
+             position: absolute;
+             opacity: 0.1;
+             animation: float 6s ease-in-out infinite;
+         }
+
+         @keyframes float {
+             0%, 100% { transform: translateY(0px) rotate(0deg); }
+             50% { transform: translateY(-20px) rotate(180deg); }
          }
  
          @media (min-width: 621px) {
@@ -396,7 +495,7 @@
             <td class="pc-w620-spacing-0-0-0-0" style="padding: 0px 0px 0px 0px;">
              <table width="100%" border="0" cellspacing="0" cellpadding="0" role="presentation">
               <tr>
-               <td valign="top" class="pc-w620-padding-30-30-100-30" style="padding: 0px 40px 40px 40px;border-radius: 16px;background: linear-gradient(135deg, #1F2937, #111827);box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);" bgcolor="#1F2937">
+               <td valign="top" class="pc-w620-padding-30-30-100-30" style="padding: 0px 40px 40px 40px;background: linear-gradient(135deg, #1F2937, #111827);box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);" bgcolor="#1F2937">
                 <table width="100%" border="0" cellpadding="0" cellspacing="0" role="presentation">
                  <tr>
                   <td class="pc-w620-spacing-0-0-0-0" align="center" valign="top" style="padding: 30px 0px 20px 0px;">
@@ -413,39 +512,93 @@
                    <table border="0" cellpadding="0" cellspacing="0" role="presentation" align="center">
                     <tr>
                      <td valign="top" class="pc-font-alt pc-w620-fontSize-16 pc-w620-lineHeight-26" align="center" style="padding: 10px 0px 0px 0px;mso-line-height: exactly;line-height: 156%;letter-spacing: -0.2px;font-family: Fira Sans, Arial, Helvetica, sans-serif;font-size: 18px;font-weight: 300;color: #ffffff;text-align: left;text-align-last: left;font-variant-ligatures: normal;">
-                      <div style="text-align: left;">
-                        <h1 style="font-size: 28px; font-weight: 700; margin: 0 0 10px 0; background: linear-gradient(135deg, #F59E0B, #FBBF24); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">🎉 Account Activated!</h1>
-                        
-                        <div class="success-badge">
-                          ✅ APPROVED
-                        </div>
-                        
-                        <h3 style="color: #F3F4F6; font-size: 22px; margin: 20px 0 15px 0;">Hi $orgName,</h3>
-                        
-                        <p style="color: #D1D5DB; font-size: 16px; line-height: 1.6; margin: 15px 0;">Great news! We're thrilled to inform you that your merchant account has been successfully <strong style="color: #10B981;">activated</strong> and you're now ready to start your journey with Finnep.</p>
-                        
-                        <div class="feature-list">
-                          <h4 style="color: #F59E0B; margin: 0 0 15px 0; font-size: 18px;">🚀 What you can do now:</h4>
-                          <ul style="color: #E5E7EB; margin: 0; padding-left: 20px;">
-                            <li style="margin: 12px 0; font-size: 16px;">🎫 Create and manage stunning events</li>
-                            <li style="margin: 12px 0; font-size: 16px;">💰 Sell tickets and track real-time performance</li>
-                            <li style="margin: 12px 0; font-size: 16px;">📊 Access detailed analytics and insights</li>
-                            <li style="margin: 12px 0; font-size: 16px;">💳 Receive secure and timely payouts</li>
-                          </ul>
+                      <div style="text-align: left; position: relative; z-index: 2;">
+                        <!-- Welcome Hero Section -->
+                        <div class="hero-section" style="background: linear-gradient(135deg, #1E1B4B, #312E81, #1E40AF); border-radius: 20px; padding: 40px; margin: 30px 0; position: relative; overflow: hidden;">
+                          <div class="floating-elements" style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; overflow: hidden;">
+                            <div class="floating-element" style="position: absolute; top: 10%; left: 10%; font-size: 24px; opacity: 0.1; animation: float 6s ease-in-out infinite;">🎪</div>
+                            <div class="floating-element" style="position: absolute; top: 20%; right: 15%; font-size: 20px; opacity: 0.1; animation: float 8s ease-in-out infinite;">🎭</div>
+                            <div class="floating-element" style="position: absolute; bottom: 20%; left: 20%; font-size: 18px; opacity: 0.1; animation: float 10s ease-in-out infinite;">🎨</div>
+                            <div class="floating-element" style="position: absolute; bottom: 10%; right: 10%; font-size: 22px; opacity: 0.1; animation: float 7s ease-in-out infinite;">🎵</div>
+                          </div>
+                          
+                          <h1 style="font-size: 28px; font-weight: 700; margin: 0 0 20px 0; background: linear-gradient(135deg, #F59E0B, #EF4444, #8B5CF6, #10B981); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; text-align: center; font-family: 'Space Grotesk', sans-serif; line-height: 1.3;">🌟 Welcome to Your Event Empire! 🌟</h1>
+                          
+                          <div class="welcome-badge" style="background: linear-gradient(135deg, #8B5CF6, #A855F7, #C084FC); color: white; padding: 12px 24px; border-radius: 50px; font-weight: 700; font-size: 16px; display: inline-block; margin: 20px auto; box-shadow: 0 8px 32px rgba(139, 92, 246, 0.3); text-align: center; width: fit-content;">
+                            🚀 WELCOME TO THE FUTURE OF EVENTS! 🚀
+                          </div>
+                          
+                          <h3 style="color: #F3F4F6; font-size: 28px; margin: 30px 0 20px 0; text-align: center; font-family: 'Inter', sans-serif;">Hey $orgName! 👋</h3>
+                          
+                          <p style="color: #D1D5DB; font-size: 16px; line-height: 1.6; margin: 20px 0; text-align: left; font-weight: 400; max-width: 100%;">Welcome to the most <strong style="color: #F59E0B; font-weight: 700;">revolutionary event platform</strong> on the planet! You're not just joining a platform – you're becoming part of a <strong style="color: #8B5CF6; font-weight: 700;">global community</strong> of event creators who are changing the world, one experience at a time.</p>
                         </div>
 
-                        <div class="cta-section">
-                          <h3 style="color: white; margin: 0 0 10px 0; font-size: 20px;">Ready to get started?</h3>
-                          <p style="color: white; margin: 0 0 15px 0; opacity: 0.9;">Log in to your dashboard and create your first event!</p>
-                          <a href="$dashboardUrl" class="cta-button" style="background: white; color: #D97706; padding: 12px 30px; border-radius: 25px; text-decoration: none; font-weight: 600; display: inline-block;">Access Dashboard →</a>
+                        <!-- Stats Section -->
+                         <!--
+                        <div class="stats-section" style="background: linear-gradient(135deg, #F59E0B, #EF4444); border-radius: 20px; padding: 30px; margin: 30px 0; text-align: center; position: relative; overflow: hidden;">
+                          <h3 style="color: white; margin: 0 0 20px 0; font-size: 24px; font-weight: 700;">🎯 You're Joining the Elite!</h3>
+                          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 20px; margin: 20px 0;">
+                            <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 20px;">
+                              <div style="font-size: 32px; font-weight: 800; color: white;">50K+</div>
+                              <div style="font-size: 14px; color: rgba(255,255,255,0.9);">Events Created</div>
+                            </div>
+                            <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 20px;">
+                              <div style="font-size: 32px; font-weight: 800; color: white;">2M+</div>
+                              <div style="font-size: 14px; color: rgba(255,255,255,0.9);">Tickets Sold</div>
+                            </div>
+                            <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 20px;">
+                              <div style="font-size: 32px; font-weight: 800; color: white;">99.9%</div>
+                              <div style="font-size: 14px; color: rgba(255,255,255,0.9);">Uptime</div>
+                            </div>
+                          </div>
+                        </div>
+                    -->
+
+                        <!-- Feature Grid -->
+                        <div class="feature-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin: 30px 0;">
+                          <div class="feature-card" style="background: rgba(255, 255, 255, 0.08); border-radius: 16px; padding: 25px; border: 1px solid rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); transition: all 0.3s ease; position: relative; overflow: hidden;">
+                            <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #F59E0B, #EF4444, #8B5CF6, #10B981);"></div>
+                            <div style="font-size: 48px; margin-bottom: 15px;">🎪</div>
+                            <h4 style="color: #F59E0B; margin: 0 0 15px 0; font-size: 20px; font-weight: 700;">Create Magic</h4>
+                            <p style="color: #E5E7EB; margin: 0; font-size: 16px; line-height: 1.6;">Design breathtaking events that leave your audience speechless. From intimate gatherings to massive festivals.</p>
+                          </div>
+                          
+                          <div class="feature-card" style="background: rgba(255, 255, 255, 0.08); border-radius: 16px; padding: 25px; border: 1px solid rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); transition: all 0.3s ease; position: relative; overflow: hidden;">
+                            <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #F59E0B, #EF4444, #8B5CF6, #10B981);"></div>
+                            <div style="font-size: 48px; margin-bottom: 15px;">💰</div>
+                            <h4 style="color: #10B981; margin: 0 0 15px 0; font-size: 20px; font-weight: 700;">Maximize Revenue</h4>
+                            <p style="color: #E5E7EB; margin: 0; font-size: 16px; line-height: 1.6;">Advanced pricing strategies, dynamic pricing, and revenue optimization tools to maximize your earnings.</p>
+                          </div>
+                          
+                          <div class="feature-card" style="background: rgba(255, 255, 255, 0.08); border-radius: 16px; padding: 25px; border: 1px solid rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); transition: all 0.3s ease; position: relative; overflow: hidden;">
+                            <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #F59E0B, #EF4444, #8B5CF6, #10B981);"></div>
+                            <div style="font-size: 48px; margin-bottom: 15px;">📊</div>
+                            <h4 style="color: #8B5CF6; margin: 0 0 15px 0; font-size: 20px; font-weight: 700;">Data Insights</h4>
+                            <p style="color: #E5E7EB; margin: 0; font-size: 16px; line-height: 1.6;">Real-time analytics, attendee insights, and performance metrics to make data-driven decisions.</p>
+                          </div>
+                          
+                          <div class="feature-card" style="background: rgba(255, 255, 255, 0.08); border-radius: 16px; padding: 25px; border: 1px solid rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); transition: all 0.3s ease; position: relative; overflow: hidden;">
+                            <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #F59E0B, #EF4444, #8B5CF6, #10B981);"></div>
+                            <div style="font-size: 48px; margin-bottom: 15px;">🌍</div>
+                            <h4 style="color: #EF4444; margin: 0 0 15px 0; font-size: 20px; font-weight: 700;">Global Reach</h4>
+                            <p style="color: #E5E7EB; margin: 0; font-size: 16px; line-height: 1.6;">Reach audiences worldwide with multi-language support and global payment processing.</p>
+                          </div>
+                        </div>
+
+                        <!-- CTA Section -->
+                        <div class="cta-section" style="background: linear-gradient(135deg, #10B981, #059669); border-radius: 20px; padding: 30px; margin: 30px 0; text-align: center; position: relative; overflow: hidden;">
+                          <h3 style="color: white; margin: 0 0 15px 0; font-size: 22px; font-weight: 700; line-height: 1.3;">🚀 Ready to Conquer the Event World?</h3>
+                          <p style="color: white; margin: 0 0 20px 0; opacity: 0.9; font-size: 16px; line-height: 1.5; text-align: center;">Your dashboard is waiting with powerful tools to create your first legendary event!</p>
+                          <a href="$dashboardUrl" class="cta-button" style="background: linear-gradient(135deg, #FFFFFF, #F8FAFC); color: #059669; padding: 14px 32px; border-radius: 50px; text-decoration: none; font-weight: 700; display: inline-block; margin-top: 15px; transition: all 0.3s ease; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2); position: relative; z-index: 2; font-size: 16px;">🎯 Launch Your First Event →</a>
                         </div>
                         
-                        <p style="color: #D1D5DB; font-size: 16px; line-height: 1.6; margin: 25px 0 15px 0;">We're excited to support your success and look forward to being part of your event journey.</p>
+                        <p style="color: #D1D5DB; font-size: 16px; line-height: 1.6; margin: 30px 0 20px 0; text-align: left; font-weight: 400; max-width: 100%;">We're not just a platform – we're your <strong style="color: #8B5CF6; font-weight: 700;">success partners</strong>. Our team of event experts, marketing gurus, and tech wizards are here to help you create experiences that people will talk about for years to come.</p>
                         
-                        <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid rgba(255, 255, 255, 0.1);">
-                          <p style="color: #9CA3AF; margin: 0 0 5px 0; font-size: 16px;">Best Regards,</p>
-                          <p style="color: #F59E0B; margin: 0 0 5px 0; font-size: 18px; font-weight: 600;">The Finnep Team</p>
-                          <a href="mailto:info@finnep.fi" style="color: #60A5FA; text-decoration: none; font-size: 16px;">info@finnep.fi</a>
+                        <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid rgba(255, 255, 255, 0.1); text-align: center;">
+                          <p style="color: #9CA3AF; margin: 0 0 8px 0; font-size: 14px; font-weight: 400;">With infinite possibilities,</p>
+                          <p style="color: #F59E0B; margin: 0 0 8px 0; font-size: 16px; font-weight: 600;">The Finnep Team</p>
+                          <a href="mailto:info@finnep.fi" style="color: #60A5FA; text-decoration: none; font-size: 16px; font-weight: 500;">info@finnep.fi</a>
+                          <p style="color: #8B5CF6; margin: 15px 0 0 0; font-size: 14px; font-weight: 500;">🌟 Let's create magic together! 🌟</p>
                         </div>
                       </div>
                       <div><span>&#xFEFF;</span></div>
@@ -495,7 +648,7 @@
                           <img src="https://cdn4.iconfinder.com/data/icons/social-media-icons-the-circle-set/48/instagram_circle-512.png" alt="Instagram" width="36" height="36" style="display: block; border: 0; outline: none; border-radius: 50%; filter: brightness(0.9);">
                          </a>  
                         </td>
-                        -->
+                    -->
                         <td valign="top" class="pc-font-alt social-icon" align="center" style="padding: 0px 0px 0px 0px;">
                          <a href="https://www.linkedin.com/company/105069196/admin/dashboard/" target="_blank" style="color:#FFFFFF;text-decoration: none; display: inline-block;">
                           <img src="https://cdn4.iconfinder.com/data/icons/social-media-icons-the-circle-set/48/linkedin_circle-512.png" alt="LinkedIn" width="36" height="36" style="display: block; border: 0; outline: none; border-radius: 50%; filter: brightness(0.9);">

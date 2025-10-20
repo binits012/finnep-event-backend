@@ -46,8 +46,8 @@ export const formateDateWithHash = async (date) =>{
     return  moment(date).format("DD/MM/YYYY")
 }
 
-export const convertDateTimeWithTimeZone = async (eventDate) =>{ 
-    return  moment(eventDate).tz(process.env.TIME_ZONE).format('YYYY-MM-DDTHH:mm:ss')
+export const convertDateTimeWithTimeZone = async (eventDate, eventTimeZone = "Europe/Helsinki") =>{ 
+    return  moment(eventDate).tz(eventTimeZone).format('YYYY-MM-DDTHH:mm:ss')
 }
 //redis-client
 export const getCacheByKey = async(redisClient, key) =>{ 
@@ -151,7 +151,8 @@ export  const generateQRCode = async(ticketId) =>{
 }
 export  const generateICS = async(event, ticketId)=>{
     const eventDate = event.eventDate
-    const start = moment(eventDate).utc().format('YYYY-MM-DD-HH-mm-ss').split("-").map((a) => parseInt(a))  
+    const eventTimezone = event.eventTimezone || 'UTC' // Use event timezone, fallback to UTC
+    const start = moment(eventDate).tz(eventTimezone).format('YYYY-MM-DD-HH-mm-ss').split("-").map((a) => parseInt(a))  
     const eventGeoCode = event.eventLocationGeoCode.split(',')
     const icsData = {
         title: event.eventTitle,
@@ -175,13 +176,13 @@ export  const generateICS = async(event, ticketId)=>{
 
 }
 
-export  const loadEmailTemplate = async (fileLocation, eventTitle,eventPromotionalPhoto, qrCode, otp) => { 
+export  const loadEmailTemplate = async (fileLocation, eventTitle,eventPromotionalPhoto, qrCodeRef, otp) => { 
     const emailData = (await fs.readFile(fileLocation,'utf8'))
     .replace('$eventTitle',eventTitle)
     .replace('$eventTitle',eventTitle)
     .replace('$eventTitle',eventTitle)
     .replace('$eventPromotionalPhoto',eventPromotionalPhoto)
-    .replace('$qrcodeData',qrCode) 
+    .replace('$qrcodeData',qrCodeRef) 
     .replace('$ticketCode',otp) 
     return emailData
   }
@@ -192,6 +193,44 @@ export const loadEmailTemplateForMerchant = async (fileLocation, orgName, dashbo
     .replace('$dashboardUrl',dashboardUrl)
     
     return emailData
+}
+
+export const loadFeedbackTemplate = async (name, email, subject, message) => {
+    const fileLocation = './emailTemplates/feedback_acknowledgement.html';
+    const emailData = (await fs.readFile(fileLocation,'utf8'))
+    .replace(/\$name/g, name)
+    .replace(/\$email/g, email)
+    .replace(/\$subject/g, subject)
+    .replace(/\$message/g, message)
+    .replace(/\$date/g, new Date().toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    }));
+    
+    return emailData;
+}
+
+export const loadCareerTemplate = async (name, email, phone, position, experience, availability) => {
+    const fileLocation = './emailTemplates/career_acknowledgement.html';
+    const emailData = (await fs.readFile(fileLocation,'utf8'))
+    .replace(/\$name/g, name)
+    .replace(/\$email/g, email)
+    .replace(/\$phone/g, phone || 'Not provided')
+    .replace(/\$position/g, position)
+    .replace(/\$experience/g, experience || 'Not provided')
+    .replace(/\$availability/g, availability || 'Not specified')
+    .replace(/\$date/g, new Date().toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    }));
+    
+    return emailData;
 }  
 
 export const getCloudFrontUrl = async (photoLink) =>{

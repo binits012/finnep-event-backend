@@ -2,13 +2,15 @@ import * as model from '../model/mongoModel.js'
 import {error} from '../model/logger.js'
 
 export class Ticket{
-    constructor(qrCode, ticketFor, event, type, ticketInfo, otp) {
+    constructor(qrCode, ticketFor, event, type, ticketInfo, otp, merchantId, externalMerchantId) {
         this.qrCode = qrCode
         this.ticketFor = ticketFor,
         this.event = event
         this.type = type
         this.ticketInfo = ticketInfo,
         this.otp = otp
+        this.merchant = merchantId
+        this.externalMerchantId = externalMerchantId
     }
 
     async saveToDB(){
@@ -19,7 +21,9 @@ export class Ticket{
                 event: this.event,
                 type: this.type,
                 ticketInfo:this.ticketInfo,
-                otp:this.otp
+                otp:this.otp,
+                merchant:this.merchant,
+                externalMerchantId:this.externalMerchantId
             })
             return await ticket.save()
         }catch(err){
@@ -29,9 +33,9 @@ export class Ticket{
     }
 }
 
-export const createTicket = async(qrCode, ticketFor, event, type,ticketInfo, otp) =>{
+export const createTicket = async(qrCode, ticketFor, event, type,ticketInfo, otp, merchantId, externalMerchantId) =>{
           
-    const ticket = new Ticket(qrCode, ticketFor, event, type,ticketInfo, otp)
+    const ticket = new Ticket(qrCode, ticketFor, event, type,ticketInfo, otp, merchantId, externalMerchantId)
     return await ticket.saveToDB()
 }
 

@@ -1,7 +1,19 @@
 {
-  "name": "yellowbridge",
+  "name": "finnep-eventapp-backend",
   "version": "0.0.0",
   "private": true,
+  "author": "Binit Shrestha", 
+  "license": "MIT", 
+  "company": "Finnep", 
+  "description": "Finnep Event App",
+  "keywords": [
+    "finnep",
+    "eventapp",
+    "event",
+    "app",
+    "event management"
+  ],
+  "homepage": "https://eventapp.finnep.fi", 
   "scripts": {
     "start": "nodemon --exec node app.js",
     "esbuild": "node esbuild.config.js"
