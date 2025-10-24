@@ -1,19 +1,8 @@
 import dotenv from 'dotenv'
 dotenv.config()
 import {error} from '../model/logger.js'
-import * as redis from 'redis'
 import jwt from 'jsonwebtoken'
-
-const redisClient = redis.createClient({
-	port: process.env.REDIS_PORT,
-	host: process.env.REDIS_HOST,
-    no_ready_check: true,
-    password:process.env.REDIS_PWD
-})
-redisClient.connect().catch(console.error)
-redisClient.on('error', function (error) {
-	console.error(error);
-});
+import redisClient from '../model/redisConnect.js'
 import * as commonUtil from '../util/common.js'
 import * as JWTToken from '../model/token.js'
 

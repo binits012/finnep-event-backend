@@ -13,9 +13,9 @@ import * as ticketMaster from '../util/ticketMaster.js'
 import * as sendMail from '../util/sendMail.js'
 import Stripe from 'stripe'
 const stripe = new Stripe(process.env.STRIPE_KEY)
-const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET 
+const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET
 import redisClient from '../model/redisConnect.js'
-import * as commonUtil from '../util/common.js'  
+import * as commonUtil from '../util/common.js'
 import * as Merchant from '../model/merchant.js'
 import * as OutboxMessage from '../model/outboxMessage.js'
 import { messageConsumer } from '../rabbitMQ/services/messageConsumer.js'
@@ -26,16 +26,16 @@ import busboy from 'busboy'
 export const getDataForFront = async (req, res, next) => {
     const photo = await Photo.listPhoto()
     const photosWithCloudFrontUrls = await Promise.all(photo.map(async el => {
-                    
+
         const cacheKey = `signedUrl:${el.id}`;
         const cached = await commonUtil.getCacheByKey(redisClient, cacheKey);
-          
+
         if (cached && cached.url && cached.expiresAt > Date.now()) {
             el.photoLink = cached.url;
         } else {
             // Generate new signed URL
             const expiresInSeconds = 29 * 24 * 60 * 60; // e.g., 29 days
-             
+
             const signedUrl = await commonUtil.getCloudFrontUrl(el.photoLink)
             const expiresAt = Date.now() + expiresInSeconds * 1000;
 
@@ -49,7 +49,7 @@ export const getDataForFront = async (req, res, next) => {
     }));
     const notification = await Notification.getAllNotification()
     let event = await Event.getEventsWithTicketCounts()
-   
+
     if (event) {
         event = event.filter(e => e.active)
     }
@@ -69,20 +69,20 @@ export const getEventById = async (req, res, next) => {
         console.log(event)
         if (event) {
             const {  ...restOfEvent } = event?._doc
-            
+
             const eventId = id
             // First ensure eventPhoto is a valid array with non-empty strings
             const validPhotos = restOfEvent?.eventPhoto?.filter(photo => photo && photo.trim() !== '') || [];
             /*
             const photoWithCloudFrontUrls = await Promise.all(validPhotos.map(async (photo, index) => {
-                const cacheKey = `signedUrl:${eventId}:${index}`; 
+                const cacheKey = `signedUrl:${eventId}:${index}`;
                 const cached = await commonUtil.getCacheByKey(redisClient, cacheKey);
                 if (cached && cached.url && cached.expiresAt > Date.now()) {
                     return cached.url;
                 } else {
                     // Generate new signed URL
                     const expiresInSeconds = 29 * 24 * 60 * 60; // e.g., 29 days
-                     
+
                     const signedUrl = await commonUtil.getCloudFrontUrl(photo)
                     const expiresAt = Date.now() + expiresInSeconds * 1000;
 
@@ -91,7 +91,7 @@ export const getEventById = async (req, res, next) => {
                     redisClient.expire(cacheKey, expiresInSeconds);
 
                     return signedUrl
-                } 
+                }
             }));
             */
 
@@ -100,7 +100,7 @@ export const getEventById = async (req, res, next) => {
             }
            // data.event.eventPhoto = validPhotos
 
-            
+
             return res.status(consts.HTTP_STATUS_OK).json(data)
         } else {
             return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).send({ error: RESOURCE_NOT_FOUND });
@@ -309,7 +309,7 @@ export const cancelOrderTicket = async (req, res, next) => {
     }
 
     res.status(consts.HTTP_STATUS_NO_CONTENT).send()
-} 
+}
 
 export const listEvent = async (req, res, next) => {
     try {
@@ -346,11 +346,11 @@ const getClientIdentifier = (req) => {
 const validateRequestSize = (reqBody) => {
     const bodyString = JSON.stringify(reqBody);
     const maxSize = 20 * 1024; // 20KB limit
-    
+
     if (bodyString.length > maxSize) {
         throw new Error('Request payload too large');
     }
-    
+
     return true;
 };
 
@@ -371,21 +371,21 @@ const validatePaymentRequest = (reqBody) => {
     if (!amount || !currency) {
         throw new Error('Missing required fields: amount and currency are required');
     }
-    
+
     if (!metadata.eventId || !metadata.ticketId || !metadata.merchantId) {
         throw new Error('Missing required metadata: eventId, ticketId, and merchantId are required');
     }
-    
+
     // Validate amount range (prevent extremely large amounts)
     if (amount <= 1 || amount > 10000000) { // Max 100,000.00 in cents
         throw new Error('Invalid amount range');
     }
-    
+
     // Validate currency format
     if (!/^[a-z]{3}$/.test(currency)) {
         throw new Error('Invalid currency format');
     }
-    
+
     // Validate and sanitize metadata fields
     const sanitizedMetadata = {
         eventId: sanitizeString(metadata.eventId, 50),
@@ -398,26 +398,26 @@ const validatePaymentRequest = (reqBody) => {
         ticketName: sanitizeString(metadata.ticketName, 100),
         country: sanitizeString(metadata.country, 50)
     };
-    
+
     // Validate quantity
     if (sanitizedMetadata.quantity && (parseInt(sanitizedMetadata.quantity) < 1 || parseInt(sanitizedMetadata.quantity) > 100)) {
         throw new Error('Invalid quantity range');
     }
-    
+
     // Validate email format
     if (sanitizedMetadata.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(sanitizedMetadata.email)) {
         throw new Error('Invalid email format');
     }
-    
+
     // Validate ObjectId format for MongoDB IDs
     if (!/^[0-9a-fA-F]{24}$/.test(sanitizedMetadata.eventId)) {
         throw new Error('Invalid event ID format');
     }
-    
+
     if (!/^[0-9a-fA-F]{24}$/.test(sanitizedMetadata.ticketId)) {
         throw new Error('Invalid ticket ID format');
     }
-    
+
     if (!/^[0-9a-fA-F]{24}$/.test(sanitizedMetadata.merchantId)) {
         throw new Error('Invalid merchant ID format - must be numeric');
     }
@@ -425,7 +425,7 @@ const validatePaymentRequest = (reqBody) => {
     if (!/^\d+$/.test(sanitizedMetadata.externalMerchantId)) {
         throw new Error('Invalid merchant ID format - must be numeric');
     }
-    
+
     return { amount, currency, metadata: sanitizedMetadata };
 };
 
@@ -437,13 +437,13 @@ const validateMerchantAndEvent = async (metadata) => {
     if (!merchant || merchant.status !== 'active') {
         throw new Error('Merchant is not available or active');
     }
-    
+
     // Check event
     const event = await Event.getEventById(metadata.eventId);
     if (!event) {
         throw new Error('Event is not available');
     }
-    
+
     // Check ticket configuration exists in event
     const ticketConfig = event.ticketInfo.find(ticket => ticket._id.toString() === metadata.ticketId);
     if (!ticketConfig) {
@@ -453,7 +453,7 @@ const validateMerchantAndEvent = async (metadata) => {
     if(ticketConfig.status === 'sold_out') {
         throw new Error('Ticket is sold out');
     }
-    
+
     return { merchant, event, ticket: ticketConfig };
 };
 
@@ -463,16 +463,16 @@ const calculateExpectedPrice = (ticket, event, quantity) => {
     const serviceFee = parseFloat(ticket.serviceFee) || 1;
     const vatRate = parseFloat(ticket.vat) || 1;
     const qty = parseInt(quantity) || 1;
-    
+
     // Calculate per unit subtotal (price + service fee)
     const perUnitSubtotal = ticketPrice + serviceFee;
-    
+
     // Calculate VAT amount per unit
     const perUnitVat = perUnitSubtotal * (vatRate / 100);
-    
+
     // Calculate total per unit
     const perUnitTotal = perUnitSubtotal + perUnitVat;
-    
+
     // Calculate total for all units
     const totalAmount = perUnitTotal * qty;
     console.log('totalAmount', totalAmount);
@@ -495,24 +495,24 @@ export const createPaymentIntent = async (req, res, next) => {
     try {
         // Security Layer 1: Request size validation
         validateRequestSize(req.body);
-        
+
         // Security Layer 2: Input validation and sanitization
         const { amount, currency, metadata } = validatePaymentRequest(req.body);
-        
+
         // Security Layer 3: Business logic validation
         const { merchant, event, ticket } = await validateMerchantAndEvent(metadata);
-        
+
         // Security Layer 4: Price validation
         const expectedPrice = calculateExpectedPrice(ticket, event, parseInt(metadata.quantity));
         validatePriceCalculation(amount / 100, expectedPrice);
-        
+
         // Security Layer 5: Timeout protection for external API calls
         const stripeTimeout = new Promise((_, reject) => {
             setTimeout(() => reject(new Error('Stripe API timeout')), 10000); // 10 second timeout
         });
-        
+
         const clientId = getClientIdentifier(req);
-        
+
         // Debug: Log merchant data to see what stripeAccount contains
         console.log('Merchant data for Stripe Connect:', {
             merchantId: merchant._id,
@@ -520,24 +520,19 @@ export const createPaymentIntent = async (req, res, next) => {
             stripeAccountType: typeof merchant.stripeAccount,
             stripeAccountLength: merchant.stripeAccount?.length
         });
-        
+
         // Validate stripeAccount format
         if (!merchant.stripeAccount) {
             throw new Error('Merchant does not have a Stripe account connected');
         }
-        
+
         if (!merchant.stripeAccount.startsWith('acct_')) {
             throw new Error(`Invalid Stripe account format: ${merchant.stripeAccount}. Expected format: acct_xxxxxxxxxx`);
         }
-        
-        const stripePromise = stripe.paymentIntents.create({
+
+        const stripePaymentIntentPayload = {
             amount: Math.round(amount),
             currency: currency.toLowerCase(),
-            //application_fee_amount: Math.round(amount * 0.04), // 4% application fee
-            on_behalf_of: merchant.stripeAccount,
-            transfer_data: {
-                destination: merchant.stripeAccount, // Connected account ID
-            },
             metadata: {
                 ...metadata,
                 merchantId: metadata.merchantId,
@@ -550,9 +545,21 @@ export const createPaymentIntent = async (req, res, next) => {
             },
             automatic_payment_methods: {
                 enabled: true,
-            },
-        });
-        
+            }
+        };
+
+        // Only apply connected account logic if merchant is NOT the platform account
+        if(merchant.stripeAccount !== process.env.STRIPE_PLATFORM_ACCOUNT_ID) {
+            stripePaymentIntentPayload.on_behalf_of = merchant.stripeAccount;
+            stripePaymentIntentPayload.transfer_data = {
+                destination: merchant.stripeAccount, // Connected account ID
+            };
+            stripePaymentIntentPayload.application_fee_amount = 5; // Fixed 5 cents application fee for connected accounts
+        }
+
+        const stripePromise = stripe.paymentIntents.create(
+            stripePaymentIntentPayload
+        );
         // Race between Stripe API and timeout
         const paymentIntent = await Promise.race([stripePromise, stripeTimeout]);
 
@@ -581,8 +588,8 @@ export const createPaymentIntent = async (req, res, next) => {
         });
         console.log('error', error.message);
         // Don't expose internal error details
-        const safeErrorMessage =  error.message  
-        
+        const safeErrorMessage =  error.message
+
         res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
             error: error.message
         });
@@ -594,19 +601,19 @@ export const handlePaymentSuccess = async (req, res, next) => {
     try {
         // Security Layer 1: Request size validation
         validateRequestSize(req.body);
-        
+
         const { paymentIntentId, metadata } = req.body;
 
         // Security Layer 2: Validate required fields
         if (!paymentIntentId || !metadata) {
             throw new Error('Missing required fields');
         }
-        
+
         // Security Layer 3: Validate payment intent ID format
         if (!/^pi_[a-zA-Z0-9_]+$/.test(paymentIntentId)) {
             throw new Error('Invalid payment intent ID format');
         }
-        
+
         // Security Layer 4: Validate and sanitize metadata
         const sanitizedMetadata = {
             eventId: sanitizeString(metadata.eventId, 50),
@@ -619,36 +626,36 @@ export const handlePaymentSuccess = async (req, res, next) => {
             ticketName: sanitizeString(metadata.ticketName, 200),
             marketingOptIn: sanitizeBoolean(metadata?.marketingOptIn || false)
         };
-        
+
         // Validate ID formats
         if (!/^[0-9a-fA-F]{24}$/.test(sanitizedMetadata.eventId) ||
             !/^[0-9a-fA-F]{24}$/.test(sanitizedMetadata.ticketId) ||
             !/^[0-9a-fA-F]{24}$/.test(sanitizedMetadata.merchantId) ) {
             throw new Error('Invalid MongoDB ObjectId format');
         }
-        
+
         // Merchant ID is a numeric string (PostgreSQL style)
         if (!/^\d+$/.test(sanitizedMetadata.externalMerchantId)) {
             throw new Error('Invalid merchant ID format - must be numeric');
         }
-        
+
         // Security Layer 5: Timeout for Stripe API call
         const stripeTimeout = new Promise((_, reject) => {
             setTimeout(() => reject(new Error('Stripe API timeout')), 10000);
         });
-        
+
         const stripePromise = stripe.paymentIntents.retrieve(paymentIntentId);
         const paymentIntent = await Promise.race([stripePromise, stripeTimeout]);
-        
+
         if (paymentIntent.status !== 'succeeded') {
             return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
                 error: 'Payment not successful'
             });
         }
-        
+
         // Generate secure OTP using the existing createCode utility
         const otp = await commonUtil.createCode(8); // 8-character alphanumeric OTP
-        
+
         // Create ticketInfo object similar to completeOrderTicket
         const ticketInfo = {
             eventName: sanitizedMetadata.eventName,
@@ -663,7 +670,7 @@ export const handlePaymentSuccess = async (req, res, next) => {
             eventId: sanitizedMetadata.eventId,
             ticketId: sanitizedMetadata.ticketId
         };
-        
+
         // Get or create crypto hash for email (using efficient search)
         const emailCrypto = await hash.getCryptoBySearchIndex(sanitizedMetadata.email, 'email');
         let emailHash = null;
@@ -689,7 +696,7 @@ export const handlePaymentSuccess = async (req, res, next) => {
             console.error('Error creating ticket:', err);
             throw err;
         });
-        
+
         // Generate email payload and send ticket (same as completeOrderTicket)
         const event = await Event.getEventById(sanitizedMetadata.eventId);
         const emailPayload = await ticketMaster.createEmailPayload(event, ticket, sanitizedMetadata.email, otp);
@@ -701,10 +708,10 @@ export const handlePaymentSuccess = async (req, res, next) => {
             console.error('Error sending ticket email:', err);
             // Don't throw here - ticket is created successfully even if email fails
         });
-        
+
         // Update ticket availability (atomic operation)
         //await Ticket.decrementAvailability(sanitizedMetadata.ticketId, parseInt(sanitizedMetadata.quantity));
-        
+
         const clientId = getClientIdentifier(req);
         console.log('Payment success handled:', {
             paymentIntentId,
@@ -712,8 +719,8 @@ export const handlePaymentSuccess = async (req, res, next) => {
             eventId: sanitizedMetadata.eventId,
             clientId: clientId
         });
-        
-        
+
+
         res.status(consts.HTTP_STATUS_OK).json({
             success: true,
             data: ticket,
@@ -728,22 +735,22 @@ export const handlePaymentSuccess = async (req, res, next) => {
             console.error('Failed to publish ticket creation event:', publishError);
             // Don't fail the entire operation if event publishing fails
         }
-        
+
     } catch (error) {
         console.error('Error handling payment success:', {
             error: error.message,
             clientId: getClientIdentifier(req),
             timestamp: new Date().toISOString()
         });
-        
-        const safeErrorMessage = error.message.includes('timeout') || 
+
+        const safeErrorMessage = error.message.includes('timeout') ||
                                 error.message.includes('Missing') ||
                                 error.message.includes('Invalid') ||
                                 error.message.includes('format') ||
                                 error.message.includes('too large')
-                                ? error.message 
+                                ? error.message
                                 : 'Payment processing temporarily unavailable';
-        
+
         res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
             error: safeErrorMessage
         });
@@ -759,15 +766,15 @@ const publishTicketCreationEvent = async (ticket, event, metadata, paymentIntent
         // Generate unique identifiers for the event
         const correlationId = uuidv4();
         const messageId = uuidv4();
-        
+
         // Get merchant information for the event
         const merchant = await Merchant.getMerchantByMerchantId(metadata.externalMerchantId);
-        
+
         // Create a clean ticket object without heavy base64 data
         const cleanTicket = { ...ticket.toObject() };
         delete cleanTicket.qrCode; // Remove base64 QR code
         delete cleanTicket.ics;    // Remove base64 ICS file
-        
+
         // Ensure ticketInfo is preserved and convert Map to Object if needed
         if (ticket.ticketInfo) {
             if (ticket.ticketInfo instanceof Map) {
@@ -777,7 +784,7 @@ const publishTicketCreationEvent = async (ticket, event, metadata, paymentIntent
                 cleanTicket.ticketInfo = ticket.ticketInfo;
             }
         }
-        
+
         // Create comprehensive event data
         const eventData = {
             eventType: 'TicketCreated',
@@ -788,7 +795,7 @@ const publishTicketCreationEvent = async (ticket, event, metadata, paymentIntent
                 marketingOptIn: metadata?.marketingOptIn || false,
                 externalEventId: event.externalEventId,
                 externalMerchantId: metadata.externalMerchantId,
-                merchantId: metadata.merchantId,             
+                merchantId: metadata.merchantId,
                 // Timestamps
                 createdAt: new Date(),
                 eventCreatedAt: event.createdAt
@@ -801,7 +808,7 @@ const publishTicketCreationEvent = async (ticket, event, metadata, paymentIntent
                 source: 'finnep-eventapp',
             }
         };
-        
+
         // Create outbox message entry
         const outboxMessageData = {
             messageId: messageId,
@@ -822,12 +829,12 @@ const publishTicketCreationEvent = async (ticket, event, metadata, paymentIntent
             maxRetries: 3,
             attempts: 0
         };
-        
+
         // Save outbox message for reliability
         const outboxMessage = await OutboxMessage.createOutboxMessage(outboxMessageData);
         info('Outbox message created for ticket creation:', outboxMessage._id);
-        
-        
+
+
         // Publish to RabbitMQ exchange
         await messageConsumer.publishToExchange(
             outboxMessageData.exchange,
@@ -844,20 +851,20 @@ const publishTicketCreationEvent = async (ticket, event, metadata, paymentIntent
             }
         ).then(async () => {
             info('Ticket creation event published successfully:', outboxMessageData.messageId);
-            
+
             // Mark outbox message as sent
             await OutboxMessage.markMessageAsSent(outboxMessage._id);
-            
+
         }).catch(async (publishError) => {
             error('Error publishing ticket creation event:', publishError);
-            
+
             // Mark outbox message as failed for retry
             await OutboxMessage.markMessageAsFailed(outboxMessage._id, publishError.message);
             throw publishError;
         });
-        
+
         info('Published ticket creation event to exchange: %s', outboxMessageData.exchange);
-        
+
     } catch (err) {
         error('Failed to publish ticket creation event:', err);
         throw err;
@@ -953,7 +960,7 @@ export const sendCareerApplication = async (req, res, next) => {
             bb.on('file', (name, file, info) => {
                 if (name === 'resume') {
                     const { filename, mimeType } = info;
-                    
+
                     // Validate file type
                     if (!consts.ALLOWED_RESUME_TYPES.includes(mimeType)) {
                         file.resume();

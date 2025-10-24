@@ -2,9 +2,9 @@ import * as model from '../model/mongoModel.js'
 import {error} from './logger.js'
 import { Ticket } from '../model/mongoModel.js'
 export class Event {
-    
-    constructor(eventTitle, eventDescription, eventDate,  
-        occupancy,ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, 
+
+    constructor(eventTitle, eventDescription, eventDate,
+        occupancy,ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress,
         eventLocationGeoCode, transportLink,
         socialMedia, lang, position, active, eventName, videoUrl, otherInfo,
         eventTimezone, city, country, venueInfo, externalMerchantId, merchant,
@@ -12,7 +12,7 @@ export class Event {
     ) {
         this.eventTitle = eventTitle
         this.eventDescription = eventDescription
-        this.eventDate = eventDate 
+        this.eventDate = eventDate
         this.occupancy = occupancy
         this.ticketInfo = ticketInfo
         this.eventPromotionPhoto = eventPromotionPhoto
@@ -42,7 +42,7 @@ export class Event {
             const event = new model.Event({
                 eventTitle: this.eventTitle,
                 eventDescription: this.eventDescription,
-                eventDate: this.eventDate, 
+                eventDate: this.eventDate,
                 occupancy: this.occupancy,
                 ticketInfo:this.ticketInfo,
                 eventPromotionPhoto: this.eventPromotionPhoto,
@@ -58,9 +58,9 @@ export class Event {
                 videoUrl: this.videoUrl,
                 otherInfo: this.otherInfo,
                 eventTimezone: this.eventTimezone,
-                city: this.city,       
+                city: this.city,
                 country: this.country,
-                venueInfo: this.venueInfo,  
+                venueInfo: this.venueInfo,
                 externalMerchantId: this.externalMerchantId,
                 merchant: this.merchant,
                 externalEventId: this.externalEventId,
@@ -75,15 +75,15 @@ export class Event {
     }
 }
 
-export const createEvent = async (eventTitle, eventDescription, eventDate,  
+export const createEvent = async (eventTitle, eventDescription, eventDate,
     occupancy, ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
     socialMedia, lang, position, active, eventName, videoUrl, otherInfo,
     eventTimezone, city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue
     ) =>{
-        
-    const event = new Event(eventTitle, eventDescription, eventDate,  
+
+    const event = new Event(eventTitle, eventDescription, eventDate,
         occupancy, ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
-        socialMedia, lang, position, active, eventName, videoUrl, otherInfo,   
+        socialMedia, lang, position, active, eventName, videoUrl, otherInfo,
         eventTimezone, city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue)
     return await event.saveToDB()
 }
@@ -98,21 +98,31 @@ export const getEvents = async() =>{
     }))
 }
 
-export const getEventById = async(id) =>{ 
-    return await model.Event.findById({_id:id}).populate('merchant').exec() 
+export const getEventById = async(id) =>{
+    return await model.Event.findById({_id:id}).populate('merchant').exec()
 }
 
 export const getEventByExternalEventId = async(externalEventId) =>{
     return await model.Event.findOne({externalEventId:externalEventId}).exec()
 }
 export const updateEventById = async (id, obj) =>{
-    return await model.Event.findByIdAndUpdate(id, {
-        $set: obj
-    }, { new: true }).lean().exec()  
+    try {
+        return await model.Event.findByIdAndUpdate(id, {
+            $set: obj
+        }, { new: true }).lean().exec();
+    } catch (error) {
+        // Handle duplicate key errors gracefully
+        if (error.code === 11000) {
+            console.warn(`Duplicate key error when updating event ${id}:`, error.keyValue);
+            // Try to find the existing event and return it instead of throwing
+            return await model.Event.findById(id).lean().exec();
+        }
+        throw error;
+    }
 }
 
 export const getEventsWithTicketCounts = async() =>{
-    try{ 
+    try{
         // Use the new positioning system
         const events = await getEventsWithPositioning();
         // Clean up the events (ticket counts already included from getEventsWithPositioning)
@@ -180,7 +190,7 @@ export const getFeaturedEvents = async() => {
             'featured.isFeatured': true,
             $or: [
                 { 'featured.featuredType': 'sticky' },
-                { 
+                {
                     'featured.featuredType': 'temporary',
                     'featured.startDate': { $lte: now },
                     'featured.endDate': { $gte: now }
@@ -190,10 +200,10 @@ export const getFeaturedEvents = async() => {
             eventDate: { $gte: now } // Only future events
         })
         .populate('merchant')
-        .sort({ 
-            'featured.priority': -1, 
-            'featured.position': 1, 
-            'featured.featuredAt': -1 
+        .sort({
+            'featured.priority': -1,
+            'featured.position': 1,
+            'featured.featuredAt': -1
         })
         .lean();
 
@@ -236,15 +246,15 @@ export const getEventsWithPositioning = async() => {
 
         // Combine and sort: featured first, then regular
         const allEvents = [...featuredEvents, ...regularEvents];
-        
+
         // Add ticket counts
         const eventsWithTicketCounts = await Promise.all(
             allEvents.map(async (event) => {
-                const ticketsSold = await Ticket.countDocuments({ 
+                const ticketsSold = await Ticket.countDocuments({
                     active: true,
                     event: event._id
                 });
-                
+
                 return {
                     ...event,
                     ticketsSold
@@ -293,8 +303,8 @@ export const unfeatureEvent = async(eventId) => {
     try {
         const event = await model.Event.findByIdAndUpdate(
             eventId,
-            { 
-                $set: { 
+            {
+                $set: {
                     'featured.isFeatured': false,
                     'featured.featuredType': 'temporary',
                     'featured.priority': 0,

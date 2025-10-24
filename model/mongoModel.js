@@ -281,7 +281,7 @@ const ticketInfoSchema = new mongoose.Schema({
 })
 
 const eventSchema = new mongoose.Schema({
-	eventTitle: { type: String, required: true, unique: true },
+	eventTitle: { type: String, required: true },
 	eventDescription: { type: String, required: true },
 	eventDate: { type: Date, required: true },
 	occupancy: {type: Number, required:true},
@@ -311,7 +311,7 @@ const eventSchema = new mongoose.Schema({
 	eventPhoto:[{type:String}],
 	transportLink:{type:String},
 	active:{type:Boolean, default:true},
-	eventName:{type:String,  unique:true},
+	eventName:{type:String},
 	videoUrl:{type:String},
 	status:{type:String, enum:['up-coming', 'on-going', 'completed'], default:'up-coming' },
 	otherInfo:{
