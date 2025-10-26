@@ -11,10 +11,11 @@ class RabbitMQConnection {
             username: process.env.RABBITMQ_USERNAME || 'guest',
             password: process.env.RABBITMQ_PASSWORD || 'guest',
             vhost: process.env.RABBITMQ_VHOST || '/',
+            heartbeat: parseInt(process.env.RABBITMQ_HEARTBEAT || '60', 10), // 60 seconds heartbeat
             // SSL options if enabled
             ...(process.env.RABBITMQ_SSL === 'true' ? {
                 protocol: 'amqps',
-                ssl: { 
+                ssl: {
                     rejectUnauthorized: process.env.RABBITMQ_REJECT_UNAUTHORIZED !== 'false'
                 }
             } : { protocol: 'amqp' })
@@ -33,7 +34,7 @@ class RabbitMQConnection {
 
     async connect() {
         if (this.isConnecting || (this.connection && !this.connection.connection.closed)) return;
-        
+
         this.isConnecting = true;
         try {
             info('Attempting to connect to RabbitMQ', { hostname: this.config.hostname, port: this.config.port });
@@ -46,7 +47,7 @@ class RabbitMQConnection {
                 protocol: this.config.protocol,
                 ...(this.config.ssl ? { ssl: this.config.ssl } : {})
             });
-            
+
             info('RabbitMQ connection established');
             this.connection.on('error', (err) => {
                 error('RabbitMQ connection error', { error: err.message, stack: err.stack });
@@ -97,22 +98,22 @@ class RabbitMQConnection {
         if (!connection) {
             throw new Error('No connection available');
         }
-        
+
         try {
             const channel = await connection.createChannel();
             this.channels.add(channel);
-            
+
             // Handle channel-specific errors
             channel.on('error', (err) => {
                 error('RabbitMQ channel error', { error: err.message });
                 this.channels.delete(channel);
             });
-            
+
             channel.on('close', () => {
                 info('RabbitMQ channel closed');
                 this.channels.delete(channel);
             });
-            
+
             return channel;
         } catch (err) {
             error('Failed to create channel', { error: err.message });
@@ -123,7 +124,7 @@ class RabbitMQConnection {
     async close() {
         this.shouldReconnect = false;
         info('Closing RabbitMQ connection');
-        
+
         // Close all channels first
         for (const channel of this.channels) {
             try {
@@ -135,7 +136,7 @@ class RabbitMQConnection {
             }
         }
         this.channels.clear();
-        
+
         if (this.connection && !this.connection.connection.closed) {
             await this.connection.close();
         }
