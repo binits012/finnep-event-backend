@@ -9,15 +9,15 @@ export const handleEventMessage = async (message) => {
         error('Invalid message format - not an object %s', { message });
         throw new Error('Message must be an object');
     }
-    
+
     const messageId = message?.metaData?.causationId;
-    
+
     // Check if message has already been processed (idempotency)
     if (messageId && await inboxModel.isProcessed(messageId)) {
         console.log(`Message ${messageId} already processed, skipping...`);
         return;
     }
-    
+
     // Try to save message, but handle duplicate key error gracefully
     try {
         await inboxModel.saveMessage({
@@ -39,7 +39,7 @@ export const handleEventMessage = async (message) => {
         // Re-throw if it's not a duplicate key error or message wasn't processed
         throw saveError;
     }
-    
+
     try {
         switch (message.routingKey) {
             case 'event.created':
@@ -60,14 +60,14 @@ export const handleEventMessage = async (message) => {
     }
 };
 
-async function handleEventCreated(message) {  
+async function handleEventCreated(message) {
     console.log(message, 'creating event:');
     const externalMerchantId = message.merchantId;
     const merchant = await getMerchantByMerchantId(externalMerchantId)
     if (!merchant) {
         throw new Error(`Merchant with ID ${externalMerchantId} not found`);
     }
-     
+
     const eventTitle = message?.title
     const eventDescription = message?.description;
     const eventDate = message?.event_date;
@@ -88,10 +88,10 @@ async function handleEventCreated(message) {
     const eventTimezone = message?.event_timezone;
     const city = message?.city;
     const country = message?.country;
-    const venueInfo = message?.venue_info; 
+    const venueInfo = message?.venue_info;
     const externalEventId = message?.id;
-    const venue = message?.venue; 
-    
+    const venue = message?.venue;
+
     await Event.createEvent(
         eventTitle, eventDescription, eventDate, occupancy,
         ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress,
@@ -100,7 +100,7 @@ async function handleEventCreated(message) {
         city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue
     );
 
-    await inboxModel.markProcessed(message?.metaData?.causationId); 
+    await inboxModel.markProcessed(message?.metaData?.causationId);
 }
 
 async function handleEventUpdated(message) {
@@ -110,7 +110,7 @@ async function handleEventUpdated(message) {
     if (!merchant) {
         throw new Error(`Merchant with ID ${externalMerchantId} not found`);
     }
-     
+
     const eventTitle = message?.title
     const eventDescription = message?.description;
     const eventDate = message?.event_date;
@@ -131,24 +131,25 @@ async function handleEventUpdated(message) {
     const eventTimezone = message?.event_timezone;
     const city = message?.city;
     const country = message?.country;
-    const venueInfo = message?.venue_info; 
+    const venueInfo = message?.venue_info;
     const externalEventId = message?.id;
-    const existingEvent = await Event.getEventByExternalEventId(externalEventId);
+    const existingEvent = await Event.getEventByMerchantAndExternalId(externalMerchantId,
+        externalEventId);
     const venue = existingEvent?.venue;
     if (!existingEvent) {
         throw new Error(`Event with ID ${externalEventId} not found`);
     }
-    await Event.updateEventById(existingEvent._id,{ 
+    await Event.updateEventById(existingEvent._id,{
         eventTitle, eventDescription, eventDate, occupancy,
         ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress,
         eventLocationGeoCode, transportLink, socialMedia, lang, position,
         active, eventName, videoUrl, otherInfo, eventTimezone,
         city, country, venueInfo, venue}
     );
-    await inboxModel.markProcessed(message?.metaData?.causationId); 
+    await inboxModel.markProcessed(message?.metaData?.causationId);
 }
 
- 
+
 
 async function handleEventDeleted(message) {
     console.log('Updating event:', message);
@@ -158,12 +159,12 @@ async function handleEventDeleted(message) {
         throw new Error(`Merchant with ID ${externalMerchantId} not found`);
     }
     const externalEventId = message?.id;
-    const existingEvent = await Event.getEventByExternalEventId(externalEventId);
+    const existingEvent = await Event.getEventByMerchantAndExternalId(externalMerchantId, externalEventId);
     if (!existingEvent) {
         throw new Error(`Event with ID ${externalEventId} not found`);
     }
     await Event.deleteEventById(existingEvent._id);
-    await inboxModel.markProcessed(message?.metaData?.causationId); 
+    await inboxModel.markProcessed(message?.metaData?.causationId);
 }
 
 export { handleEventCreated, handleEventUpdated, handleEventDeleted };

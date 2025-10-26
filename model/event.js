@@ -105,6 +105,7 @@ export const getEventById = async(id) =>{
 export const getEventByExternalEventId = async(externalEventId) =>{
     return await model.Event.findOne({externalEventId:externalEventId}).exec()
 }
+
 export const updateEventById = async (id, obj) =>{
     try {
         return await model.Event.findByIdAndUpdate(id, {
@@ -351,4 +352,16 @@ export const cleanupExpiredFeatures = async() => {
     }
 }
 
+// find by index
+export const getEventByMerchantAndExternalId = async(externalMerchantId, externalEventId) => {
+    try {
+        return await model.Event.findOne({
+            externalMerchantId: externalMerchantId,
+            externalEventId: externalEventId
+        }).populate('merchant').lean().exec();
+    } catch (error) {
+        console.error('Error finding event by merchant and external ID:', error);
+        throw error;
+    }
+}
 
