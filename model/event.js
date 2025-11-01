@@ -89,8 +89,6 @@ export const createEvent = async (eventTitle, eventDescription, eventDate,
 }
 
 export const getEvents = async() =>{
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
     const events = await model.Event.find({}).sort({eventDate:-1}).exec()
     return events.map(event => ({
         ...event.toObject(),
@@ -148,7 +146,11 @@ export const deleteEventById = async(id) =>{
 
 
 export const listEvent = async(filter) =>{
-    return await model.Event.find({}).populate('merchant').sort({'position':-1}).lean()
+    // Only return future events
+    const now = new Date();
+    return await model.Event.find({
+        eventDate: { $gte: now }
+    }).populate('merchant').sort({'position':-1}).lean()
 }
 
 export const listEventFiltered = async({ city, country, page = 1, limit = 12 } = {}) => {
@@ -162,13 +164,17 @@ export const listEventFiltered = async({ city, country, page = 1, limit = 12 } =
     // Active only by default
     q.active = { $ne: false }
 
+    // Only return future events
+    const now = new Date();
+    q.eventDate = { $gte: now }
+
     const numericPage = Math.max(parseInt(String(page), 10) || 1, 1)
     const numericLimit = Math.min(Math.max(parseInt(String(limit), 10) || 12, 1), 100)
 
     const total = await model.Event.countDocuments(q)
     const items = await model.Event.find(q)
         .populate('merchant')
-        .sort({ position: -1, eventDate: 1 })
+        .sort({ eventDate: 1 })
         .skip((numericPage - 1) * numericLimit)
         .limit(numericLimit)
         .lean()

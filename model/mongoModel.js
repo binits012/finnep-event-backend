@@ -9,21 +9,21 @@ mongoose.set('strict', true);
 
 // 1. First, define the audit plugin and schema
 const auditTrailSchema = new mongoose.Schema({
-	action: { 
-		type: String, 
+	action: {
+		type: String,
 		enum: ['create', 'update', 'delete', 'restore', 'other'],
-		required: true 
+		required: true
 	},
-	documentId: { 
-		type: mongoose.Schema.Types.ObjectId, 
-		required: true 
+	documentId: {
+		type: mongoose.Schema.Types.ObjectId,
+		required: true
 	},
-	collectionName: { 
-		type: String, 
-		required: true 
+	collectionName: {
+		type: String,
+		required: true
 	},
-	user: { 
-		type: mongoose.Schema.Types.ObjectId, 
+	user: {
+		type: mongoose.Schema.Types.ObjectId,
 		ref: 'User',
 		required: false
 	},
@@ -33,8 +33,8 @@ const auditTrailSchema = new mongoose.Schema({
 });
 
 function auditPlugin(schema) {
-	const debug = true;
-	
+	const debug = process.env.AUDIT_DEBUG == 'true' || false;
+	console.log('Audit debug:', debug);
 	// Add modifiedBy field to all schemas that use the audit plugin
 	schema.add({
 		modifiedBy: {
@@ -53,11 +53,11 @@ function auditPlugin(schema) {
 
 	schema.pre('save', async function(next) {
 		if (debug) console.log('Audit pre-save triggered for:', this.constructor.modelName);
-		
+
 		try {
 			// Store the user ID from the model's options
 			this._auditUser = this.constructor._auditUser;
-			
+
 			if (this.isNew) {
 				if (debug) console.log('New document detected');
 				this._auditAction = 'create';
@@ -77,7 +77,7 @@ function auditPlugin(schema) {
 
 	schema.post('save', true, async function(doc, next) {
 		if (debug) console.log('Audit post-save triggered for:', doc.constructor.modelName);
-		
+
 		try {
 			const auditEntry = new AuditTrail({
 				action: this._auditAction || 'other',
@@ -104,7 +104,7 @@ function auditPlugin(schema) {
 	// Modify the update operations to handle user information
 	schema.pre(['updateOne', 'updateMany', 'findOneAndUpdate'], async function(next) {
 		if (debug) console.log('Audit pre-update triggered');
-		
+
 		try {
 			// Store the user ID from the model's options
 			this._auditUser = this.model._auditUser;
@@ -119,16 +119,16 @@ function auditPlugin(schema) {
 
 	schema.post(['updateOne', 'updateMany', 'findOneAndUpdate'], async function(result) {
 		if (debug) console.log('Audit post-update triggered');
-		
+
 		try {
 			if (result && (result.modifiedCount > 0 || result._id)) {
 				const updatedDocs = await this.model.find(this._auditQuery).lean();
-				
+
 				const auditPromises = updatedDocs.map(doc => {
-					const beforeDoc = this._auditBefore?.find(d => 
+					const beforeDoc = this._auditBefore?.find(d =>
 						d._id.toString() === doc._id.toString()
 					);
-					
+
 					return new AuditTrail({
 						action: 'update',
 						documentId: doc._id,
@@ -188,7 +188,7 @@ userSchema.methods.hashPassword = async function (userPassword) {
 	}).catch(err => { return err });
 	return hashPassword;
   };
-  
+
 userSchema.methods.comparePassword = async function (pwd) {
 	return await bcrypt.compare(pwd, this.pwd);
 }
@@ -259,7 +259,7 @@ const ticketInfoSchema = new mongoose.Schema({
 	  min: [1, 'Quantity must be at least 1']
 	},
 	available: {
-		type: Number, 
+		type: Number,
 		min: [0, 'Available quantity cannot be negative']
 	},
 	serviceFee:{
@@ -290,7 +290,7 @@ const eventSchema = new mongoose.Schema({
 		validate: {
 		  validator: function(ticketInfoArray) {
 			const size = ticketInfoArray.length
-			 
+
 			// Check for duplicate `name` fields
 			const names = ticketInfoArray.map((item) => item.name);
 			const uniqueNames = new Set(names);
@@ -317,32 +317,33 @@ const eventSchema = new mongoose.Schema({
 	otherInfo:{
 		type: mongoose.Schema.Types.Mixed
 	},
-	eventTimezone: { type: String },  
-	city: { type: String },           
-	country: { type: String },        
-	venueInfo: {                      
+	eventTimezone: { type: String },
+	city: { type: String },
+	country: { type: String },
+	venueInfo: {
 		type: mongoose.Schema.Types.Mixed
 	},
 	externalMerchantId: { type: String, required: true, index: true },
 	merchant:{ type: mongoose.Schema.Types.ObjectId, ref: 'Merchant', required:true },
 	externalEventId: { type: String, required: true, index: true },
-	venue:{                      
+	venue:{
 		type: mongoose.Schema.Types.Mixed
 	},
 	// Featured and positioning system
 	featured: {
 		isFeatured: { type: Boolean, default: false },
-		featuredType: { 
-			type: String, 
-			enum: ['sticky', 'temporary'], 
-			default: 'temporary' 
+		featuredType: {
+			type: String,
+			enum: ['sticky', 'temporary'],
+			default: 'temporary'
 		},
 		priority: { type: Number, default: 0 }, // Higher number = higher priority
 		startDate: { type: Date }, // When featuring starts (for temporary)
 		endDate: { type: Date }, // When featuring ends (for temporary)
 		featuredAt: { type: Date, default: Date.now }
 	},
-	createdAt: { type: Date, default: Date.now }
+	createdAt: { type: Date, default: Date.now },
+	updatedAt:{ type:Date, default:Date.now }
 })
 eventSchema.index({ externalMerchantId: 1, externalEventId: 1 }, { unique: true });
 // Featured events indexes
@@ -351,12 +352,12 @@ eventSchema.index({ 'featured.isFeatured': 1, 'featured.featuredType': 1, 'featu
 eventSchema.index({ 'featured.isFeatured': 1, 'featured.endDate': 1 }); // For cleanup of expired temporary features
 
 eventSchema.pre('findOneAndUpdate', function(next) {
-	const update = this.getUpdate() 
+	const update = this.getUpdate()
 	if (update && update.$set.ticketInfo) {
 	  const ticketInfoArray = update.$set.ticketInfo
 	  const names = ticketInfoArray.map(item => item.name)
 	  const uniqueNames = new Set(names)
-	  
+
 	  if (names.length !== uniqueNames.size) {
 		return next(new Error('Duplicate entries found in ticketInfoArray array'));
 	  }
@@ -383,7 +384,7 @@ const notificationTypeSchema = new mongoose.Schema({
 	name: {type:String, unique:true, required:true},
 	publish:{ type: Boolean, default: true },
 	createdAt: { type: Date, default: Date.now }
-}) 
+})
 
 
 const notificationSchema = new mongoose.Schema({
@@ -393,7 +394,7 @@ const notificationSchema = new mongoose.Schema({
 	publish: { type: Boolean, default: true },
 	lang: { type:String, default:'en'},
 	notificationType: { type: mongoose.Schema.Types.ObjectId, ref: 'NotificationType', required:true },
-	createdAt: { type: Date, default: Date.now }	
+	createdAt: { type: Date, default: Date.now }
 })
 
 
@@ -410,7 +411,7 @@ const photoSchema = new mongoose.Schema({
 	createdAt: { type: Date, default: Date.now },
 	photoLink: String,
 	position: Number,
-	publish:{ type:Boolean, default:true}, 
+	publish:{ type:Boolean, default:true},
 	photoType:[{type: mongoose.Schema.Types.ObjectId, ref: 'PhotoType', required:true}]
 })
 
@@ -466,11 +467,11 @@ const settingSchema = new mongoose.Schema({
 	socialMedia:{
 		type: Map,
 		of: String
-	  }, 
+	  },
 	otherInfo:{
 		type:Map,
 		of:mongoose.Schema.Types.Mixed
-	} 
+	}
 })
 
 
@@ -487,9 +488,9 @@ const paymentSchema = new mongoose.Schema({
 })
 
 
- 
+
 const orderTicketSchema = mongoose.Schema({
-	createdAt: { type: Date, default: Date.now }, 
+	createdAt: { type: Date, default: Date.now },
 	ticketInfo:{type:Map, of: mongoose.Schema.Types.Mixed},
 	status:{type:String, enum:["created","in-complete","failed","completed","roundTripCompleted"], default:"created"},
 	otp:{type:String, required:true},
@@ -500,18 +501,18 @@ const orderTicketSchema = mongoose.Schema({
 
 const merchantSchema = new mongoose.Schema({
 	createdAt: { type: Date, default: Date.now },
-	merchantId: { type: String, required: true, unique: true, index: true }, 
+	merchantId: { type: String, required: true, unique: true, index: true },
 	name: { type: String, required: true },
-	orgName: { type: String, unique: true },  
+	orgName: { type: String, unique: true },
 	country: { type: String },
 	code: { type: String },
 	email: { type: String },
-	companyEmail: { type: String },  
+	companyEmail: { type: String },
 	phone: { type: String },
-	companyPhoneNumber: { type: String },  
+	companyPhoneNumber: { type: String },
 	address: { type: String },
-	companyAddress: { type: String },  
-	schemaName: { type: String },  
+	companyAddress: { type: String },
+	schemaName: { type: String },
 	status: { type: String, enum: ["active", "inactive", "pending", "suspended"], default: "pending" },
 	website: { type: String },
 	logo: { type: String },
@@ -520,7 +521,7 @@ const merchantSchema = new mongoose.Schema({
 });
 
 // Additional indexes for common search patterns
-merchantSchema.index({ merchantId: 1 }); // Index on country code for filtering 
+merchantSchema.index({ merchantId: 1 }); // Index on country code for filtering
 
 const outboxMessageSchema = new mongoose.Schema({
 	createdAt: { type: Date, default: Date.now },
@@ -529,10 +530,10 @@ const outboxMessageSchema = new mongoose.Schema({
 	routingKey: { type: String, required: true },
 	messageBody: { type: mongoose.Schema.Types.Mixed, required: true },
 	headers: { type: Map, of: String },
-	status: { 
-		type: String, 
-		enum: ["pending", "sent", "failed", "retrying"], 
-		default: "pending" 
+	status: {
+		type: String,
+		enum: ["pending", "sent", "failed", "retrying"],
+		default: "pending"
 	},
 	attempts: { type: Number, default: 0 },
 	maxRetries: { type: Number, default: 3 },
@@ -578,24 +579,24 @@ const ticketAnalyticsSchema = new mongoose.Schema({
 	merchant: { type: mongoose.Schema.Types.ObjectId, ref: 'Merchant', required: true },
 	externalMerchantId: { type: String, required: true },
 	event: { type: mongoose.Schema.Types.ObjectId, ref: 'Event', required: true },
-  
+
 	totalTickets: { type: Number, default: 0 },
 	totalRevenue: { type: Number, default: 0 }, // Derived from ticketInfo.price
-  
+
 	ticketTypes: [{
 	  type: { type: String }, // From ticket.type
 	  count: { type: Number },
 	  revenue: { type: Number }
 	}],
-  
+
 	ticketInfoStats: {
 	  categories: { type: Map, of: Number }, // e.g., { 'VIP': 12, 'General': 88 }
-	  extras: { type: Map, of: Number },     // e.g., { 'meal': 45, 'parking': 30 }
+	  extras: { type: Map, of: Number },     // e.g., { 'parking': 30 }
 	  seatsSold: { type: Number }            // If seat info is present in ticketInfo
 	},
-  
+
 	processedTicketIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Ticket' }], // Track processed tickets
-  
+
 	firstSale: { type: Date },
 	lastSale: { type: Date },
 	lastUpdated: { type: Date, default: Date.now }
@@ -604,7 +605,7 @@ const ticketAnalyticsSchema = new mongoose.Schema({
 const schemas = [
 	inboxMessageSchema,
 	outboxMessageSchema,
-	merchantSchema, 
+	merchantSchema,
 	orderTicketSchema,paymentSchema,settingSchema,ticketSchema,messageSchema,photoSchema,photoTypeSchema,
 	notificationSchema,notificationTypeSchema,tokenSchema,eventSchema,timeBasedPriceSchema,eventTypeSchema,
 	socialMediaSchema,contactSchema,cryptoSchema,roleSchema, userSchema, ticketAnalyticsSchema

@@ -38,6 +38,7 @@ var app = express();
 // Configure CORS to work with frontend CSP
 const corsOptions = {
   origin: [
+    'http://localhost:3002',
     'http://localhost:3000',
     'https://eventapp.finnep.fi',
     'https://finnep.fi',

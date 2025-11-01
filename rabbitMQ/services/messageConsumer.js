@@ -6,6 +6,7 @@ class MessageConsumer {
         this.publishChannel = null;
         this.consumeChannel = null;
         this.isInitialized = false;
+        this.activeConsumers = new Set(); // Track active consumer tags to prevent duplicates
     }
 
     async initialize() {
@@ -43,7 +44,9 @@ class MessageConsumer {
 
             if (publishChannelInvalid || consumeChannelInvalid) {
                 this.isInitialized = false;
-                info('Channels not ready or closed, initializing...');
+                // Clear active consumers since channels are being re-initialized
+                this.activeConsumers.clear();
+                info('Channels not ready or closed, clearing consumers and initializing...');
                 await this.initialize();
             }
 
@@ -58,6 +61,12 @@ class MessageConsumer {
 
     async consumeQueue(queueName, handler, options = {}) {
         await this.ensureChannelsReady();
+
+        // Prevent duplicate consumers for the same queue
+        if (this.activeConsumers.has(queueName)) {
+            warn(`Consumer for queue ${queueName} already active, skipping setup`);
+            return;
+        }
 
         const { durable = true, prefetch = 1, deadLetterExchange, deadLetterRoutingKey } = options;
 
@@ -78,7 +87,7 @@ class MessageConsumer {
 
         info(`Starting to consume queue: ${queueName}`);
 
-        this.consumeChannel.consume(queueName, async (msg) => {
+        const { consumerTag } = await this.consumeChannel.consume(queueName, async (msg) => {
             if (msg) {
                 try {
                     const content = JSON.parse(msg.content.toString());
@@ -92,6 +101,10 @@ class MessageConsumer {
                 }
             }
         });
+
+        // Track this consumer to prevent duplicates
+        this.activeConsumers.add(queueName);
+        info(`Consumer registered for queue ${queueName} with tag: ${consumerTag}`);
     }
 
     async publishMessage(queueName, message) {
@@ -109,7 +122,7 @@ class MessageConsumer {
         try {
             await this.ensureChannelsReady();
 
-            const { exchangeType = 'direct', durable = true } = options; 
+            const { exchangeType = 'direct', durable = true } = options;
 
             // Declare the exchange if it doesn't exist
             await this.publishChannel.assertExchange(exchangeName, exchangeType, { durable });
@@ -139,6 +152,13 @@ class MessageConsumer {
     async consumeFromExchange(exchangeName, queueName, routingKey, handler, options = {}) {
         await this.ensureChannelsReady();
 
+        // Prevent duplicate consumers for the same queue
+        const consumerKey = `${exchangeName}:${queueName}:${routingKey}`;
+        if (this.activeConsumers.has(consumerKey)) {
+            warn(`Consumer for exchange ${exchangeName}, queue ${queueName}, routing key ${routingKey} already active, skipping setup`);
+            return;
+        }
+
         const {
             exchangeType = 'direct',
             durable = true,
@@ -156,7 +176,7 @@ class MessageConsumer {
 
         info(`Starting to consume from exchange: ${exchangeName}, queue: ${queueName}, routing key: ${routingKey}`);
 
-        this.consumeChannel.consume(queueName, async (msg) => {
+        const { consumerTag } = await this.consumeChannel.consume(queueName, async (msg) => {
             if (msg) {
                 try {
                     const content = JSON.parse(msg.content.toString());
@@ -176,6 +196,10 @@ class MessageConsumer {
                 }
             }
         });
+
+        // Track this consumer to prevent duplicates
+        this.activeConsumers.add(consumerKey);
+        info(`Consumer registered for exchange ${exchangeName}, queue ${queueName} with tag: ${consumerTag}`);
     }
 
     async setupQueue(queueName, options = {}) {
@@ -197,42 +221,6 @@ class MessageConsumer {
 
         await this.publishChannel.assertExchange(exchangeName, exchangeType, { durable });
         info(`Exchange ${exchangeName} created with type ${exchangeType}`);
-    }
-}
-
-async function ensureChannel() {
-    if (!this.channel || this.channel.connection.destroyed) {
-        await this.initialize(); // or your channel init logic
-    }
-}
-
-export async function publishToExchange(exchange, routingKey, message, options) {
-    await ensureChannel.call(this); // Ensure channel is open
-
-    try {
-        await this.channel.assertExchange(exchange, options.exchangeType || 'topic', { durable: true });
-        this.channel.publish(
-            exchange,
-            routingKey,
-            Buffer.from(JSON.stringify(message)),
-            options.publishOptions || {}
-        );
-    } catch (err) {
-        error('Failed to publish to exchange:', err);
-        // Optionally, try to re-initialize and retry once
-        if (err.message.includes('Channel closed')) {
-            await this.initialize();
-            // Retry publish once
-            await this.channel.assertExchange(exchange, options.exchangeType || 'topic', { durable: true });
-            this.channel.publish(
-                exchange,
-                routingKey,
-                Buffer.from(JSON.stringify(message)),
-                options.publishOptions || {}
-            );
-        } else {
-            throw err;
-        }
     }
 }
 
