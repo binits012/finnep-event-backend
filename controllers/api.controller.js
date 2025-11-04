@@ -39,26 +39,26 @@ export const changePassword = async (req, res, next) => {
 }
 
 export const getUserById = async (req, res, next) => {
-    const id = req.params.id 
+    const id = req.params.id
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
             message: 'Invalid Id.', error: appText.INVALID_ID
         })
         await user.getUserById(req,res,next)
-    }))   
+    }))
 }
 
 export const updateUserById = async(req, res, next) =>{
-    const id = req.params.id 
+    const id = req.params.id
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
             message: 'Invalid Id.', error: appText.INVALID_ID
         })
         await user.updateUserById(req,res,next)
-    })) 
+    }))
 }
 export const deleteUserById = async (req, res, next) => {
-    const id = req.params.id 
+    const id = req.params.id
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
             message: 'Invalid Id.', error: appText.INVALID_ID
@@ -76,7 +76,7 @@ export const createContact = async(req, res, next) =>{
 }
 
 export const updateContact = async(req, res, next) =>{
-    await contact.updateContact(req, res, next) 
+    await contact.updateContact(req, res, next)
 }
 
 export const deleteContact = async(req, res,next)=>{
@@ -84,14 +84,14 @@ export const deleteContact = async(req, res,next)=>{
 }
 
 export const logout = async (req, res, next) => {
-	
+
     const token = req.query.token
     if(token !== null){
         await jwtToken.invalidateJWT(token, async (err, data) => {
             res.send(200).json({reply:"ok"})
         })
     }
-	
+
 }
 
 
@@ -107,27 +107,27 @@ export const getPhoto = async (req, res, next) => {
 }
 
 export const getPhotoById = async (req,res,next) =>{
-    const id = req.params.id 
+    const id = req.params.id
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
             message: 'Invalid Id.', error: appText.INVALID_ID
         })
         await photo.getPhotoById(req,res,next)
-    })) 
+    }))
 }
 
 export const updatePhotoById = async(req,res,next) =>{
-    const id = req.params.id 
+    const id = req.params.id
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
             message: 'Invalid Id.', error: appText.INVALID_ID
         })
         await photo.updatePhotoById(req,res,next)
-    }))  
+    }))
 }
 
 export const deletePhotoById = async(req,res,next) =>{
-    const id = req.params.id 
+    const id = req.params.id
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
             message: 'Invalid Id.', error: appText.INVALID_ID
@@ -148,29 +148,29 @@ export const createNotification = async(req, res, next) =>{
 }
 
 export const getNotificationById = async(req,res,next) =>{
-    const id = req.params.id 
+    const id = req.params.id
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
             message: 'Invalid Id.', error: appText.INVALID_ID
         })
         await notification.getNotificationById(req,res,next)
     }))
-    
+
 }
 
 export const updateNotificationById = async(req,res,next) =>{
-    const id = req.params.id 
+    const id = req.params.id
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
             message: 'Invalid Id.', error: appText.INVALID_ID
         })
         await notification.updateNotificationById(req,res,next)
     }))
-    
+
 }
 
 export const deleteNotificationById = async(req,res,next) =>{
-    const id = req.params.id 
+    const id = req.params.id
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
             message: 'Invalid Id.', error: appText.INVALID_ID
@@ -182,11 +182,11 @@ export const deleteNotificationById = async(req,res,next) =>{
 
 /** EVENT BEGINS */
 
-export const createEvent = async(req,res, next) =>{ 
+export const createEvent = async(req,res, next) =>{
     await common.validate([
         body('eventTitle').notEmpty(),
         body('eventDescription').notEmpty(),
-        body('eventDate').notEmpty(), 
+        body('eventDate').notEmpty(),
         body('occupancy').notEmpty().isNumeric(),
         body('eventPromotionPhoto').notEmpty(),
         body('eventLocationAddress').notEmpty(),
@@ -195,24 +195,28 @@ export const createEvent = async(req,res, next) =>{
         body('position').notEmpty(),
         body('active').notEmpty(),
 
-    ], req).then(async data =>{ 
+    ], req).then(async data =>{
         if(data.errors.length === 0){
             await event.createEvent(req, res, next)
         } else {
             return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
             message: 'Please check the payload.', error: data.errors })
         }
-    }) 
-    
-    
+    })
+
+
 }
 
 export const getEvents = async(req,res,next) =>{
     await event.getEvents(req,res,next)
 }
 
+export const getEventFilterOptions = async(req,res,next) =>{
+    await event.getEventFilterOptions(req,res,next)
+}
+
 export const getEventById = async(req,res,next) =>{
-    const id = req.params.id 
+    const id = req.params.id
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
             message: 'Invalid Id.', error: appText.INVALID_ID
@@ -225,7 +229,7 @@ export const updateEventById = async(req,res,next) =>{
     await common.validate([
         body('eventTitle').notEmpty(),
         body('eventDescription').notEmpty(),
-        body('eventDate').notEmpty(),  
+        body('eventDate').notEmpty(),
         body('occupancy').notEmpty().isNumeric(),
         body('eventPromotionPhoto').notEmpty(),
         body('eventLocationAddress').notEmpty(),
@@ -234,7 +238,7 @@ export const updateEventById = async(req,res,next) =>{
         body('position').notEmpty(),
         body('active').notEmpty(),
 
-    ], req).then(async data =>{ 
+    ], req).then(async data =>{
         if(data.errors.length === 0){
             await event.updateEventById(req, res, next)
         } else {
@@ -265,56 +269,56 @@ export const updateEventStatusById = async(req,res,next) =>{
 }
 
 export const uploadPhotosForParticularEvent = async(req,res,next) =>{
-    const id = req.params.id 
+    const id = req.params.id
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
             message: 'Invalid Id.', error: appText.INVALID_ID
         })
         return await event.uploadPhotosForParticularEvent(req,res,next)
     }))
-    
+
 }
 /** EVENT ENDS */
 
 /** dashboard helper */
 export const dashboard = async(req, res, next) =>{
 
-    const token = req.headers.authorization 
+    const token = req.headers.authorization
     await jwtToken.verifyJWT(token, async (err, data) => {
-        if (err || data === null) { 
+        if (err || data === null) {
             return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({
                 message: 'Please, provide valid token', error: appText.TOKEN_NOT_VALID
             })
-        } else { 
+        } else {
             const userRoleFromToken = data.role
-            if (consts.ROLE_MEMBER ===userRoleFromToken) { 
+            if (consts.ROLE_MEMBER ===userRoleFromToken) {
                 return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
                     message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
                 })
-            } 
+            }
             try{
                 const eventAll = await event.getAllEventsForDashboard().catch(err=>{
                     error('error',err)
                     throw err
-                })  
+                })
                 const photoAll = await photo.getAllPhotoForDashboard().catch(err=>{
                     error('error',err)
                     throw err
-                }) 
+                })
                 const notificationAll = await notification.getAllNotificationForDashboard().catch(err=>{
-                    error('error',err) 
+                    error('error',err)
                     throw err
-                }) 
+                })
                 const photoTypes = await photoType.getPhotoTypes().catch(err=>{
                     error('error',err)
                     throw err
-                    
-                }) 
+
+                })
                 const tickets = await ticket.getAllTickets().catch(err=>{
                     error('error',err)
                     throw err
-                    
-                }) 
+
+                })
                 const notificationType = await NotificationType.getNotificationTypes()
                 const dashboardData = {
                     event:eventAll,
@@ -323,8 +327,8 @@ export const dashboard = async(req, res, next) =>{
                     notification:notificationAll,
                     ticket:tickets,
                     notificationType:notificationType
-    
-                }  
+
+                }
                 return res.status(consts.HTTP_STATUS_OK).json({ data: dashboardData })
             }catch(err){
                 console.log(err)
@@ -334,7 +338,7 @@ export const dashboard = async(req, res, next) =>{
                     })
                 }
             }
-            
+
         }
     })
 }
@@ -355,25 +359,25 @@ export const getSetting = async(req,res,next) =>{
 }
 
 export const getSettingById = async(req,res,next) =>{
-    const id = req.params.id 
+    const id = req.params.id
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
             message: 'Invalid Id.', error: appText.INVALID_ID
         })
         await setting.getSettingById(req,res,next)
     }))
-    
+
 }
 
 export const updateSettingById = async(req,res,next) =>{
-    const id = req.params.id 
+    const id = req.params.id
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
             message: 'Invalid Id.', error: appText.INVALID_ID
         })
         await setting.updateSettingById(req,res,next)
     }))
-    
+
 }
 /** Setting ends */
 
@@ -381,8 +385,8 @@ export const updateSettingById = async(req,res,next) =>{
 export const createSingleTicket = async(req,res,next) =>{
     await common.validate([
         body('event').notEmpty(),
-        body('ticketFor').notEmpty(), 
-    ], req).then(async data =>{ 
+        body('ticketFor').notEmpty(),
+    ], req).then(async data =>{
         if(data.errors.length === 0){
             await ticket.createSingleTicket(req, res, next)
         } else {
@@ -392,12 +396,12 @@ export const createSingleTicket = async(req,res,next) =>{
     })
 }
 
-export const createMultipleTicket = async(req, res, next) =>{ 
+export const createMultipleTicket = async(req, res, next) =>{
     return await ticket.createMultipleTicket(req,res,next)
 }
 
-export const getAllTicketByEventId = async(req, res, next) =>{ 
-    const id = req.params.id 
+export const getAllTicketByEventId = async(req, res, next) =>{
+    const id = req.params.id
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
             message: 'Invalid Id.', error: appText.INVALID_ID
@@ -407,7 +411,7 @@ export const getAllTicketByEventId = async(req, res, next) =>{
 }
 
 export const getTicketById = async(req,res,next) =>{
-    const id = req.params.id 
+    const id = req.params.id
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
             message: 'Invalid Id.', error: appText.INVALID_ID
@@ -417,7 +421,7 @@ export const getTicketById = async(req,res,next) =>{
 }
 
 export const ticketCheckIn = async(req,res,next) =>{
-    const id = req.params.id 
+    const id = req.params.id
     param(id).custom(common.validateParam(id).then(async data=>{
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
             message: 'Invalid Id.', error: appText.INVALID_ID
@@ -429,13 +433,13 @@ export const ticketCheckIn = async(req,res,next) =>{
 export const searchTicket = async(req, res, next) => {
     const id = req.params.id
     const {code, phone} = req.query
-    
+
     // Validate event ID
     param(id).custom(common.validateParam(id).then(async data => {
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
             message: 'Invalid Event Id.', error: appText.INVALID_ID
         })
-        
+
         // Validate search parameters
         if (!code && !phone) {
             return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -444,13 +448,13 @@ export const searchTicket = async(req, res, next) => {
             })
         }
         await ticket.searchTicket(req,res,next)
-         
+
     }))
 }
 
 /** Merchant API functions */
 export const getAllMerchants = async (req, res, next) => {
-    
+
     try {
         // Input validation can be added here
         await merchantController.getAllMerchants(req, res, next);
@@ -460,15 +464,15 @@ export const getAllMerchants = async (req, res, next) => {
 }
 
 export const getMerchantById = async (req, res, next) => {
-    const id = req.params.id 
+    const id = req.params.id
     param(id).custom(common.validateParam(id).then(async data => {
         if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
             message: 'Invalid Event Id.', error: appText.INVALID_ID
-        }) 
-        await merchantController.getMerchantById(req, res, next);    
+        })
+        await merchantController.getMerchantById(req, res, next);
     }))
-    
-     
+
+
 }
 
 export const getMerchantByMerchantId = async (req, res, next) => {
@@ -491,12 +495,12 @@ export const updateMerchantById = async (req, res, next) => {
             .withMessage('Status must be one of: active, inactive, suspended')
     ], req).then(async data => {
         if(data.errors.length === 0) {
-            const id = req.params.id 
+            const id = req.params.id
             param(id).custom(common.validateParam(id).then(async data => {
                 if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
                     message: 'Invalid Event Id.', error: appText.INVALID_ID
-                }) 
-                await merchantController.updateMerchantById(req, res, next); 
+                })
+                await merchantController.updateMerchantById(req, res, next);
             }))
         } else {
             return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({

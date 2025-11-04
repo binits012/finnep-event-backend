@@ -491,6 +491,81 @@ const validatePriceCalculation = (clientAmount, expectedPrice, tolerance = 0.01)
     }
 };
 
+/**
+ * Calculate Stripe processing fee based on country and currency
+ * Fetches fee structure from Settings (otherInfo.stripeFees) or uses defaults
+ * @param {number} amount - Amount in cents
+ * @param {string} currency - Currency code (e.g., 'eur', 'dkk', 'usd')
+ * @param {string} country - Country name or code
+ * @returns {Promise<number>} Processing fee in cents
+ */
+const calculateStripeProcessingFee = async (amount, currency, country) => {
+    const currencyLower = currency.toLowerCase();
+    const countryLower = country?.toLowerCase() || '';
+
+    console.log('currencyLower', currencyLower);
+    console.log('countryLower', countryLower);
+    console.log('amount', amount);
+    // Default fee structure (fallback if not in database)
+    const defaultFees = {
+        // Default: 2.9% + $0.30 for USD or €0.25 for EUR, or generic estimate
+        default: {
+            percentage: 0.029,
+            fixed: currencyLower === 'usd' ? 30 : currencyLower === 'eur' ? 25 : currencyLower === 'gbp' ? 25 : 30
+        }
+    };
+
+    try {
+        // Fetch Stripe fees from Settings
+        const settings = await Setting.getSetting();
+        console.log('settings', settings);
+        const stripeFeesConfig = settings?.[0]?.otherInfo?.get("stripeFees");
+        console.log('stripeFeesConfig', stripeFeesConfig, typeof stripeFeesConfig === 'object');
+
+        if (stripeFeesConfig && typeof stripeFeesConfig === 'object') {
+            // Find matching country in config
+            let feeStructure = defaultFees.default;
+
+            // Try exact country match first
+            if (stripeFeesConfig[countryLower]) {
+                feeStructure = stripeFeesConfig[countryLower];
+            } else {
+                // Try partial match (e.g., "finland" in "Finland")
+                for (const [configCountry, fees] of Object.entries(stripeFeesConfig)) {
+                    if (countryLower.includes(configCountry.toLowerCase()) ||
+                        configCountry.toLowerCase().includes(countryLower)) {
+                        feeStructure = fees;
+                        break;
+                    }
+                }
+
+                // If still no match, check for currency-based default
+                if (stripeFeesConfig[currencyLower]) {
+                    feeStructure = stripeFeesConfig[currencyLower];
+                } else if (stripeFeesConfig.default) {
+                    feeStructure = stripeFeesConfig.default;
+                }
+            }
+
+            // Calculate fee: percentage of amount + fixed fee
+            const percentageFee = Math.ceil(amount * (feeStructure.percentage || 0));
+            const fixedFee = feeStructure.fixed || 0;
+            const totalFee = percentageFee + fixedFee + 10; // Add 10 cents to the stripe processing fee to cover the application fee
+            console.log('totalFee', totalFee);
+            return Math.max(5, totalFee); // Minimum 5 cents
+        }
+    } catch (err) {
+        error('Error fetching Stripe fees from Settings:', err);
+    }
+
+    // Fallback to default if Settings lookup fails
+    const feeStructure = defaultFees.default;
+    const percentageFee = Math.ceil(amount * feeStructure.percentage);
+    const totalFee = percentageFee + feeStructure.fixed + 10; // Add 10 cents to the stripe processing fee to cover the application fee
+    console.log('totalFee =============================================>', totalFee);
+    return Math.max(5, totalFee); // Minimum 5 cents
+};
+
 export const createPaymentIntent = async (req, res, next) => {
     try {
         // Security Layer 1: Request size validation
@@ -530,31 +605,64 @@ export const createPaymentIntent = async (req, res, next) => {
             throw new Error(`Invalid Stripe account format: ${merchant.stripeAccount}. Expected format: acct_xxxxxxxxxx`);
         }
 
-        const stripePaymentIntentPayload = {
-            amount: Math.round(amount),
-            currency: currency.toLowerCase(),
-            metadata: {
-                ...metadata,
-                merchantId: metadata.merchantId,
-                externalMerchantId: metadata.externalMerchantId,
-                timestamp: new Date().toISOString(),
-                source: 'finnep-eventapp',
-                version: '1.0',
-                serverCalculatedTotal: expectedPrice.totalAmount.toString(),
-                clientId: clientId // Track client for monitoring
-            },
-            automatic_payment_methods: {
-                enabled: true,
-            }
-        };
+        // Calculate fees
+        const baseAmount = Math.round(amount);
+        let stripePaymentIntentPayload;
 
         // Only apply connected account logic if merchant is NOT the platform account
         if(merchant.stripeAccount !== process.env.STRIPE_PLATFORM_ACCOUNT_ID) {
-            stripePaymentIntentPayload.on_behalf_of = merchant.stripeAccount;
-            stripePaymentIntentPayload.transfer_data = {
-                destination: merchant.stripeAccount, // Connected account ID
+
+            // Calculate country-specific Stripe processing fee (fetched from Settings)
+            const country = metadata.country || event?.country || '';
+            const stripeProcessingFeeEstimate = await calculateStripeProcessingFee(
+                baseAmount,
+                currency,
+                country
+            );
+
+            stripePaymentIntentPayload = {
+                amount: baseAmount, // Customer pays base + application fee + Stripe fee
+                currency: currency.toLowerCase(),
+                metadata: {
+                    ...metadata,
+                    merchantId: metadata.merchantId,
+                    externalMerchantId: metadata.externalMerchantId,
+                    timestamp: new Date().toISOString(),
+                    source: 'finnep-eventapp',
+                    version: '1.0',
+                    serverCalculatedTotal: expectedPrice.totalAmount.toString(),
+                    clientId: clientId, // Track client for monitoring
+                    baseAmount: baseAmount.toString(),
+                    stripeProcessingFee: stripeProcessingFeeEstimate .toString() // Add 10 cents to the stripe processing fee to cover the application fee
+                },
+                automatic_payment_methods: {
+                    enabled: true,
+                },
+                on_behalf_of: merchant.stripeAccount,
+                transfer_data: {
+                    destination: merchant.stripeAccount, // Connected account ID
+                },
+                application_fee_amount: stripeProcessingFeeEstimate
             };
-            stripePaymentIntentPayload.application_fee_amount = 5; // Fixed 5 cents application fee for connected accounts
+        } else {
+            // Platform account - no fees
+            stripePaymentIntentPayload = {
+                amount: baseAmount,
+                currency: currency.toLowerCase(),
+                metadata: {
+                    ...metadata,
+                    merchantId: metadata.merchantId,
+                    externalMerchantId: metadata.externalMerchantId,
+                    timestamp: new Date().toISOString(),
+                    source: 'finnep-eventapp',
+                    version: '1.0',
+                    serverCalculatedTotal: expectedPrice.totalAmount.toString(),
+                    clientId: clientId
+                },
+                automatic_payment_methods: {
+                    enabled: true,
+                }
+            };
         }
 
         const stripePromise = stripe.paymentIntents.create(

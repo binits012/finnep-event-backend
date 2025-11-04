@@ -1,11 +1,11 @@
 /*
 "use strict"
 const express = require('express')
-const router = express.Router() 
-const api = require('../controllers/api.controller') 
+const router = express.Router()
+const api = require('../controllers/api.controller')
 */
 import * as express from 'express'
-const router = express.Router() 
+const router = express.Router()
 import * as api  from '../controllers/api.controller.js'
 
 router.route('/auth/user/login').post(api.login)
@@ -20,7 +20,7 @@ router.route('/user/staff')
 router.route('/user/:id')
     .get(api.getUserById)
     .delete(api.deleteUserById)
-    .patch(api.updateUserById) 
+    .patch(api.updateUserById)
 
 router.route('/user/:id/contact')
     .get(api.getContact)
@@ -36,7 +36,7 @@ router.route('/photo/:id')
     .patch(api.updatePhotoById)
     .delete(api.deletePhotoById)
 
- 
+
 router.route('/notification')
     .get(api.getAllNotification)
     .post(api.createNotification)
@@ -51,11 +51,14 @@ router.route('/event')
     .post(api.createEvent)
     .get(api.getEvents)
 
+router.route('/event/filters/options')
+    .get(api.getEventFilterOptions)
+
 router.route('/event/:id')
     .get( api.getEventById)
-    .put(api.updateEventById) 
+    .put(api.updateEventById)
     .patch(api.updateEventStatusById)
-    
+
 router.route('/event/:id/eventPhoto')
     .post(api.uploadPhotosForParticularEvent)
 
@@ -66,7 +69,7 @@ router.route('/setting')
 router.route('/setting/:id')
     .get(api.getSettingById)
     .post(api.updateSettingById)
-    
+
 router.route('/singleTicket')
     .post(api.createSingleTicket)
 router.route('/multipleTicket')
@@ -94,6 +97,6 @@ router.route('/merchant')
 
 router.route('/merchant/:id')
     .get(api.getMerchantById)
-    .patch(api.updateMerchantById) 
+    .patch(api.updateMerchantById)
 
 export default router

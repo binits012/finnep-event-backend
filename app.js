@@ -42,6 +42,7 @@ const corsOptions = {
     'http://localhost:3000',
     'https://eventapp.finnep.fi',
     'https://finnep.fi',
+    'https://cms.eventapp.finnep.fi',
     process.env.FRONTEND_URL || 'http://localhost:3000'
   ],
   credentials: true,

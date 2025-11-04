@@ -88,12 +88,89 @@ export const createEvent = async (eventTitle, eventDescription, eventDate,
     return await event.saveToDB()
 }
 
-export const getEvents = async() =>{
-    const events = await model.Event.find({}).sort({eventDate:-1}).exec()
+export const getEvents = async(page = 1, limit = 10, filters = {}) =>{
+    const skip = (page - 1) * limit
+
+    // Build query filter object
+    const queryFilter = {}
+
+    if (filters.country) {
+        queryFilter.country = filters.country
+    }
+
+    if (filters.merchantId) {
+        queryFilter.merchant = filters.merchantId
+    }
+
+    // Get total count for pagination metadata with filters
+    const total = await model.Event.countDocuments(queryFilter).exec()
+
+    // Get paginated events with filters
+    const events = await model.Event.find(queryFilter)
+        .populate('merchant')
+        .sort({eventDate:-1})
+        .skip(skip)
+        .limit(limit)
+        .exec()
+
+    const totalPages = Math.ceil(total / limit)
+
+    return {
+        events: events.map(event => ({
+            ...event.toObject(),
+            eventPhoto: []
+        })),
+        pagination: {
+            currentPage: page,
+            totalPages,
+            totalItems: total,
+            itemsPerPage: limit,
+            hasNextPage: page < totalPages,
+            hasPrevPage: page > 1
+        }
+    }
+}
+
+export const getAllEventsForDashboard = async() => {
+    // Get all events without pagination for dashboard
+    const events = await model.Event.find({})
+        .populate('merchant')
+        .sort({eventDate:-1})
+        .exec()
+
     return events.map(event => ({
         ...event.toObject(),
         eventPhoto: []
     }))
+}
+
+export const getEventFilterOptions = async() => {
+    try {
+        // Get all unique countries
+        const countries = await model.Event.distinct('country').exec()
+        const countriesList = countries.filter(c => c && c.trim() !== '').sort()
+
+        // Get all unique merchants
+        const merchantIds = await model.Event.distinct('merchant').exec()
+        const merchants = await model.Merchant.find({ _id: { $in: merchantIds } })
+            .select('_id name')
+            .sort({ name: 1 })
+            .exec()
+
+        return {
+            countries: countriesList,
+            merchants: merchants.map(m => ({
+                _id: m._id,
+                name: m.name
+            }))
+        }
+    } catch (err) {
+        error('error getting filter options', err)
+        return {
+            countries: [],
+            merchants: []
+        }
+    }
 }
 
 export const getEventById = async(id) =>{

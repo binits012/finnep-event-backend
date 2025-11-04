@@ -4,7 +4,7 @@ import * as consts from '../const.js'
 import {info, error} from '../model/logger.js'
 import * as appText from '../applicationTexts.js'
 import * as commonUtil from '../util/common.js'
-import * as busboyFileUpload from '../util/busboyFileUpload.js' 
+import * as busboyFileUpload from '../util/busboyFileUpload.js'
 import redisClient from '../model/redisConnect.js'
 import { v4 as uuidv4 } from 'uuid'
 import * as OutboxMessage from '../model/outboxMessage.js'
@@ -14,7 +14,7 @@ export const createEvent = async (req, res, next) =>{
     const token = req.headers.authorization
     const eventTitle = req.body.eventTitle
     const eventDescription = req.body.eventDescription
-    const eventDate = req.body.eventDate 
+    const eventDate = req.body.eventDate
     const occupancy = req.body.occupancy
     const ticketInfo = req.body.ticketInfo
     const eventPromotionPhoto = req.body.eventPromotionPhoto
@@ -36,24 +36,24 @@ export const createEvent = async (req, res, next) =>{
     const venueInfo = req.body.venueInfo
     if(lang === 'undefined' || lang === ""){
         lang = "en"
-    }   
+    }
     await jwtToken.verifyJWT(token, async (err, data) => {
-        if (err || data === null) { 
+        if (err || data === null) {
             return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({
                 message: 'Please, provide valid token', error: appText.TOKEN_NOT_VALID
             })
-        } else { 
+        } else {
             try{
                 const userRoleFromToken = data.role
-                if (consts.ROLE_MEMBER ===userRoleFromToken) { 
+                if (consts.ROLE_MEMBER ===userRoleFromToken) {
                     if(!res.headersSent){
                         return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
                             message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
                         })
                     }
-                    
-                } 
-                await Event.createEvent(eventTitle, eventDescription, eventDate, 
+
+                }
+                await Event.createEvent(eventTitle, eventDescription, eventDate,
                     occupancy, ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
                     socialMedia, lang, position, active, eventName, videoUrl, otherInfo,
                     eventTimezone, city, country, venueInfo
@@ -62,7 +62,7 @@ export const createEvent = async (req, res, next) =>{
                 }).catch(err=>{
                     error("error", err.stack)
                     throw err
-                }) 
+                })
             }catch(err){
                 error("error", err.stack)
                 if(!res.headersSent){
@@ -72,7 +72,7 @@ export const createEvent = async (req, res, next) =>{
                     })
                 }
             }
-            
+
         }
     })
 
@@ -81,26 +81,72 @@ export const createEvent = async (req, res, next) =>{
 export const getEvents = async(req,res,next)=>{
     const token = req.headers.authorization
     await jwtToken.verifyJWT(token, async (err, data) => {
-        if ( err || data === null) { 
+        if ( err || data === null) {
             return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({
                 message: 'Please, provide valid token', error: appText.TOKEN_NOT_VALID
             })
-        } else { 
+        } else {
             const userRoleFromToken = data.role
-            if (consts.ROLE_MEMBER ===userRoleFromToken) { 
+            if (consts.ROLE_MEMBER ===userRoleFromToken) {
                 return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
                     message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
                 })
-            } 
-             
-            await Event.getEvents().then(data=>{
-                return res.status(consts.HTTP_STATUS_OK).json({ data: data, timeZone:process.env.TIME_ZONE })
+            }
+
+            // Extract pagination parameters from query string
+            const page = parseInt(req.query.page) || 1
+            const limit = parseInt(req.query.limit) || 10
+
+            // Extract filter parameters from query string
+            const filters = {}
+            if (req.query.country) {
+                filters.country = req.query.country
+            }
+            if (req.query.merchantId) {
+                filters.merchantId = req.query.merchantId
+            }
+
+            await Event.getEvents(page, limit, filters).then(result=>{
+                return res.status(consts.HTTP_STATUS_OK).json({
+                    data: result.events,
+                    pagination: result.pagination,
+                    timeZone:process.env.TIME_ZONE
+                })
             }).catch(err=>{
                 error('error',err)
                 return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
                     message: 'Sorry, get events failed', error: appText.EVENT_GET_FAILED
                 })
-            }) 
+            })
+        }
+    })
+}
+
+export const getEventFilterOptions = async(req, res, next) => {
+    const token = req.headers.authorization
+    await jwtToken.verifyJWT(token, async (err, data) => {
+        if (err || data === null) {
+            return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({
+                message: 'Please, provide valid token', error: appText.TOKEN_NOT_VALID
+            })
+        } else {
+            const userRoleFromToken = data.role
+            if (consts.ROLE_MEMBER === userRoleFromToken) {
+                return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
+                    message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
+                })
+            }
+
+            await Event.getEventFilterOptions().then(result => {
+                return res.status(consts.HTTP_STATUS_OK).json({
+                    data: result
+                })
+            }).catch(err => {
+                error('error', err)
+                return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                    message: 'Sorry, get filter options failed', error: appText.EVENT_GET_FAILED
+                })
+            })
         }
     })
 }
@@ -109,18 +155,18 @@ export const getEventById = async (req, res, next) => {
     const token = req.headers.authorization
     const id = req.params.id
     await jwtToken.verifyJWT(token, async (err, data) => {
-        if (err || data === null) { 
+        if (err || data === null) {
             return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({
                 message: 'Please, provide valid token', error: appText.TOKEN_NOT_VALID
             })
-        } else { 
+        } else {
             const userRoleFromToken = data.role
-            if (consts.ROLE_MEMBER ===userRoleFromToken) { 
+            if (consts.ROLE_MEMBER ===userRoleFromToken) {
                 return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
                     message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
                 })
-            } 
-             
+            }
+
             await Event.getEventById(id).then( async data=>{
                 const eventId = data.id
                 const validPhotos = data?.eventPhoto?.filter(photo => photo && photo.trim() !== '') || [];
@@ -132,7 +178,7 @@ export const getEventById = async (req, res, next) => {
                     } else {
                         // Generate new signed URL
                         const expiresInSeconds = 29 * 24 * 60 * 60; // e.g., 29 days
-                         
+
                         const signedUrl = await commonUtil.getCloudFrontUrl(photo)
                         const expiresAt = Date.now() + expiresInSeconds * 1000;
 
@@ -141,7 +187,7 @@ export const getEventById = async (req, res, next) => {
                         redisClient.expire(cacheKey, expiresInSeconds);
 
                         return signedUrl
-                    } 
+                    }
                 }))
                 /*
                 const photosWithCloudFrontUrls = data?.eventPhoto?.map(photo => {
@@ -165,8 +211,8 @@ export const getEventById = async (req, res, next) => {
                       };
                     const policyString = JSON.stringify(policy);
                     // Create signed CloudFront URL
-                    const signedUrl = getSignedUrl({  
-                        keyPairId, 
+                    const signedUrl = getSignedUrl({
+                        keyPairId,
                         privateKey,
                         policy:policyString
                     });
@@ -180,7 +226,7 @@ export const getEventById = async (req, res, next) => {
                 return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
                     message: 'Sorry, get event by id failed', error: appText.EVENT_GET_FAILED
                 })
-            }) 
+            })
         }
     })
 }
@@ -191,10 +237,10 @@ export const updateEventById = async (req,res,next) =>{
     const id = req.params.id
     const eventTitle = req.body.eventTitle
     const eventDescription = req.body.eventDescription
-    const eventDate = req.body.eventDate  
+    const eventDate = req.body.eventDate
     const occupancy = req.body.occupancy
     const ticketInfo = req.body.ticketInfo
-    const eventPromotionPhoto = req.body.eventPromotionPhoto 
+    const eventPromotionPhoto = req.body.eventPromotionPhoto
     const eventLocationAddress = req.body.eventLocationAddress
     const eventLocationGeoCode = req.body.eventLocationGeoCode
     const transportLink = req.body.transportLink
@@ -208,20 +254,20 @@ export const updateEventById = async (req,res,next) =>{
     const convertDateTime = await commonUtil.convertDateTimeWithTimeZone(eventDate, eventTimezone)
     const otherInfo = req.body.otherInfo
     //const timeInMinutes =  commonUtil.timeInMinutes(eventTime)
-    
-    const city = req.body.city  
+
+    const city = req.body.city
     const country = req.body.country
     const venueInfo = req.body.venueInfo
     if(lang === 'undefined' || lang === ""){
         lang = "en"
-    } 
+    }
     const eventObj = {
         eventTitle: eventTitle,
         eventDescription:eventDescription,
-        eventDate:eventDate,  
+        eventDate:eventDate,
         occupancy:occupancy,
         ticketInfo:ticketInfo,
-        eventPromotionPhoto:eventPromotionPhoto, 
+        eventPromotionPhoto:eventPromotionPhoto,
         eventLocationAddress:eventLocationAddress,
         eventLocationGeoCode:eventLocationGeoCode,
         transportLink:transportLink,
@@ -235,22 +281,22 @@ export const updateEventById = async (req,res,next) =>{
         eventTimezone:eventTimezone,
         city:city,
         country:country,
-        venueInfo:venueInfo 
+        venueInfo:venueInfo
 
     }
     await jwtToken.verifyJWT(token, async (err, data) => {
-        if (err || data === null) { 
+        if (err || data === null) {
             return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({
                 message: 'Please, provide valid token', error: appText.TOKEN_NOT_VALID
             })
-        } else { 
+        } else {
             const userRoleFromToken = data.role
-            if (consts.ROLE_MEMBER ===userRoleFromToken) { 
+            if (consts.ROLE_MEMBER ===userRoleFromToken) {
                 return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
                     message: 'Sorry, You do not have rights.', error: appText.INSUFFICENT_ROLE
                 })
-            } 
-             
+            }
+
             await Event.updateEventById(id,eventObj).then(data=>{
                 return res.status(consts.HTTP_STATUS_OK).json({ data: data })
             }).catch(err=>{
@@ -258,36 +304,36 @@ export const updateEventById = async (req,res,next) =>{
                 return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
                     message: 'Sorry, update event failed.', error: err.stack
                 })
-            }) 
+            })
         }
     })
 }
 
 export const updateEventStatusById = async (req,res,next) =>{
-    const token = req.headers.authorization 
+    const token = req.headers.authorization
     const id = req.params.id
-    const active = req.body.active  
+    const active = req.body.active
     const featured = req.body.featured
-    
+
     console.log('updateEventStatusById payload:', { active, featured })
 
     await jwtToken.verifyJWT(token, async (err, data) => {
-        if (err || data === null) { 
+        if (err || data === null) {
             return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({
                 message: 'Please, provide valid token', error: appText.TOKEN_NOT_VALID
             })
-        } else { 
+        } else {
             const userRoleFromToken = data.role
-            if (consts.ROLE_MEMBER ===userRoleFromToken) { 
+            if (consts.ROLE_MEMBER ===userRoleFromToken) {
                 return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
                     message: 'Sorry, You do not have rights.', error: appText.INSUFFICENT_ROLE
                 })
-            } 
+            }
             const originalEvent = await Event.getEventById(id)
             if(originalEvent === null || originalEvent === '' || originalEvent === 'undefined'){
                 return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({ })
             }
-            const updatedEvent =  await Event.updateEventById(id,{active:active, featured:featured}) 
+            const updatedEvent =  await Event.updateEventById(id,{active:active, featured:featured})
             try {
                 // 2. Create outbox message entry
                 const correlationId = uuidv4()
@@ -299,7 +345,7 @@ export const updateEventStatusById = async (req,res,next) =>{
                 console.log(eventType, active, "========",updatedEvent, updatedEvent?.externalMerchantId, "\n", updatedEvent?.eventTitle)
                 const outboxMessageData = {
                     messageId: messageId,
-                    exchange: 'event-merchant-exchange',   
+                    exchange: 'event-merchant-exchange',
                     routingKey: routingKey,
                     messageBody: {
                         eventType: eventType,
@@ -380,20 +426,20 @@ export const updateEventStatusById = async (req,res,next) =>{
         return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
             message: 'Sorry, update event failed.', error: err.stack
         })
-    }) 
+    })
 }
 
 export const uploadPhotosForParticularEvent = async (req,res,next) =>{
     const token = req.headers.authorization
     const id = req.params.id
     await jwtToken.verifyJWT(token, async (err, data) => {
-        if (err || data === null) { 
+        if (err || data === null) {
             return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({
                 message: 'Please, provide valid token', error: appText.TOKEN_NOT_VALID
             })
-        } else { 
+        } else {
             const userRoleFromToken = data.role
-            if (consts.ROLE_MEMBER ===userRoleFromToken) { 
+            if (consts.ROLE_MEMBER ===userRoleFromToken) {
                 return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
                     message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
                 })
@@ -404,13 +450,13 @@ export const uploadPhotosForParticularEvent = async (req,res,next) =>{
                 return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
                     message: 'Sorry, given event not found.', error: appText.RESOURCE_NOT_FOUND
                 })
-            })  
+            })
             if(myEvent === null || myEvent === '' || myEvent === 'undefined'){
                 return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
                     message: 'Sorry, update event failed.', error: appText.EVENT_UPDATE_FAILED
                 })
             }
-            else{ 
+            else{
                 await busboyFileUpload.uploadToS3(myEvent, req, (success, err)=>{
                     if(success){
                         const data = {
@@ -423,14 +469,14 @@ export const uploadPhotosForParticularEvent = async (req,res,next) =>{
                         })
                     }
                 })
-                
-            } 
+
+            }
         }
     })
-    
+
 }
 
 
 export const getAllEventsForDashboard = async () =>{
-    return await Event.getEvents()
-} 
+    return await Event.getAllEventsForDashboard()
+}
