@@ -33,7 +33,9 @@ class RabbitMQConnection {
     }
 
     async connect() {
-        if (this.isConnecting || (this.connection && !this.connection.connection.closed)) return;
+        if (this.isConnecting || (this.connection && !this.connection.connection.closed)) {
+            return this.connection;
+        }
 
         this.isConnecting = true;
         try {
@@ -60,11 +62,14 @@ class RabbitMQConnection {
             });
 
             info('Successfully connected to RabbitMQ');
+            this.isConnecting = false;
+            return this.connection;
         } catch (err) {
             error('Failed to connect to RabbitMQ', { error: err.message, stack: err.stack });
-            setTimeout(() => this.reconnect(), 5000);
-        } finally {
             this.isConnecting = false;
+            // Schedule reconnection but throw error so caller knows connection failed
+            setTimeout(() => this.reconnect(), 5000);
+            throw err;
         }
     }
 

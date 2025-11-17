@@ -102,6 +102,10 @@ export const getEvents = async(page = 1, limit = 10, filters = {}) =>{
         queryFilter.merchant = filters.merchantId
     }
 
+    if (filters.category) {
+        queryFilter['otherInfo.categoryName'] = filters.category
+    }
+
     // Get total count for pagination metadata with filters
     const total = await model.Event.countDocuments(queryFilter).exec()
 
@@ -203,7 +207,7 @@ export const getEventsWithTicketCounts = async() =>{
         const events = await getEventsWithPositioning();
         // Clean up the events (ticket counts already included from getEventsWithPositioning)
         const eventsWithTicketCounts = events.map(event => {
-            const { otherInfo, ...cleanedEvent } = event;
+            const { ...cleanedEvent } = event;
             return {
                 ...cleanedEvent,
                 eventPhoto: [] // Remove event photos for performance
@@ -259,7 +263,7 @@ export const listEventFiltered = async({ city, country, page = 1, limit = 12 } =
     // append ticketsSold like getEventsWithTicketCounts does
     const itemsWithCounts = await Promise.all(items.map(async (event) => {
         const ticketsSold = await Ticket.countDocuments({ active: true, event: event._id })
-        const { otherInfo, ...cleaned } = event
+        const {  ...cleaned } = event
         return { ...cleaned, ticketsSold }
     }))
 

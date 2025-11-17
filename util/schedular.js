@@ -300,20 +300,20 @@ function defineJobs() {
   agenda.define('inactive past events', async(job) => {
     try {
       const now = new Date();
-      console.log('now', now);
+      console.log('inactive past events ================== now', now);
       // Batch update all past events to inactive in a single operation
       const result = await Event.updateMany(
         {
           eventDate: { $lt: now },
           active: { $ne: false }, // Only update events that are currently active
-          status: { $ne: 'on-going' } // Only update events that are not completed
+          status: { $ne: 'completed' } // Only exclude events that are already completed
         },
         {
           $set: { active: false, status: 'completed', updatedAt:new Date() }
         }
       );
 
-      console.log('result', result);
+      console.log('inactive past events ================== result', result);
       if (result.modifiedCount > 0) {
         info(`Deactivated ${result.modifiedCount} past events`);
 
@@ -383,7 +383,7 @@ function defineJobs() {
         }
       }
     } catch (err) {
-      error('Error in inactive past events job:', err);
+      error('inactive past events ================== Error in inactive past events job:', err);
     }
   });
 

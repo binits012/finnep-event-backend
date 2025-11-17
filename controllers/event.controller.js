@@ -28,7 +28,17 @@ export const createEvent = async (req, res, next) =>{
     const active = req.body.active
     const eventName=req.body.eventName
     const videoUrl = req.body.videoUrl
-    const otherInfo = req.body.otherInfo
+    // Build enhanced otherInfo with additional fields
+    const otherInfo = {
+        ...(req.body.otherInfo || {}),
+        categoryName: req.body.categoryName || req.body.category_name,
+        subCategoryName: req.body.subCategoryName || req.body.subcategory_name,
+        eventExtraInfo: {
+            eventType: req.body.eventType || req.body.event_type,
+            doorSaleAllowed: req.body.doorSaleAllowed !== undefined ? req.body.doorSaleAllowed : req.body.door_sale_allowed,
+            doorSaleExtraAmount: req.body.doorSaleExtraAmount || req.body.door_sale_extra_amount
+        }
+    };
     //const convertDateTime = await commonUtil.convertDateTimeWithTimeZone(eventDate)
     const eventTimezone = req.body.eventTimezone
     const city = req.body.city
@@ -95,7 +105,7 @@ export const getEvents = async(req,res,next)=>{
 
             // Extract pagination parameters from query string
             const page = parseInt(req.query.page) || 1
-            const limit = parseInt(req.query.limit) || 10
+            const limit = parseInt(req.query.limit) || 1000
 
             // Extract filter parameters from query string
             const filters = {}
@@ -104,6 +114,9 @@ export const getEvents = async(req,res,next)=>{
             }
             if (req.query.merchantId) {
                 filters.merchantId = req.query.merchantId
+            }
+            if (req.query.category) {
+                filters.category = req.query.category
             }
 
             await Event.getEvents(page, limit, filters).then(result=>{
@@ -252,7 +265,17 @@ export const updateEventById = async (req,res,next) =>{
     const videoUrl = req.body.videoUrl
     const eventTimezone = req.body.eventTimezone
     const convertDateTime = await commonUtil.convertDateTimeWithTimeZone(eventDate, eventTimezone)
-    const otherInfo = req.body.otherInfo
+    // Build enhanced otherInfo with additional fields
+    const otherInfo = {
+        ...(req.body.otherInfo || {}),
+        categoryName: req.body.categoryName || req.body.category_name,
+        subCategoryName: req.body.subCategoryName || req.body.subcategory_name,
+        eventExtraInfo: {
+            eventType: req.body.eventType || req.body.event_type,
+            doorSaleAllowed: req.body.doorSaleAllowed !== undefined ? req.body.doorSaleAllowed : req.body.door_sale_allowed,
+            doorSaleExtraAmount: req.body.doorSaleExtraAmount || req.body.door_sale_extra_amount
+        }
+    };
     //const timeInMinutes =  commonUtil.timeInMinutes(eventTime)
 
     const city = req.body.city

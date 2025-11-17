@@ -163,6 +163,22 @@ async function handleMerchantUpdated(message) {
         delete updateData.type;
         delete updateData.routingKey;
 
+        // Extract banking-related fields and structure them into bankingInfo Map
+        const bankingFields = ['bank_name', 'bic_swift', 'bank_account', 'bank_address', 'account_holder_name'];
+        const bankingInfo = {};
+
+        bankingFields.forEach(field => {
+            if (updateData[field] !== undefined && updateData[field] !== null) {
+                bankingInfo[field] = updateData[field];
+                delete updateData[field]; // Remove from direct update data
+            }
+        });
+
+        // Add bankingInfo to updateData if there are any banking fields
+        if (Object.keys(bankingInfo).length > 0) {
+            updateData.bankingInfo = bankingInfo;
+        }
+
         // needs sanitization
         await updateMerchantById(merchant._id, updateData);
         await inboxModel.markProcessed(message?.metaData?.causationId);

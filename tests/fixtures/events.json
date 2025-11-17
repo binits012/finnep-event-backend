@@ -1,0 +1,55 @@
+{
+  "paidEvent": {
+    "_id": "507f1f77bcf86cd799439020",
+    "eventTitle": "Summer Music Festival",
+    "eventDescription": "Annual summer music festival",
+    "eventDate": "2025-07-15T18:00:00Z",
+    "occupancy": 1000,
+    "active": true,
+    "status": "up-coming",
+    "merchant": "507f1f77bcf86cd799439013",
+    "ticketInfo": [
+      {
+        "ticketName": "General Admission",
+        "price": 50,
+        "quantity": 500,
+        "vat": 10,
+        "serviceFee": 2
+      }
+    ],
+    "otherInfo": {
+      "categoryName": "Music",
+      "subCategoryName": "Festival",
+      "eventType": "paid",
+      "doorSaleAllowed": true,
+      "doorSaleExtraAmount": 5
+    }
+  },
+  "freeEvent": {
+    "_id": "507f1f77bcf86cd799439021",
+    "eventTitle": "Free Community Event",
+    "eventDescription": "Free community gathering",
+    "eventDate": "2025-08-20T14:00:00Z",
+    "occupancy": 200,
+    "active": true,
+    "status": "up-coming",
+    "merchant": "507f1f77bcf86cd799439013",
+    "ticketInfo": [
+      {
+        "ticketName": "Free Entry",
+        "price": 0,
+        "quantity": 200,
+        "vat": 0,
+        "serviceFee": 0
+      }
+    ],
+    "otherInfo": {
+      "categoryName": "Community",
+      "subCategoryName": "Gathering",
+      "eventType": "free",
+      "doorSaleAllowed": false,
+      "doorSaleExtraAmount": 0
+    }
+  }
+}
+

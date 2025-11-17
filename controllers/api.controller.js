@@ -14,6 +14,7 @@ import * as ticket from '../controllers/ticket.controller.js'
 import * as NotificationType from '../model/notificationType.js'
 import {error} from '../model/logger.js'
 import * as merchantController from './merchant.controller.js'
+import * as report from './report.controller.js'
 
 
 /** USER STUFF BEGINGS */
@@ -479,7 +480,7 @@ export const getMerchantByMerchantId = async (req, res, next) => {
     try {
         // Validate merchantId parameter
         if (!req.params.merchantId) {
-            return res.status(400).json({
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
                 message: 'Merchant ID is required'
             });
         }
@@ -514,11 +515,126 @@ export const deleteMerchantById = async (req, res, next) => {
     try {
         // Validate ID parameter
         if (!req.params.id) {
-            return res.status(400).json({
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
                 message: 'Merchant ID is required'
             });
         }
         await merchantController.deleteMerchantById(req, res, next);
+    } catch (error) {
+        next(error);
+    }
+}
+
+export const addOrUpdateOtherInfo = async (req, res, next) => {
+    try {
+        if (!req.params.id) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                message: 'Merchant ID is required'
+            });
+        }
+        const { otherInfo } = req.body;
+
+        // Validate otherInfo structure
+        if (!otherInfo || typeof otherInfo !== 'object' || Array.isArray(otherInfo)) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                error: 'VALIDATION_ERROR',
+                message: 'otherInfo must be an object',
+                details: [{
+                    instancePath: '/otherInfo',
+                    schemaPath: '#/properties/otherInfo/type',
+                    keyword: 'type',
+                    params: { type: 'object' },
+                    message: 'must be an object'
+                }]
+            });
+        }
+
+        // Validate that all values are numbers
+        const invalidEntries = [];
+        for (const [key, value] of Object.entries(otherInfo)) {
+            if (typeof value !== 'number' || isNaN(value)) {
+                invalidEntries.push({
+                    instancePath: `/otherInfo/${key}`,
+                    schemaPath: '#/properties/otherInfo/additionalProperties/type',
+                    keyword: 'type',
+                    params: { type: 'number' },
+                    message: `must be a number, received: ${typeof value}`
+                });
+            } else if (value < 0) {
+                invalidEntries.push({
+                    instancePath: `/otherInfo/${key}`,
+                    schemaPath: '#/properties/otherInfo/additionalProperties/minimum',
+                    keyword: 'minimum',
+                    params: { comparison: '>=', limit: 0 },
+                    message: 'must be >= 0'
+                });
+            }
+        }
+
+        if (invalidEntries.length > 0) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                error: 'VALIDATION_ERROR',
+                message: 'Validation failed',
+                details: invalidEntries
+            });
+        }
+
+        // If validation passes, proceed to merchant controller
+        await merchantController.addOrUpdateOtherInfo(req, res, next);
+    } catch (error) {
+        next(error);
+    }
+}
+
+export const getEventFinancialReport = async (req, res, next) => {
+    try {
+        const eventId = req.params.eventId;
+        if (!eventId) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                success: false,
+                message: 'Event ID is required',
+                error: appText.INVALID_ID
+            });
+        }
+
+        // Validate MongoDB ObjectId format
+        const isValidObjectId = await common.validateParam(eventId);
+        if (!isValidObjectId) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                success: false,
+                message: 'Invalid Event ID format',
+                error: appText.INVALID_ID
+            });
+        }
+
+        await report.getEventFinancialReport(req, res, next);
+    } catch (error) {
+        next(error);
+    }
+}
+
+export const requestExternalTicketSalesData = async (req, res, next) => {
+    try {
+        const eventId = req.params.eventId;
+        if (!eventId) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                success: false,
+                message: 'Event ID is required',
+                error: appText.INVALID_ID
+            });
+        }
+
+        // Validate MongoDB ObjectId format
+        const isValidObjectId = await common.validateParam(eventId);
+        if (!isValidObjectId) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                success: false,
+                message: 'Invalid Event ID format',
+                error: appText.INVALID_ID
+            });
+        }
+
+        await report.requestExternalTicketSalesData(req, res, next);
     } catch (error) {
         next(error);
     }

@@ -1,0 +1,27 @@
+{
+  "admin": {
+    "id": "507f1f77bcf86cd799439011",
+    "username": "admin@test.com",
+    "email": "admin@test.com",
+    "password": "TestPassword123!",
+    "role": "admin"
+  },
+  "staff": {
+    "id": "507f1f77bcf86cd799439012",
+    "username": "staff@test.com",
+    "email": "staff@test.com",
+    "password": "TestPassword123!",
+    "role": "staff"
+  },
+  "member": {
+    "id": "507f1f77bcf86cd799439013",
+    "username": "member@test.com",
+    "email": "member@test.com",
+    "password": "TestPassword123!",
+    "role": "member"
+  },
+  "guest": {
+    "email": "guest@test.com"
+  }
+}
+

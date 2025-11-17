@@ -39,8 +39,15 @@ class MessageConsumer {
     async ensureChannelsReady() {
         try {
             // Check if channels exist and their connections are open
-            const publishChannelInvalid = !this.publishChannel || !this.publishChannel.connection || this.publishChannel.connection.closed || this.publishChannel.connection.destroyed;
-            const consumeChannelInvalid = !this.consumeChannel || !this.consumeChannel.connection || this.consumeChannel.connection.closed || this.consumeChannel.connection.destroyed;
+            const publishChannelInvalid = !this.publishChannel ||
+                !this.publishChannel.connection ||
+                this.publishChannel.connection.closed ||
+                this.publishChannel.connection.destroyed;
+
+            const consumeChannelInvalid = !this.consumeChannel ||
+                !this.consumeChannel.connection ||
+                this.consumeChannel.connection.closed ||
+                this.consumeChannel.connection.destroyed;
 
             if (publishChannelInvalid || consumeChannelInvalid) {
                 this.isInitialized = false;
@@ -53,8 +60,18 @@ class MessageConsumer {
             if (!this.publishChannel || !this.consumeChannel) {
                 throw new Error('Channels are still null after initialization attempt');
             }
+
+            // Double-check channels have valid connections after initialization
+            if (!this.publishChannel.connection || !this.consumeChannel.connection ||
+                this.publishChannel.connection.closed || this.consumeChannel.connection.closed) {
+                throw new Error('Channels have invalid connections after initialization');
+            }
         } catch (err) {
             error('Error ensuring channels are ready:', err);
+            // Reset state to force re-initialization on next attempt
+            this.publishChannel = null;
+            this.consumeChannel = null;
+            this.isInitialized = false;
             throw err;
         }
     }
@@ -119,34 +136,88 @@ class MessageConsumer {
     }
 
     async publishToExchange(exchangeName, routingKey, message, options = {}) {
-        try {
-            await this.ensureChannelsReady();
+        const maxRetries = 2;
+        let lastError;
 
-            const { exchangeType = 'direct', durable = true } = options;
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                // Ensure channels are ready before each attempt
+                await this.ensureChannelsReady();
 
-            // Declare the exchange if it doesn't exist
-            await this.publishChannel.assertExchange(exchangeName, exchangeType, { durable });
+                // Double-check channel has valid connection right before use
+                if (!this.publishChannel.connection || this.publishChannel.connection.closed) {
+                    throw new Error('Publish channel connection is invalid');
+                }
 
-            // Publish to exchange with routing key
-            this.publishChannel.publish(exchangeName, routingKey, Buffer.from(JSON.stringify(message)), {
-                persistent: true,
-                ...options.publishOptions
-            });
+                const { exchangeType = 'direct', durable = true } = options;
 
-            info(`Published message to exchange: ${exchangeName} with routing key: ${routingKey}`);
-        } catch (err) {
-            error(`Failed to publish to exchange: ${exchangeName}`, {
-                error: err.message,
-                stack: err.stack,
-                exchangeName,
-                routingKey
-            });
-            // Reset channels to force reconnection
-            this.publishChannel = null;
-            this.consumeChannel = null;
-            this.isInitialized = false;
-            throw err;
+                // Declare the exchange if it doesn't exist
+                await this.publishChannel.assertExchange(exchangeName, exchangeType, { durable });
+
+                // Publish to exchange with routing key
+                const published = this.publishChannel.publish(exchangeName, routingKey, Buffer.from(JSON.stringify(message)), {
+                    persistent: true,
+                    ...options.publishOptions
+                });
+
+                if (!published) {
+                    warn(`Channel buffer full when publishing to exchange: ${exchangeName}, routing key: ${routingKey}`);
+                    // Wait a bit and retry
+                    if (attempt < maxRetries) {
+                        await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
+                        continue;
+                    }
+                }
+
+                info(`Published message to exchange: ${exchangeName} with routing key: ${routingKey}`);
+                return; // Success, exit retry loop
+            } catch (err) {
+                lastError = err;
+
+                // Check if it's a channel closed error
+                const isChannelClosed = err.message && (
+                    err.message.includes('Channel closed') ||
+                    err.message.includes('IllegalOperationError') ||
+                    err.message.includes('closed')
+                );
+
+                if (isChannelClosed || err.message.includes('Publish channel is closed')) {
+                    error(`Channel closed error on attempt ${attempt + 1}/${maxRetries + 1} for exchange: ${exchangeName}`, {
+                        error: err.message,
+                        exchangeName,
+                        routingKey
+                    });
+
+                    // Reset channels to force reconnection
+                    this.publishChannel = null;
+                    this.consumeChannel = null;
+                    this.isInitialized = false;
+
+                    // Wait before retry (exponential backoff)
+                    if (attempt < maxRetries) {
+                        await new Promise(resolve => setTimeout(resolve, 200 * Math.pow(2, attempt)));
+                        continue;
+                    }
+                } else {
+                    // Non-channel error, don't retry
+                    error(`Failed to publish to exchange: ${exchangeName}`, {
+                        error: err.message,
+                        stack: err.stack,
+                        exchangeName,
+                        routingKey
+                    });
+                    throw err;
+                }
+            }
         }
+
+        // All retries exhausted
+        error(`Failed to publish to exchange after ${maxRetries + 1} attempts: ${exchangeName}`, {
+            error: lastError?.message,
+            exchangeName,
+            routingKey
+        });
+        throw lastError;
     }
 
     async consumeFromExchange(exchangeName, queueName, routingKey, handler, options = {}) {

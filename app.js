@@ -43,6 +43,7 @@ const corsOptions = {
     'https://eventapp.finnep.fi',
     'https://finnep.fi',
     'https://cms.eventapp.finnep.fi',
+    'http://192.168.1.117:3003',
     process.env.FRONTEND_URL || 'http://localhost:3000'
   ],
   credentials: true,
@@ -145,34 +146,103 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (request, 
 app.use(express.json({ limit: '300mb', extended: false }))
 app.use(express.urlencoded({ extended: false }))
 //app.use(cookieParser())
+
+// Swagger API Documentation (optional - only if packages are installed)
+// Lazy-load Swagger when route is accessed
+let swaggerSetupPromise = null;
+const setupSwagger = async () => {
+  if (swaggerSetupPromise) return swaggerSetupPromise;
+
+  swaggerSetupPromise = (async () => {
+    try {
+      const swaggerJsdoc = (await import('swagger-jsdoc')).default;
+      const swaggerUi = (await import('swagger-ui-express')).default;
+      const swaggerConfig = await import('./config/swagger.js');
+      const swaggerSpec = swaggerConfig.swaggerSpec;
+
+      return { swaggerUi, swaggerSpec };
+    } catch (err) {
+      if (err.code !== 'ERR_MODULE_NOT_FOUND') {
+        console.log('Error loading Swagger:', err.message);
+      }
+      return null;
+    }
+  })();
+
+  return swaggerSetupPromise;
+};
+
+// Swagger UI endpoint
+app.use('/api-docs', async (req, res, next) => {
+  const swagger = await setupSwagger();
+  if (!swagger) {
+    return res.status(503).json({
+      success: false,
+      message: 'Swagger documentation is not available. Install swagger-jsdoc and swagger-ui-express to enable.'
+    });
+  }
+  swagger.swaggerUi.serve(req, res, next);
+});
+
+app.get('/api-docs', async (req, res, next) => {
+  const swagger = await setupSwagger();
+  if (!swagger) {
+    return res.status(503).json({
+      success: false,
+      message: 'Swagger documentation is not available. Install swagger-jsdoc and swagger-ui-express to enable.'
+    });
+  }
+  swagger.swaggerUi.setup(swagger.swaggerSpec, {
+    customCss: '.swagger-ui .topbar { display: none }',
+    customSiteTitle: 'Finnep Event App Backend API'
+  })(req, res, next);
+});
+
+// OpenAPI JSON endpoint
+app.get('/api-docs.json', async (req, res) => {
+  const swagger = await setupSwagger();
+  if (!swagger) {
+    return res.status(503).json({
+      success: false,
+      message: 'Swagger documentation is not available. Install swagger-jsdoc and swagger-ui-express to enable.'
+    });
+  }
+  res.setHeader('Content-Type', 'application/json');
+  res.send(swagger.swaggerSpec);
+});
+
+// Try to initialize Swagger on startup (non-blocking)
+setupSwagger().then(swagger => {
+  if (swagger) {
+    console.log('Swagger documentation available at http://localhost:3000/api-docs');
+  }
+}).catch(() => {
+  // Silently fail - Swagger is optional
+});
+
 app.use('/api', api)
 app.use('/front', front)
 app.set('port', process.env.PORT || process.env.PORT);
 
-var server = app.listen(app.get('port'), async function () {
-    console.log('Express server listening on port ' + server.address().port);
-
-    // Initialize messageConsumer after server starts
-    try {
-        console.log('Initializing messageConsumer...');
-        await messageConsumer.initialize();
-        console.log('messageConsumer initialized successfully');
-    } catch (error) {
-        console.error('Failed to initialize messageConsumer:', error);
-        console.log('Application will continue without messageConsumer functionality');
-        // Don't crash the app, just log the error and continue
-    }
-})
-// create remaining roles
-await adminRole.createRoles()
-//add admin role and  user if not present
-//await adminRole.createAdmin()
-// create photoTypes
-await adminRole.photoTypes()
-//create notificationTypes
-await adminRole.notificationTypes()
-//create socialMedia
-//await adminRole.socialMedia()
+// Only start server if not in test mode
+if (process.env.NODE_ENV !== 'test') {
+    var server = app.listen(app.get('port'), async function () {
+        console.log('Express server listening on port ' + server.address().port);
+    })
+}
+// Only run initialization if not in test mode
+if (process.env.NODE_ENV !== 'test') {
+    // create remaining roles
+    await adminRole.createRoles()
+    //add admin role and  user if not present
+    //await adminRole.createAdmin()
+    // create photoTypes
+    await adminRole.photoTypes()
+    //create notificationTypes
+    await adminRole.notificationTypes()
+    //create socialMedia
+    //await adminRole.socialMedia()
+}
 
 // Initialize and start queue consumers
 try {
@@ -182,7 +252,7 @@ try {
     await setupQueues();
     console.log('Queue setup completed successfully');
 } catch (error) {
-    console.error('Failed to setup RabbitMQ/queues:', error);
+    console.error('Failed to setup RabbitMQ/queues:', error.message || error);
     console.log('Application will continue without RabbitMQ functionality');
     // Don't crash the app, just log the error and continue
 }
@@ -219,4 +289,6 @@ process.on('SIGINT', async () => {
     process.exit(0);
 });
 
+// Export app for testing
+export { app }
 export default app

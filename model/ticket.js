@@ -34,16 +34,20 @@ export class Ticket{
 }
 
 export const createTicket = async(qrCode, ticketFor, event, type,ticketInfo, otp, merchantId, externalMerchantId) =>{
-          
+
     const ticket = new Ticket(qrCode, ticketFor, event, type,ticketInfo, otp, merchantId, externalMerchantId)
     return await ticket.saveToDB()
 }
 
-export const getTicketById = async(id) =>{
-    return await model.Ticket.findById({_id:id}).populate('ticketFor').populate('event').populate('readBy').exec()
+export const getTicketById = async(id, populate = true) =>{
+    if (populate) {
+        return await model.Ticket.findById(id).populate('ticketFor').populate('event').populate('readBy').exec()
+    } else {
+        return await model.Ticket.findById(id).populate('event').populate('readBy').exec()
+    }
 }
 
-export const updateTicketById = async(id, obj) =>{ 
+export const updateTicketById = async(id, obj) =>{
     return await model.Ticket.findOneAndUpdate({_id:id},{$set:obj}, {new:true}).catch(err=>{
         error('error updating ticket %s', err.stack)
     })
@@ -53,7 +57,7 @@ export const deleteTicketById = async(id) =>{
     return await model.Ticket.findOneAndDelete({_id:id})
 }
 
-export const getAllTicketByEventId = async(eventId) =>{  
+export const getAllTicketByEventId = async(eventId) =>{
     return await model.Ticket.find().populate({path:'event', select: 'id ticketInfo', match:{_id:eventId}}).populate('ticketFor').select('-qrCode -ics').exec()
 }
 
@@ -63,4 +67,10 @@ export const getAllTickets = async() =>{
 
 export const genericSearch = async (filter) =>{
     return await model.Ticket.findOne(filter).select('-qrCode -ics').populate('readBy').exec()
+}
+
+export const getTicketsByEmailCryptoId = async (emailCryptoId) => {
+    return await model.Ticket.find({ ticketFor: emailCryptoId })
+        .select('-qrCode -ics')
+        .exec()
 }

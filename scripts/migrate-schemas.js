@@ -1,0 +1,302 @@
+import mongoose from 'mongoose';
+import dotenv from 'dotenv';
+dotenv.config();
+
+// Import models after connection
+import '../model/dbConnect.js';
+import * as mongoModel from '../model/mongoModel.js';
+import { info, error, warn } from '../model/logger.js';
+
+/**
+ * Migration script for MongoDB schema changes
+ * Run with: node scripts/migrate-schemas.js
+ */
+
+const MIGRATION_VERSION = '2025-11-17-001';
+
+async function waitForConnection() {
+    let retries = 0;
+    const maxRetries = 30;
+
+    while (mongoose.connection.readyState !== 1 && retries < maxRetries) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        retries++;
+    }
+
+    if (mongoose.connection.readyState !== 1) {
+        throw new Error('Failed to connect to MongoDB');
+    }
+
+    info('Connected to MongoDB');
+}
+
+async function migrateMerchantOtherInfo() {
+    info('Starting migration: Merchant otherInfo field');
+
+    try {
+        const Merchant = mongoModel.Merchant;
+        // Use find() without lean() to get Mongoose documents
+        const merchants = await Merchant.find({});
+
+        let updated = 0;
+        let skipped = 0;
+
+        for (const merchant of merchants) {
+            let needsUpdate = false;
+
+            // Check if otherInfo doesn't exist or is null/undefined
+            if (!merchant.otherInfo) {
+                merchant.otherInfo = new Map();
+                needsUpdate = true;
+            } else {
+                // Check if it's a plain object (not a Mongoose Map)
+                // Mongoose Maps have a specific structure, plain objects don't
+                const isPlainObject = merchant.otherInfo.constructor === Object ||
+                                     (typeof merchant.otherInfo === 'object' &&
+                                      merchant.otherInfo !== null &&
+                                      !merchant.otherInfo.get &&
+                                      !merchant.otherInfo.set);
+
+                if (isPlainObject) {
+                    // Convert plain object to Map
+                    const otherInfoMap = new Map();
+                    Object.entries(merchant.otherInfo).forEach(([key, value]) => {
+                        otherInfoMap.set(key, value);
+                    });
+                    merchant.otherInfo = otherInfoMap;
+                    needsUpdate = true;
+                }
+            }
+
+            if (needsUpdate) {
+                await merchant.save();
+                updated++;
+                info(`Migrated otherInfo for merchant: ${merchant.merchantId}`);
+            } else {
+                skipped++;
+            }
+        }
+
+        info(`Merchant otherInfo migration completed: ${updated} updated, ${skipped} skipped`);
+        return { updated, skipped };
+    } catch (err) {
+        error('Error migrating Merchant otherInfo:', err);
+        throw err;
+    }
+}
+
+async function migrateSettingOtherInfo() {
+    info('Starting migration: Setting otherInfo field');
+
+    try {
+        const Setting = mongoModel.Setting;
+        // Use find() without lean() to get Mongoose documents
+        const settings = await Setting.find({});
+
+        let updated = 0;
+        let skipped = 0;
+
+        for (const setting of settings) {
+            let needsUpdate = false;
+
+            // Check if otherInfo doesn't exist or is null/undefined
+            if (!setting.otherInfo) {
+                setting.otherInfo = new Map();
+                needsUpdate = true;
+            } else {
+                // Check if it's a plain object (not a Mongoose Map)
+                const isPlainObject = setting.otherInfo.constructor === Object ||
+                                     (typeof setting.otherInfo === 'object' &&
+                                      setting.otherInfo !== null &&
+                                      !setting.otherInfo.get &&
+                                      !setting.otherInfo.set);
+
+                if (isPlainObject) {
+                    // Convert plain object to Map
+                    const otherInfoMap = new Map();
+                    Object.entries(setting.otherInfo).forEach(([key, value]) => {
+                        otherInfoMap.set(key, value);
+                    });
+                    setting.otherInfo = otherInfoMap;
+                    needsUpdate = true;
+                }
+            }
+
+            if (needsUpdate) {
+                await setting.save();
+                updated++;
+                info(`Migrated otherInfo for setting: ${setting._id}`);
+            } else {
+                skipped++;
+            }
+        }
+
+        info(`Setting otherInfo migration completed: ${updated} updated, ${skipped} skipped`);
+        return { updated, skipped };
+    } catch (err) {
+        error('Error migrating Setting otherInfo:', err);
+        throw err;
+    }
+}
+
+async function ensureIndexes() {
+    info('Ensuring indexes are created');
+
+    try {
+        const Merchant = mongoModel.Merchant;
+        const Event = mongoModel.Event;
+        const ExternalTicketSales = mongoModel.ExternalTicketSales;
+
+        // Helper function to safely create index
+        const safeCreateIndex = async (collection, indexSpec, options = {}) => {
+            try {
+                // Check if index already exists
+                const existingIndexes = await collection.indexes();
+                const indexKey = JSON.stringify(indexSpec);
+                const indexExists = existingIndexes.some(idx =>
+                    JSON.stringify(idx.key) === indexKey
+                );
+
+                if (indexExists) {
+                    info(`Index already exists: ${JSON.stringify(indexSpec)}`);
+                    return;
+                }
+
+                await collection.createIndex(indexSpec, options);
+                info(`Index created: ${JSON.stringify(indexSpec)}`);
+            } catch (err) {
+                // If index already exists with different options, that's okay
+                if (err.code === 86 || err.codeName === 'IndexKeySpecsConflict') {
+                    warn(`Index conflict (may already exist): ${err.message}`);
+                } else {
+                    throw err;
+                }
+            }
+        };
+
+        // Ensure merchant indexes - merchantId is unique in schema
+        // Note: The unique index is already created by Mongoose schema definition
+        // We just ensure it exists, but don't recreate if it conflicts
+        try {
+            await Merchant.collection.createIndex(
+                { merchantId: 1 },
+                { unique: true, background: true }
+            );
+            info('Merchant merchantId index ensured');
+        } catch (err) {
+            if (err.code === 86 || err.codeName === 'IndexKeySpecsConflict') {
+                info('Merchant merchantId index already exists');
+            } else {
+                throw err;
+            }
+        }
+
+        // Ensure event indexes
+        await safeCreateIndex(
+            Event.collection,
+            { externalMerchantId: 1, externalEventId: 1 },
+            { unique: true, background: true }
+        );
+        info('Event compound index ensured');
+
+        await safeCreateIndex(
+            Event.collection,
+            { 'featured.isFeatured': 1, 'featured.priority': -1 },
+            { background: true }
+        );
+        info('Event featured index ensured');
+
+        // Ensure external ticket sales indexes
+        await safeCreateIndex(
+            ExternalTicketSales.collection,
+            { eventId: 1, source: 1 },
+            { background: true }
+        );
+        info('ExternalTicketSales compound index ensured');
+
+        await safeCreateIndex(
+            ExternalTicketSales.collection,
+            { externalEventId: 1, source: 1 },
+            { background: true }
+        );
+        info('ExternalTicketSales externalEventId index ensured');
+
+        info('All indexes ensured');
+    } catch (err) {
+        error('Error ensuring indexes:', err);
+        throw err;
+    }
+}
+
+async function trackMigration(version, results) {
+    try {
+        // Create a migration tracking collection
+        const Migration = mongoose.models.Migration || mongoose.model('Migration', new mongoose.Schema({
+            version: { type: String, required: true, unique: true },
+            appliedAt: { type: Date, default: Date.now },
+            results: mongoose.Schema.Types.Mixed
+        }));
+
+        await Migration.findOneAndUpdate(
+            { version },
+            {
+                version,
+                appliedAt: new Date(),
+                results
+            },
+            { upsert: true }
+        );
+
+        info(`Migration ${version} tracked`);
+    } catch (err) {
+        error('Error tracking migration:', err);
+        // Don't throw - tracking failure shouldn't fail migration
+    }
+}
+
+async function runMigrations() {
+    try {
+        info(`Starting migration version: ${MIGRATION_VERSION}`);
+
+        // Wait for MongoDB connection
+        await waitForConnection();
+
+        const results = {
+            merchantOtherInfo: {},
+            settingOtherInfo: {},
+            indexes: 'ensured'
+        };
+
+        // Run migrations
+        results.merchantOtherInfo = await migrateMerchantOtherInfo();
+        results.settingOtherInfo = await migrateSettingOtherInfo();
+        await ensureIndexes();
+
+        // Track migration
+        await trackMigration(MIGRATION_VERSION, results);
+
+        info(`Migration ${MIGRATION_VERSION} completed successfully`);
+        console.log('\n=== Migration Summary ===');
+        console.log(`Version: ${MIGRATION_VERSION}`);
+        console.log(`Merchant otherInfo: ${results.merchantOtherInfo.updated} updated, ${results.merchantOtherInfo.skipped} skipped`);
+        console.log(`Setting otherInfo: ${results.settingOtherInfo.updated} updated, ${results.settingOtherInfo.skipped} skipped`);
+        console.log('Indexes: Ensured');
+        console.log('========================\n');
+
+        process.exit(0);
+    } catch (err) {
+        error('Migration failed:', err);
+        console.error('Migration failed:', err);
+        process.exit(1);
+    }
+}
+
+// Run migrations if script is executed directly
+// Check if this file is being run directly (not imported)
+const isMainModule = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'));
+if (isMainModule || process.argv[1]?.includes('migrate-schemas.js')) {
+    runMigrations();
+}
+
+export { runMigrations, MIGRATION_VERSION };
+

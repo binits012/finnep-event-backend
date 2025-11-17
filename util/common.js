@@ -1,4 +1,4 @@
-import * as fs from 'fs/promises'; 
+import * as fs from 'fs/promises';
 import * as ICS from 'ics'
 import * as QRCode from 'qrcode'
 import { validationResult } from 'express-validator'
@@ -17,20 +17,20 @@ export const manipulatePhoneNumber = async (phoneNumber) =>{
     }
     let sanitaizedPhoneNumber = phoneNumber.replaceAll("-","").replaceAll("(","").replaceAll(")","")
     if(sanitaizedPhoneNumber.startsWith('+358')) {
-         //probably this is ok 
-        return phoneNumber 
+         //probably this is ok
+        return phoneNumber
     }
     if(sanitaizedPhoneNumber.startsWith('0')){
         sanitaizedPhoneNumber = sanitaizedPhoneNumber.replace('0','')
         sanitaizedPhoneNumber = process.env.PREFIX_PHONE+sanitaizedPhoneNumber
         return sanitaizedPhoneNumber
-    } 
+    }
     if(sanitaizedPhoneNumber.startsWith('4') || sanitaizedPhoneNumber.startsWith('5') ){
         sanitaizedPhoneNumber = process.env.PREFIX_PHONE+sanitaizedPhoneNumber
         return sanitaizedPhoneNumber
     }
     return phoneNumber
-     
+
 }
 
 export const formatDate = async (dateString) =>{
@@ -42,31 +42,31 @@ export const formatDate = async (dateString) =>{
     return tempString
 }
 
-export const formateDateWithHash = async (date) =>{ 
+export const formateDateWithHash = async (date) =>{
     return  moment(date).format("DD/MM/YYYY")
 }
 
-export const convertDateTimeWithTimeZone = async (eventDate, eventTimeZone = "Europe/Helsinki") =>{ 
+export const convertDateTimeWithTimeZone = async (eventDate, eventTimeZone = "Europe/Helsinki") =>{
     return  moment(eventDate).tz(eventTimeZone).format('YYYY-MM-DDTHH:mm:ss')
 }
 //redis-client
-export const getCacheByKey = async(redisClient, key) =>{ 
+export const getCacheByKey = async(redisClient, key) =>{
     try{
         return JSON.parse(await redisClient.get(key))
     }catch(error){
         console.log(error)
         return error
     }
-    
+
 }
 
 export const setCacheByKey = async(redisClient, key, data) =>{
     try{
         return await redisClient.set(key, JSON.stringify(data))
-    }catch(error){ 
+    }catch(error){
         return error
     }
-   
+
 }
 
 export const removeCacheByKey = async(redisClient, key) =>{
@@ -90,11 +90,11 @@ export const timeInMinutes = (time) =>{
 export const sanitizeLanguage = (lang) =>{
     let myLang = 'en'
     switch (lang) {
-        case 'Finnish': 
+        case 'Finnish':
         case 'fi':
             myLang = 'fi'
           break
-        
+
         case 'Swedish':
         case 'sv':
             myLang = 'sv'
@@ -105,24 +105,24 @@ export const sanitizeLanguage = (lang) =>{
     return myLang
 }
 
-export const sortByDate = (a, b) =>{ 
+export const sortByDate = (a, b) =>{
     return Date.parse(b.reservationDate) - Date.parse(a.reservationDate)
 }
 
 
 export const validateParam = async (id) =>{
-    return ObjectId.isValid(id) 
+    return ObjectId.isValid(id)
 }
 
-export  const validate = async (validations, req) => { 
-    
+export  const validate = async (validations, req) => {
+
     for (let validation of validations) {
-        
+
         const result = await validation.run(req)
         if (result.errors.length)  break
-    } 
-    
-    return validationResult(req)    
+    }
+
+    return validationResult(req)
   }
 
 export  const generateQRCode = async(ticketId) =>{
@@ -138,7 +138,7 @@ export  const generateQRCode = async(ticketId) =>{
     }
     return await new Promise((resolve, reject)=>{
         QRCode.toDataURL(ticketId, opts, function (err, url) {
-             
+
             if(err) reject(err)
             resolve(url)
         })
@@ -152,7 +152,7 @@ export  const generateQRCode = async(ticketId) =>{
 export  const generateICS = async(event, ticketId)=>{
     const eventDate = event.eventDate
     const eventTimezone = event.eventTimezone || 'UTC' // Use event timezone, fallback to UTC
-    const start = moment(eventDate).tz(eventTimezone).format('YYYY-MM-DD-HH-mm-ss').split("-").map((a) => parseInt(a))  
+    const start = moment(eventDate).tz(eventTimezone).format('YYYY-MM-DD-HH-mm-ss').split("-").map((a) => parseInt(a))
     const eventGeoCode = event.eventLocationGeoCode.split(',')
     const icsData = {
         title: event.eventTitle,
@@ -166,24 +166,24 @@ export  const generateICS = async(event, ticketId)=>{
         classification:'PRIVATE',
         organizer: { name: process.env.COMPANY_TITLE, email: process.env.EMAIL_USERNAME },
         uid:ticketId
-    } 
+    }
     return await new Promise((resolve, reject)=>{
         ICS.createEvent(icsData, async(err, value)=>{
             if(err) reject(err)
             resolve(value)
        })
-    }) 
+    })
 
 }
 
-export  const loadEmailTemplate = async (fileLocation, eventTitle,eventPromotionalPhoto, qrCodeRef, otp) => { 
+export  const loadEmailTemplate = async (fileLocation, eventTitle,eventPromotionalPhoto, qrCodeRef, otp) => {
     const emailData = (await fs.readFile(fileLocation,'utf8'))
     .replace('$eventTitle',eventTitle)
     .replace('$eventTitle',eventTitle)
     .replace('$eventTitle',eventTitle)
     .replace('$eventPromotionalPhoto',eventPromotionalPhoto)
-    .replace('$qrcodeData',qrCodeRef) 
-    .replace('$ticketCode',otp) 
+    .replace('$qrcodeData',qrCodeRef)
+    .replace('$ticketCode',otp)
     return emailData
   }
 
@@ -191,7 +191,7 @@ export const loadEmailTemplateForMerchant = async (fileLocation, orgName, dashbo
     const emailData = (await fs.readFile(fileLocation,'utf8'))
     .replace('$orgName',orgName)
     .replace('$dashboardUrl',dashboardUrl)
-    
+
     return emailData
 }
 
@@ -209,7 +209,7 @@ export const loadFeedbackTemplate = async (name, email, subject, message) => {
         hour: '2-digit',
         minute: '2-digit'
     }));
-    
+
     return emailData;
 }
 
@@ -229,9 +229,23 @@ export const loadCareerTemplate = async (name, email, phone, position, experienc
         hour: '2-digit',
         minute: '2-digit'
     }));
-    
+
     return emailData;
-}  
+}
+
+export const loadVerificationCodeTemplate = async (code) => {
+    const fileLocation = './emailTemplates/verification_code.html';
+    const currentYear = new Date().getFullYear();
+    const companyName = process.env.COMPANY_TITLE || 'Finnep';
+    const contactEmail = process.env.EMAIL_USERNAME || 'info@finnep.fi';
+
+    const emailData = (await fs.readFile(fileLocation,'utf8'))
+        .replace(/\$verificationCode/g, code)
+        .replace(/\$currentYear/g, currentYear)
+        .replace(/\$companyName/g, companyName)
+        .replace(/\$contactEmail/g, contactEmail);
+    return emailData;
+}
 
 export const getCloudFrontUrl = async (photoLink) =>{
 const cloudFrontUrl = photoLink.replace(
@@ -253,13 +267,13 @@ const policy = {
 };
 const policyString = JSON.stringify(policy);
 // Create signed CloudFront URL
-const signedUrl = getSignedUrl({  
-    keyPairId, 
+const signedUrl = getSignedUrl({
+    keyPairId,
     privateKey,
     policy:policyString
 });
 return signedUrl
-} 
+}
 
 export const createCode = async (codeLength=10) =>{
 

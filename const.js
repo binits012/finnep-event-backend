@@ -43,6 +43,10 @@ export const ALLOWED_RESUME_TYPES = [
 export const CLOUDFRONT_URL_EXPIRY_DAYS = 29;
 export const CLOUDFRONT_URL_EXPIRY_SECONDS = CLOUDFRONT_URL_EXPIRY_DAYS * 24 * 60 * 60;
 
+// Redis cache constants
+export const SETTINGS_CACHE_KEY = 'settings:all';
+export const SETTINGS_CACHE_TTL = 3600; // 1 hour in seconds
+
 // Request validation constants
 export const MAX_REQUEST_SIZE = 20 * 1024; // 20KB limit
 export const MAX_STRING_LENGTH = 255;

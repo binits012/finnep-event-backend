@@ -156,7 +156,7 @@ export const updateMerchantById = async (req, res, next) => {
 
                         const outboxMessageData = {
                             messageId: messageId,
-                            exchange: 'event-merchant-exchange',   
+                            exchange: 'event-merchant-exchange',
                             routingKey: routingKey,
                             messageBody: {
                                 eventType: eventType,
@@ -280,4 +280,51 @@ export const deleteMerchantById = async (req, res, next) => {
             }
         }
     })
+}
+
+/** add or update otherInfo in merchant
+ *
+ * @param {string} id - The ID of the merchant
+ * @param {object} otherInfo - The otherInfo to add or update
+ * @returns {object} The updated merchant
+ *
+ */
+export const addOrUpdateOtherInfo = async (req, res, next) => {
+    const token = req.headers.authorization
+    const id = req.params.id
+    const { otherInfo } = req.body
+
+    const merchant = await Merchant.getMerchantById(id)
+    if (!merchant || merchant.status !== 'active') {
+        return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).send({ error: RESOURCE_NOT_FOUND })
+    }
+    await jwtToken.verifyJWT(token, async (err, data) => {
+        if (err || data === null) {
+            return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({
+                message: 'Please, provide valid token', error: appText.TOKEN_NOT_VALID
+            })
+        }
+        try {
+            const userRoleFromToken = data.role
+            if (consts.ROLE_MEMBER === userRoleFromToken) {
+                return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({
+                    message: 'You are not authorized to perform this action'
+                })
+            }
+
+            const updatedMerchant = await Merchant.addOrUpdateOtherInfo(id, otherInfo)
+            if (updatedMerchant) {
+                return res.status(consts.HTTP_STATUS_OK).json(updatedMerchant)
+            } else {
+                return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).send({ error: RESOURCE_NOT_FOUND })
+            }
+        } catch (err) {
+            error(err)
+            if (!res.headersSent) {
+                return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).send({ error: INTERNAL_SERVER_ERROR })
+            }
+        }
+    }
+    )
+
 }

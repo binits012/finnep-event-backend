@@ -7,6 +7,7 @@ const api = require('../controllers/api.controller')
 import * as express from 'express'
 const router = express.Router()
 import * as api  from '../controllers/api.controller.js'
+import * as report from '../controllers/report.controller.js'
 
 router.route('/auth/user/login').post(api.login)
 router.route('/auth/user/changePassword').post(api.changePassword)
@@ -80,6 +81,12 @@ router.route('/event/:id/ticket')
 router.route('/event/:id/searchTicket')
     .get(api.searchTicket)
 
+router.route('/event/:eventId/financial-report')
+    .get(report.getEventFinancialReport)
+
+router.route('/event/:eventId/request-external-ticket-sales')
+    .post(report.requestExternalTicketSalesData)
+
 router.route('/ticket/:id')
     .get(api.getTicketById)
 
@@ -98,5 +105,7 @@ router.route('/merchant')
 router.route('/merchant/:id')
     .get(api.getMerchantById)
     .patch(api.updateMerchantById)
-
+router.route('/merchant/:id/otherInfo')
+    .patch(api.addOrUpdateOtherInfo)
+    
 export default router

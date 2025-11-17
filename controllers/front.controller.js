@@ -21,6 +21,7 @@ import * as OutboxMessage from '../model/outboxMessage.js'
 import { messageConsumer } from '../rabbitMQ/services/messageConsumer.js'
 import { v4 as uuidv4 } from 'uuid'
 import busboy from 'busboy'
+import { SETTINGS_CACHE_KEY } from '../const.js'
 
 
 export const getDataForFront = async (req, res, next) => {
@@ -53,7 +54,13 @@ export const getDataForFront = async (req, res, next) => {
     if (event) {
         event = event.filter(e => e.active)
     }
-    const setting = await Setting.getSetting()
+    // Check cache first, then fallback to getSetting()
+    let setting = await commonUtil.getCacheByKey(redisClient, SETTINGS_CACHE_KEY)
+    if (!setting || setting instanceof Error || setting === null) {
+
+        console.log('no setting in cache, getting from database');
+        setting = await Setting.getSetting()
+    }
     const data = {
         photo: photosWithCloudFrontUrls?.filter(e => e.publish),
         notification: notification,
@@ -497,15 +504,12 @@ const validatePriceCalculation = (clientAmount, expectedPrice, tolerance = 0.01)
  * @param {number} amount - Amount in cents
  * @param {string} currency - Currency code (e.g., 'eur', 'dkk', 'usd')
  * @param {string} country - Country name or code
+ * @param {number} platformFee - Platform fee in cents
  * @returns {Promise<number>} Processing fee in cents
  */
-const calculateStripeProcessingFee = async (amount, currency, country) => {
+const calculateStripeProcessingFee = async (amount, currency, country, platformFee = 30) => {
     const currencyLower = currency.toLowerCase();
     const countryLower = country?.toLowerCase() || '';
-
-    console.log('currencyLower', currencyLower);
-    console.log('countryLower', countryLower);
-    console.log('amount', amount);
     // Default fee structure (fallback if not in database)
     const defaultFees = {
         // Default: 2.9% + $0.30 for USD or €0.25 for EUR, or generic estimate
@@ -516,11 +520,13 @@ const calculateStripeProcessingFee = async (amount, currency, country) => {
     };
 
     try {
-        // Fetch Stripe fees from Settings
-        const settings = await Setting.getSetting();
+        // Fetch Stripe fees from Settings - check cache first
+        let settings = await commonUtil.getCacheByKey(redisClient, SETTINGS_CACHE_KEY)
+        if (!settings || settings instanceof Error || settings === null) {
+            settings = await Setting.getSetting()
+        }
         console.log('settings', settings);
-        const stripeFeesConfig = settings?.[0]?.otherInfo?.get("stripeFees");
-        console.log('stripeFeesConfig', stripeFeesConfig, typeof stripeFeesConfig === 'object');
+        const stripeFeesConfig = settings?.[0]?.otherInfo?.stripeFees;
 
         if (stripeFeesConfig && typeof stripeFeesConfig === 'object') {
             // Find matching country in config
@@ -550,9 +556,9 @@ const calculateStripeProcessingFee = async (amount, currency, country) => {
             // Calculate fee: percentage of amount + fixed fee
             const percentageFee = Math.ceil(amount * (feeStructure.percentage || 0));
             const fixedFee = feeStructure.fixed || 0;
-            const totalFee = percentageFee + fixedFee + 10; // Add 10 cents to the stripe processing fee to cover the application fee
+            const totalFee = percentageFee + fixedFee + platformFee; // Add 10 cents to the stripe processing fee to cover the application fee
             console.log('totalFee', totalFee);
-            return Math.max(5, totalFee); // Minimum 5 cents
+            return Math.max(platformFee, totalFee); // Minimum 5 cents
         }
     } catch (err) {
         error('Error fetching Stripe fees from Settings:', err);
@@ -561,7 +567,7 @@ const calculateStripeProcessingFee = async (amount, currency, country) => {
     // Fallback to default if Settings lookup fails
     const feeStructure = defaultFees.default;
     const percentageFee = Math.ceil(amount * feeStructure.percentage);
-    const totalFee = percentageFee + feeStructure.fixed + 10; // Add 10 cents to the stripe processing fee to cover the application fee
+    const totalFee = percentageFee + feeStructure.fixed + platformFee;
     console.log('totalFee =============================================>', totalFee);
     return Math.max(5, totalFee); // Minimum 5 cents
 };
@@ -617,7 +623,8 @@ export const createPaymentIntent = async (req, res, next) => {
             const stripeProcessingFeeEstimate = await calculateStripeProcessingFee(
                 baseAmount,
                 currency,
-                country
+                country,
+                merchant?.otherInfo?.get("stripe") || 30
             );
 
             stripePaymentIntentPayload = {
@@ -633,7 +640,7 @@ export const createPaymentIntent = async (req, res, next) => {
                     serverCalculatedTotal: expectedPrice.totalAmount.toString(),
                     clientId: clientId, // Track client for monitoring
                     baseAmount: baseAmount.toString(),
-                    stripeProcessingFee: stripeProcessingFeeEstimate .toString() // Add 10 cents to the stripe processing fee to cover the application fee
+                    stripeProcessingFee: stripeProcessingFeeEstimate .toString()
                 },
                 automatic_payment_methods: {
                     enabled: true,
@@ -940,7 +947,7 @@ const publishTicketCreationEvent = async (ticket, event, metadata, paymentIntent
 
         // Save outbox message for reliability
         const outboxMessage = await OutboxMessage.createOutboxMessage(outboxMessageData);
-        info('Outbox message created for ticket creation:', outboxMessage._id);
+        info('Outbox message created for ticket creation: %s', outboxMessage._id);
 
 
         // Publish to RabbitMQ exchange
@@ -958,7 +965,7 @@ const publishTicketCreationEvent = async (ticket, event, metadata, paymentIntent
                 }
             }
         ).then(async () => {
-            info('Ticket creation event published successfully:', outboxMessageData.messageId);
+            info('Ticket creation event published successfully: %s', outboxMessageData.messageId);
 
             // Mark outbox message as sent
             await OutboxMessage.markMessageAsSent(outboxMessage._id);
@@ -1225,6 +1232,210 @@ export const sendCareerApplication = async (req, res, next) => {
         res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
             success: false,
             message: 'Failed to submit application. Please try again.'
+        });
+    }
+};
+
+// Free event registration handler - follows same pattern as handlePaymentSuccess
+export const handleFreeEventRegistration = async (req, res, next) => {
+    try {
+        // Security Layer 1: Request size validation
+        validateRequestSize(req.body);
+
+        const { email, quantity, eventId, ticketId, merchantId, externalMerchantId, eventName, ticketName, marketingOptIn } = req.body;
+
+        // Security Layer 2: Validate required fields
+        if (!email || !quantity || !eventId || !merchantId || !externalMerchantId || !eventName || !ticketName) {
+            throw new Error('Missing required fields');
+        }
+
+        // Security Layer 3: Validate and sanitize input
+        const sanitizedData = {
+            email: sanitizeString(email, 100),
+            quantity: sanitizeString(String(quantity), 10),
+            eventId: sanitizeString(eventId, 50),
+            ticketId: ticketId && ticketId !== 'null' ? sanitizeString(ticketId, 50) : null,
+            merchantId: sanitizeString(merchantId, 50),
+            externalMerchantId: sanitizeString(externalMerchantId, 50),
+            eventName: sanitizeString(eventName, 200),
+            ticketName: sanitizeString(ticketName, 200),
+            marketingOptIn: sanitizeBoolean(marketingOptIn || false)
+        };
+
+        // Validate email format
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(sanitizedData.email)) {
+            throw new Error('Invalid email format');
+        }
+
+        // Validate quantity
+        const quantityNum = parseInt(sanitizedData.quantity);
+        if (isNaN(quantityNum) || quantityNum !== 1) {
+            throw new Error('Invalid quantity (must be 1)');
+        }
+
+        // Validate ID formats
+        if (!/^[0-9a-fA-F]{24}$/.test(sanitizedData.eventId) ||
+            !/^[0-9a-fA-F]{24}$/.test(sanitizedData.merchantId)) {
+            throw new Error('Invalid MongoDB ObjectId format');
+        }
+
+        if (sanitizedData.ticketId && !/^[0-9a-fA-F]{24}$/.test(sanitizedData.ticketId)) {
+            throw new Error('Invalid ticket ID format');
+        }
+
+        // Merchant ID is a numeric string (PostgreSQL style)
+        if (!/^\d+$/.test(sanitizedData.externalMerchantId)) {
+            throw new Error('Invalid merchant ID format - must be numeric');
+        }
+
+        // Validate and check if event exists
+        const event = await Event.getEventById(sanitizedData.eventId);
+        if (!event) {
+            return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+                success: false,
+                error: 'Event not found'
+            });
+        }
+
+        // Validate and check if merchant exists
+        const merchant = await Merchant.getMerchantById(sanitizedData.merchantId);
+        if (!merchant) {
+            return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+                success: false,
+                error: 'Merchant not found'
+            });
+        }
+
+        // Verify merchant matches event
+        if (event.merchant && event.merchant._id.toString() !== sanitizedData.merchantId) {
+            throw new Error('Merchant does not match event');
+        }
+
+        // Verify external merchant ID matches
+        if (merchant.merchantId !== sanitizedData.externalMerchantId) {
+            throw new Error('External merchant ID does not match merchant');
+        }
+
+        // Validate and check if event is free
+        if (event.otherInfo?.eventExtraInfo?.eventType !== 'free') {
+            throw new Error('Event is not free');
+        }
+
+        // Validate and check if ticket exists in the event (if ticketId is provided)
+        if (sanitizedData.ticketId) {
+            const ticketExists = event.ticketInfo && event.ticketInfo.some(ticket => ticket._id.toString() === sanitizedData.ticketId);
+            if (!ticketExists) {
+                return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+                    success: false,
+                    error: 'Ticket not found in event'
+                });
+            }
+        }
+
+        // Generate secure OTP using the existing createCode utility
+        const otp = await commonUtil.createCode(8); // 8-character alphanumeric OTP
+
+        // Get ticket info (price should be 0 for free events)
+        const selectedTicket = sanitizedData.ticketId
+            ? event.ticketInfo.find(t => t._id.toString() === sanitizedData.ticketId)
+            : (event.ticketInfo && event.ticketInfo.length > 0 ? event.ticketInfo[0] : null);
+
+        const ticketPrice = selectedTicket ? selectedTicket.price : 0;
+        const ticketType = selectedTicket ? selectedTicket.name : sanitizedData.ticketName;
+
+        // Create ticketInfo object similar to handlePaymentSuccess
+        const ticketInfo = {
+            eventName: sanitizedData.eventName,
+            ticketName: sanitizedData.ticketName,
+            quantity: sanitizedData.quantity,
+            price: ticketPrice,
+            currency: 'EUR', // Default currency for free events
+            purchaseDate: new Date().toISOString(),
+            email: sanitizedData.email,
+            merchantId: sanitizedData.merchantId,
+            eventId: sanitizedData.eventId,
+            ticketId: sanitizedData.ticketId || null,
+            isFree: true
+        };
+
+        // Get or create crypto hash for email (using efficient search)
+        const emailCrypto = await hash.getCryptoBySearchIndex(sanitizedData.email, 'email');
+        let emailHash = null;
+        if (emailCrypto.length == 0) {
+            // New email which is not yet in the system
+            let tempEmailHash = await hash.createHashData(sanitizedData.email, 'email');
+            emailHash = tempEmailHash._id;
+        } else {
+            emailHash = emailCrypto[0]._id;
+        }
+        const ticketFor = emailHash;
+
+        // Create the ticket using the same pattern as handlePaymentSuccess
+        let ticket = await Ticket.createTicket(
+            null, // qrCode - will be generated later
+            ticketFor,
+            sanitizedData.eventId, // event
+            ticketType, // type
+            ticketInfo, // ticketInfo
+            otp, // otp
+            sanitizedData.merchantId,
+            sanitizedData.externalMerchantId
+        ).catch(err => {
+            console.error('Error creating ticket:', err);
+            throw err;
+        });
+
+        // Generate email payload and send ticket (same as handlePaymentSuccess)
+        const emailPayload = await ticketMaster.createEmailPayload(event, ticket, sanitizedData.email, otp);
+        await new Promise(resolve => setTimeout(resolve, 100)); // intentional delay
+        await sendMail.forward(emailPayload).then(async data => {
+            // Update the ticket to mark as sent
+            ticket = await Ticket.updateTicketById(ticket._id, { isSend: true });
+        }).catch(err => {
+            console.error('Error sending ticket email:', err);
+            // Don't throw here - ticket is created successfully even if email fails
+        });
+
+        const clientId = getClientIdentifier(req);
+        console.log('Free event registration handled:', {
+            ticketId: ticket._id,
+            eventId: sanitizedData.eventId,
+            clientId: clientId
+        });
+
+        res.status(consts.HTTP_STATUS_OK).json({
+            success: true,
+            data: ticket,
+            message: "Free event registration successful"
+        });
+
+        // Publish ticket creation event to notify other systems
+        try {
+            await publishTicketCreationEvent(ticket, event, sanitizedData, null); // null for paymentIntentId since it's free
+        } catch (publishError) {
+            console.error('Failed to publish ticket creation event:', publishError);
+            // Don't fail the entire operation if event publishing fails
+        }
+
+    } catch (error) {
+        console.error('Error handling free event registration:', {
+            error: error.message,
+            clientId: getClientIdentifier(req),
+            timestamp: new Date().toISOString()
+        });
+
+        const safeErrorMessage = error.message.includes('Missing') ||
+                                error.message.includes('Invalid') ||
+                                error.message.includes('format') ||
+                                error.message.includes('too large') ||
+                                error.message.includes('does not match')
+                                ? error.message
+                                : 'Free event registration temporarily unavailable';
+
+        res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
+            success: false,
+            error: safeErrorMessage
         });
     }
 };

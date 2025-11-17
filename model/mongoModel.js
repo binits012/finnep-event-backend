@@ -251,12 +251,12 @@ const ticketInfoSchema = new mongoose.Schema({
 	price: {
 	  type: Number,
 	  required: true, // Price is required
-	  min: [0.01, 'Price must be a positive number']
+	  min: [0, 'Price cannot be negative'] // Allow 0 for free events
 	},
 	quantity: {
 	  type: Number,
 	  required: true, // Quantity is required
-	  min: [1, 'Quantity must be at least 1']
+	  min: [0, 'Quantity cannot be negative'] // Allow 0 for free events
 	},
 	available: {
 		type: Number,
@@ -517,6 +517,12 @@ const merchantSchema = new mongoose.Schema({
 	website: { type: String },
 	logo: { type: String },
 	stripeAccount: { type: String, required: true },
+	bankingInfo: { type:Map,
+		of:mongoose.Schema.Types.Mixed },
+	otherInfo:{
+		type:Map,
+		of:mongoose.Schema.Types.Mixed
+	},
 	updatedAt: { type: Date, default: Date.now }
 });
 
@@ -601,6 +607,32 @@ const ticketAnalyticsSchema = new mongoose.Schema({
 	lastSale: { type: Date },
 	lastUpdated: { type: Date, default: Date.now }
   });
+
+const externalTicketSalesSchema = new mongoose.Schema({
+	eventId: { type: mongoose.Schema.Types.ObjectId, ref: 'Event', required: true, index: true },
+	externalEventId: { type: String, required: true, index: true },
+	merchantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Merchant', required: true },
+	externalMerchantId: { type: String, required: true },
+	ticketType: { type: String, required: true },
+	quantity: { type: Number, required: true, min: 0 },
+	unitPrice: { type: Number, required: true, min: 0 },
+	saleDate: { type: Date, required: true },
+	source: {
+		type: String,
+		enum: ['door_sale', 'other'],
+		required: true
+	},
+	paymentMethod: { type: String }, // e.g., 'cash', 'card', 'mobile'
+	currency: { type: String, default: 'EUR' },
+	messageId: { type: String, unique: true, index: true }, // For idempotency
+	receivedAt: { type: Date, default: Date.now },
+	createdAt: { type: Date, default: Date.now }
+});
+
+// Compound indexes for efficient queries
+externalTicketSalesSchema.index({ eventId: 1, source: 1 });
+externalTicketSalesSchema.index({ externalEventId: 1, source: 1 });
+
 // 3. Apply the audit plugin to all schemas BEFORE creating any models
 const schemas = [
 	inboxMessageSchema,
@@ -608,7 +640,7 @@ const schemas = [
 	merchantSchema,
 	orderTicketSchema,paymentSchema,settingSchema,ticketSchema,messageSchema,photoSchema,photoTypeSchema,
 	notificationSchema,notificationTypeSchema,tokenSchema,eventSchema,timeBasedPriceSchema,eventTypeSchema,
-	socialMediaSchema,contactSchema,cryptoSchema,roleSchema, userSchema, ticketAnalyticsSchema
+	socialMediaSchema,contactSchema,cryptoSchema,roleSchema, userSchema, ticketAnalyticsSchema, externalTicketSalesSchema
 ];
 
 schemas.forEach(schema => {
@@ -640,3 +672,4 @@ export const Role = mongoose.model('Role', roleSchema)
 export const User = mongoose.model('User', userSchema)
 export const Merchant = mongoose.model('Merchant', merchantSchema);
 export const TicketAnalytics = mongoose.model('TicketAnalytics', ticketAnalyticsSchema);
+export const ExternalTicketSales = mongoose.model('ExternalTicketSales', externalTicketSalesSchema);

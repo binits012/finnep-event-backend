@@ -84,7 +84,17 @@ async function handleEventCreated(message) {
     const active = message?.active;
     const eventName =externalMerchantId+'_'+ message.id;
     const videoUrl = message?.video_url;
-    const otherInfo = message?.other_info;
+    // Build enhanced otherInfo with additional fields
+    const otherInfo = {
+        ...(message?.other_info || {}),
+        categoryName: message?.category_name,
+        subCategoryName: message?.subcategory_name,
+        eventExtraInfo: {
+            eventType: message?.event_type,
+            doorSaleAllowed: message?.door_sale_allowed,
+            doorSaleExtraAmount: message?.door_sale_extra_amount
+        }
+    };
     const eventTimezone = message?.event_timezone;
     const city = message?.city;
     const country = message?.country;
@@ -127,7 +137,17 @@ async function handleEventUpdated(message) {
     const active = message?.active;
     const eventName =externalMerchantId+'_'+ message.id;
     const videoUrl = message?.video_url;
-    const otherInfo = message?.other_info;
+    // Build enhanced otherInfo with additional fields
+    const otherInfo = {
+        ...(message?.other_info || {}),
+        categoryName: message?.category_name,
+        subCategoryName: message?.subcategory_name,
+        eventExtraInfo: {
+            eventType: message?.event_type,
+            doorSaleAllowed: message?.door_sale_allowed,
+            doorSaleExtraAmount: message?.door_sale_extra_amount
+        }
+    };
     const eventTimezone = message?.event_timezone;
     const city = message?.city;
     const country = message?.country;
@@ -135,24 +155,35 @@ async function handleEventUpdated(message) {
     const externalEventId = message?.id;
     const existingEvent = await Event.getEventByMerchantAndExternalId(externalMerchantId,
         externalEventId);
-    const venue = existingEvent?.venue;
+    const venue = existingEvent?.venue || message?.venue;
+
+    // If event doesn't exist, create it instead of throwing error (upsert behavior)
+    // This handles cases where update message arrives before create message
     if (!existingEvent) {
-        throw new Error(`Event with ID ${externalEventId} not found`);
+        console.log(`Event with ID ${externalEventId} not found, creating new event instead`);
+        await Event.createEvent(
+            eventTitle, eventDescription, eventDate, occupancy,
+            ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress,
+            eventLocationGeoCode, transportLink, socialMedia, lang, position,
+            active, eventName, videoUrl, otherInfo, eventTimezone,
+            city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue
+        );
+    } else {
+        await Event.updateEventById(existingEvent._id,{
+            eventTitle, eventDescription, eventDate, occupancy,
+            ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress,
+            eventLocationGeoCode, transportLink, socialMedia, lang, position,
+            active, eventName, videoUrl, otherInfo, eventTimezone,
+            city, country, venueInfo, venue}
+        );
     }
-    await Event.updateEventById(existingEvent._id,{
-        eventTitle, eventDescription, eventDate, occupancy,
-        ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress,
-        eventLocationGeoCode, transportLink, socialMedia, lang, position,
-        active, eventName, videoUrl, otherInfo, eventTimezone,
-        city, country, venueInfo, venue}
-    );
     await inboxModel.markProcessed(message?.metaData?.causationId);
 }
 
 
 
 async function handleEventDeleted(message) {
-    console.log('Updating event:', message);
+    console.log('Deleting event:', message);
     const externalMerchantId = message.merchantId;
     const merchant = await getMerchantByMerchantId(externalMerchantId)
     if (!merchant) {
@@ -160,8 +191,12 @@ async function handleEventDeleted(message) {
     }
     const externalEventId = message?.id;
     const existingEvent = await Event.getEventByMerchantAndExternalId(externalMerchantId, externalEventId);
+    // If event doesn't exist, just log and mark as processed (idempotent delete)
+    // This handles cases where delete message arrives after event was already deleted
     if (!existingEvent) {
-        throw new Error(`Event with ID ${externalEventId} not found`);
+        console.log(`Event with ID ${externalEventId} not found, already deleted or never existed`);
+        await inboxModel.markProcessed(message?.metaData?.causationId);
+        return;
     }
     await Event.deleteEventById(existingEvent._id);
     await inboxModel.markProcessed(message?.metaData?.causationId);
