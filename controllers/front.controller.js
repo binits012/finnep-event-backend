@@ -642,14 +642,17 @@ export const createPaymentIntent = async (req, res, next) => {
                     baseAmount: baseAmount.toString(),
                     stripeProcessingFee: stripeProcessingFeeEstimate .toString()
                 },
+
                 automatic_payment_methods: {
                     enabled: true,
                 },
+
                 on_behalf_of: merchant.stripeAccount,
                 transfer_data: {
                     destination: merchant.stripeAccount, // Connected account ID
                 },
                 application_fee_amount: stripeProcessingFeeEstimate
+
             };
         } else {
             // Platform account - no fees
@@ -671,9 +674,9 @@ export const createPaymentIntent = async (req, res, next) => {
                 }
             };
         }
-
+        console.log('stripePaymentIntentPayload', stripePaymentIntentPayload, '\n', merchant.stripeAccount);
         const stripePromise = stripe.paymentIntents.create(
-            stripePaymentIntentPayload
+            stripePaymentIntentPayload 
         );
         // Race between Stripe API and timeout
         const paymentIntent = await Promise.race([stripePromise, stripeTimeout]);

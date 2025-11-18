@@ -287,5 +287,250 @@ const otherInfo ={
         "title": "Contact Us",
         "text": "If you have any questions, concerns, or requests regarding this Privacy Policy or our data practices, please contact us at info@finnep.fi or +358442733404. We will respond to your inquiry as soon as possible."
       }
+    },
+    "locales": [
+      {
+        "code": "en-US",
+        "name": "English",
+        "nativeName": "English",
+        "flag": "🇺🇸",
+        "rtl": false,
+        "currency": "USD",
+        "currencySymbol": "$",
+        "dateFormat": "MM/DD/YYYY",
+        "timeFormat": "12h",
+        "pdf": "https://d3ibhfrhdk2dm6.cloudfront.net/manual/USER_MANUAL_en-US.pdf",
+        "md": "https://d3ibhfrhdk2dm6.cloudfront.net/manual/USER_MANUAL_en-US.md"
+      },
+      {
+        "code": "fi-FI",
+        "name": "Finnish",
+        "nativeName": "Suomi",
+        "flag": "🇫🇮",
+        "rtl": false,
+        "currency": "EUR",
+        "currencySymbol": "€",
+        "dateFormat": "DD.MM.YYYY",
+        "timeFormat": "24h",
+        "pdf": "https://d3ibhfrhdk2dm6.cloudfront.net/manual/USER_MANUAL_fi-FI.pdf",
+        "md": "https://d3ibhfrhdk2dm6.cloudfront.net/manual/USER_MANUAL_fi-FI.md"
+      },
+      {
+        "code": "sv-SE",
+        "name": "Swedish",
+        "nativeName": "Svenska",
+        "flag": "🇸🇪",
+        "rtl": false,
+        "currency": "SEK",
+        "currencySymbol": "kr",
+        "dateFormat": "YYYY-MM-DD",
+        "timeFormat": "24h",
+        "pdf": "https://d3ibhfrhdk2dm6.cloudfront.net/manual/USER_MANUAL_sv-SE.pdf",
+        "md": "https://d3ibhfrhdk2dm6.cloudfront.net/manual/USER_MANUAL_sv-SE.md"
+      },
+      {
+        "code": "da-DK",
+        "name": "Danish",
+        "nativeName": "Dansk",
+        "flag": "🇩🇰",
+        "rtl": false,
+        "currency": "DKK",
+        "currencySymbol": "kr",
+        "dateFormat": "DD.MM.YYYY",
+        "timeFormat": "24h",
+        "pdf": "https://d3ibhfrhdk2dm6.cloudfront.net/manual/USER_MANUAL_da-DK.pdf",
+        "md": "https://d3ibhfrhdk2dm6.cloudfront.net/manual/USER_MANUAL_da-DK.md"
+      },
+      {
+        "code": "no-NO",
+        "name": "Norwegian",
+        "nativeName": "Norsk",
+        "flag": "🇳🇴",
+        "rtl": false,
+        "currency": "NOK",
+        "currencySymbol": "kr",
+        "dateFormat": "DD.MM.YYYY",
+        "timeFormat": "24h",
+        "pdf": "https://d3ibhfrhdk2dm6.cloudfront.net/manual/USER_MANUAL_no-NO.pdf",
+        "md": "https://d3ibhfrhdk2dm6.cloudfront.net/manual/USER_MANUAL_no-NO.md"
+      }
+    ],
+    "stripeFees": {
+      "australia": {
+        "percentage": 0.0175,
+        "fixed": 30
+      },
+      "austria": {
+        "percentage": 0.015,
+        "fixed": 25
+      },
+      "belgium": {
+        "percentage": 0.015,
+        "fixed": 25
+      },
+      "brazil": {
+        "percentage": 0.0359,
+        "fixed": 0
+      },
+      "bulgaria": {
+        "percentage": 0.029,
+        "fixed": 30
+      },
+      "canada": {
+        "percentage": 0.029,
+        "fixed": 30
+      },
+      "croatia": {
+        "percentage": 0.015,
+        "fixed": 25
+      },
+      "cyprus": {
+        "percentage": 0.015,
+        "fixed": 25
+      },
+      "czech_republic": {
+        "percentage": 0.015,
+        "fixed": 25
+      },
+      "denmark": {
+        "percentage": 0.015,
+        "fixed": 180
+      },
+      "estonia": {
+        "percentage": 0.015,
+        "fixed": 25
+      },
+      "finland": {
+        "percentage": 0.015,
+        "fixed": 25
+      },
+      "france": {
+        "percentage": 0.015,
+        "fixed": 25
+      },
+      "germany": {
+        "percentage": 0.015,
+        "fixed": 25
+      },
+      "gibraltar": {
+        "percentage": 0.015,
+        "fixed": 25
+      },
+      "greece": {
+        "percentage": 0.015,
+        "fixed": 25
+      },
+      "hong_kong": {
+        "percentage": 0.035,
+        "fixed": 0
+      },
+      "hungary": {
+        "percentage": 0.029,
+        "fixed": 30
+      },
+      "ireland": {
+        "percentage": 0.015,
+        "fixed": 25
+      },
+      "italy": {
+        "percentage": 0.015,
+        "fixed": 25
+      },
+      "japan": {
+        "percentage": 0.036,
+        "fixed": 0
+      },
+      "latvia": {
+        "percentage": 0.015,
+        "fixed": 25
+      },
+      "liechtenstein": {
+        "percentage": 0.015,
+        "fixed": 25
+      },
+      "lithuania": {
+        "percentage": 0.015,
+        "fixed": 25
+      },
+      "luxembourg": {
+        "percentage": 0.015,
+        "fixed": 25
+      },
+      "malta": {
+        "percentage": 0.015,
+        "fixed": 25
+      },
+      "mexico": {
+        "percentage": 0.036,
+        "fixed": 0
+      },
+      "netherlands": {
+        "percentage": 0.015,
+        "fixed": 25
+      },
+      "new_zealand": {
+        "percentage": 0.029,
+        "fixed": 30
+      },
+      "norway": {
+        "percentage": 0.015,
+        "fixed": 250
+      },
+      "poland": {
+        "percentage": 0.015,
+        "fixed": 25
+      },
+      "portugal": {
+        "percentage": 0.015,
+        "fixed": 25
+      },
+      "romania": {
+        "percentage": 0.029,
+        "fixed": 30
+      },
+      "singapore": {
+        "percentage": 0.035,
+        "fixed": 0
+      },
+      "slovakia": {
+        "percentage": 0.015,
+        "fixed": 25
+      },
+      "slovenia": {
+        "percentage": 0.015,
+        "fixed": 25
+      },
+      "south_africa": {
+        "percentage": 0.029,
+        "fixed": 0
+      },
+      "spain": {
+        "percentage": 0.015,
+        "fixed": 25
+      },
+      "sweden": {
+        "percentage": 0.015,
+        "fixed": 180
+      },
+      "switzerland": {
+        "percentage": 0.015,
+        "fixed": 25
+      },
+      "thailand": {
+        "percentage": 0.035,
+        "fixed": 0
+      },
+      "united_arab_emirates": {
+        "percentage": 0.035,
+        "fixed": 0
+      },
+      "united_kingdom": {
+        "percentage": 0.015,
+        "fixed": 20
+      },
+      "united_states": {
+        "percentage": 0.029,
+        "fixed": 30
+      }
     }
-}
+  }

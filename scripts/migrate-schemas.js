@@ -35,50 +35,61 @@ async function migrateMerchantOtherInfo() {
 
     try {
         const Merchant = mongoModel.Merchant;
-        // Use find() without lean() to get Mongoose documents
-        const merchants = await Merchant.find({});
+        // Use lean() to get plain objects and avoid validation issues
+        const merchants = await Merchant.find({}).lean();
 
         let updated = 0;
         let skipped = 0;
+        let errors = 0;
 
         for (const merchant of merchants) {
-            let needsUpdate = false;
+            try {
+                let needsUpdate = false;
+                let otherInfoValue = null;
 
-            // Check if otherInfo doesn't exist or is null/undefined
-            if (!merchant.otherInfo) {
-                merchant.otherInfo = new Map();
-                needsUpdate = true;
-            } else {
-                // Check if it's a plain object (not a Mongoose Map)
-                // Mongoose Maps have a specific structure, plain objects don't
-                const isPlainObject = merchant.otherInfo.constructor === Object ||
-                                     (typeof merchant.otherInfo === 'object' &&
-                                      merchant.otherInfo !== null &&
-                                      !merchant.otherInfo.get &&
-                                      !merchant.otherInfo.set);
-
-                if (isPlainObject) {
-                    // Convert plain object to Map
-                    const otherInfoMap = new Map();
-                    Object.entries(merchant.otherInfo).forEach(([key, value]) => {
-                        otherInfoMap.set(key, value);
-                    });
-                    merchant.otherInfo = otherInfoMap;
+                // Check if otherInfo doesn't exist or is null/undefined
+                if (!merchant.otherInfo) {
+                    // Initialize as empty Map (Mongoose will handle conversion)
+                    otherInfoValue = {};
                     needsUpdate = true;
-                }
-            }
+                } else {
+                    // Check if it's a plain object (not a Mongoose Map)
+                    // When using lean(), Maps come back as objects
+                    const isPlainObject = merchant.otherInfo.constructor === Object ||
+                                         (typeof merchant.otherInfo === 'object' &&
+                                          merchant.otherInfo !== null &&
+                                          !merchant.otherInfo.get &&
+                                          !merchant.otherInfo.set);
 
-            if (needsUpdate) {
-                await merchant.save();
-                updated++;
-                info(`Migrated otherInfo for merchant: ${merchant.merchantId}`);
-            } else {
-                skipped++;
+                    if (isPlainObject) {
+                        // Keep as object - Mongoose will convert to Map on save
+                        otherInfoValue = merchant.otherInfo;
+                        needsUpdate = true;
+                    }
+                }
+
+                if (needsUpdate) {
+                    // Use updateOne to avoid full document validation
+                    // This only updates the otherInfo field
+                    await Merchant.updateOne(
+                        { _id: merchant._id },
+                        { $set: { otherInfo: otherInfoValue || {} } },
+                        { runValidators: false } // Skip validation to avoid required field errors
+                    );
+                    updated++;
+                    info(`Migrated otherInfo for merchant: ${merchant.merchantId}`);
+                } else {
+                    skipped++;
+                }
+            } catch (merchantErr) {
+                errors++;
+                error(`Error migrating merchant ${merchant.merchantId}: ${merchantErr.message}`);
+                // Continue with next merchant instead of failing entire migration
             }
         }
 
-        info(`Merchant otherInfo migration completed: ${updated} updated, ${skipped} skipped`);
-        return { updated, skipped };
+        info(`Merchant otherInfo migration completed: ${updated} updated, ${skipped} skipped, ${errors} errors`);
+        return { updated, skipped, errors };
     } catch (err) {
         error('Error migrating Merchant otherInfo:', err);
         throw err;
@@ -90,49 +101,61 @@ async function migrateSettingOtherInfo() {
 
     try {
         const Setting = mongoModel.Setting;
-        // Use find() without lean() to get Mongoose documents
-        const settings = await Setting.find({});
+        // Use lean() to get plain objects and avoid validation issues
+        const settings = await Setting.find({}).lean();
 
         let updated = 0;
         let skipped = 0;
+        let errors = 0;
 
         for (const setting of settings) {
-            let needsUpdate = false;
+            try {
+                let needsUpdate = false;
+                let otherInfoValue = null;
 
-            // Check if otherInfo doesn't exist or is null/undefined
-            if (!setting.otherInfo) {
-                setting.otherInfo = new Map();
-                needsUpdate = true;
-            } else {
-                // Check if it's a plain object (not a Mongoose Map)
-                const isPlainObject = setting.otherInfo.constructor === Object ||
-                                     (typeof setting.otherInfo === 'object' &&
-                                      setting.otherInfo !== null &&
-                                      !setting.otherInfo.get &&
-                                      !setting.otherInfo.set);
-
-                if (isPlainObject) {
-                    // Convert plain object to Map
-                    const otherInfoMap = new Map();
-                    Object.entries(setting.otherInfo).forEach(([key, value]) => {
-                        otherInfoMap.set(key, value);
-                    });
-                    setting.otherInfo = otherInfoMap;
+                // Check if otherInfo doesn't exist or is null/undefined
+                if (!setting.otherInfo) {
+                    // Initialize as empty object (Mongoose will handle conversion to Map)
+                    otherInfoValue = {};
                     needsUpdate = true;
-                }
-            }
+                } else {
+                    // Check if it's a plain object (not a Mongoose Map)
+                    // When using lean(), Maps come back as objects
+                    const isPlainObject = setting.otherInfo.constructor === Object ||
+                                         (typeof setting.otherInfo === 'object' &&
+                                          setting.otherInfo !== null &&
+                                          !setting.otherInfo.get &&
+                                          !setting.otherInfo.set);
 
-            if (needsUpdate) {
-                await setting.save();
-                updated++;
-                info(`Migrated otherInfo for setting: ${setting._id}`);
-            } else {
-                skipped++;
+                    if (isPlainObject) {
+                        // Keep as object - Mongoose will convert to Map on save
+                        otherInfoValue = setting.otherInfo;
+                        needsUpdate = true;
+                    }
+                }
+
+                if (needsUpdate) {
+                    // Use updateOne to avoid full document validation
+                    // This only updates the otherInfo field
+                    await Setting.updateOne(
+                        { _id: setting._id },
+                        { $set: { otherInfo: otherInfoValue || {} } },
+                        { runValidators: false } // Skip validation
+                    );
+                    updated++;
+                    info(`Migrated otherInfo for setting: ${setting._id}`);
+                } else {
+                    skipped++;
+                }
+            } catch (settingErr) {
+                errors++;
+                error(`Error migrating setting ${setting._id}: ${settingErr.message}`);
+                // Continue with next setting instead of failing entire migration
             }
         }
 
-        info(`Setting otherInfo migration completed: ${updated} updated, ${skipped} skipped`);
-        return { updated, skipped };
+        info(`Setting otherInfo migration completed: ${updated} updated, ${skipped} skipped, ${errors} errors`);
+        return { updated, skipped, errors };
     } catch (err) {
         error('Error migrating Setting otherInfo:', err);
         throw err;
