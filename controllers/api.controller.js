@@ -15,6 +15,9 @@ import * as NotificationType from '../model/notificationType.js'
 import {error} from '../model/logger.js'
 import * as merchantController from './merchant.controller.js'
 import * as report from './report.controller.js'
+import * as manifestController from './manifest.controller.js'
+import * as venueController from './venue.controller.js'
+import * as seatController from './seat.controller.js'
 
 
 /** USER STUFF BEGINGS */
@@ -640,4 +643,93 @@ export const requestExternalTicketSalesData = async (req, res, next) => {
     }
 }
 /** Ticket Ends  */
+
+/** Manifest Management */
+export const createManifest = async (req, res, next) => {
+	await manifestController.createManifest(req, res, next)
+}
+
+export const getManifests = async (req, res, next) => {
+	await manifestController.getManifests(req, res, next)
+}
+
+export const syncManifestToEventMerchant = async (req, res, next) => {
+	await manifestController.syncManifestToEventMerchant(req, res, next)
+}
+
+// Seat management endpoints
+export const getEventSeats = async (req, res, next) => {
+	await seatController.getEventSeats(req, res, next)
+}
+
+export const reserveSeats = async (req, res, next) => {
+	await seatController.reserveSeats(req, res, next)
+}
+
+export const confirmSeats = async (req, res, next) => {
+	await seatController.confirmSeats(req, res, next)
+}
+
+export const releaseSeats = async (req, res, next) => {
+	await seatController.releaseSeats(req, res, next)
+}
+
+export const getManifestById = async (req, res, next) => {
+	await manifestController.getManifestById(req, res, next)
+}
+
+export const getManifestsByVenue = async (req, res, next) => {
+	await manifestController.getManifestsByVenue(req, res, next)
+}
+
+export const updateManifest = async (req, res, next) => {
+	await manifestController.updateManifest(req, res, next)
+}
+
+export const deleteManifest = async (req, res, next) => {
+	await manifestController.deleteManifest(req, res, next)
+}
+
+export const addOrUpdatePlace = async (req, res, next) => {
+	await manifestController.addOrUpdatePlace(req, res, next)
+}
+
+export const deletePlace = async (req, res, next) => {
+	await manifestController.deletePlace(req, res, next)
+}
+
+export const generateManifest = async (req, res, next) => {
+	await manifestController.generateManifest(req, res, next)
+}
+/** Manifest Ends */
+
+/** Venue Management */
+export const createVenue = async (req, res, next) => {
+	await venueController.createVenue(req, res, next)
+}
+
+export const getVenues = async (req, res, next) => {
+	await venueController.getVenues(req, res, next)
+}
+
+export const getVenueById = async (req, res, next) => {
+	await venueController.getVenueById(req, res, next)
+}
+
+export const updateVenueById = async (req, res, next) => {
+	await venueController.updateVenueById(req, res, next)
+}
+
+export const deleteVenueById = async (req, res, next) => {
+	await venueController.deleteVenueById(req, res, next)
+}
+
+export const updateVenueSections = async (req, res, next) => {
+	await venueController.updateVenueSections(req, res, next)
+}
+
+export const getVenuesByMerchant = async (req, res, next) => {
+	await venueController.getVenuesByMerchant(req, res, next)
+}
+/** Venue Ends */
 

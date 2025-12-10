@@ -2,6 +2,7 @@ import express from 'express'
 import dotenv from 'dotenv'
 dotenv.config()
 import cors from 'cors'
+import compression from 'compression'
 import './model/dbConnect.js'
 import './util/uploadQueueProcess.js'
 import * as adminRole from './util/adminUser.js'
@@ -40,6 +41,7 @@ const corsOptions = {
   origin: [
     'http://localhost:3002',
     'http://localhost:3000',
+    'http://localhost:3003',
     'https://eventapp.finnep.fi',
     'https://finnep.fi',
     'https://cms.eventapp.finnep.fi',
@@ -85,6 +87,21 @@ app.use((req, res, next) => {
 
   next();
 });
+
+// Compression middleware - compresses all responses (gzip/deflate)
+// Works alongside Nginx compression in production (double safety net)
+app.use(compression({
+  level: 6, // Compression level (0-9). 6 is a good balance between speed and compression ratio
+  threshold: 10240, // Only compress responses larger than 10KB
+  filter: (req, res) => {
+    // Skip compression if client explicitly requests it
+    if (req.headers['x-no-compression']) {
+      return false
+    }
+    // Use default compression filter (checks Content-Type)
+    return compression.filter(req, res)
+  }
+}))
 
 //app.use(logger('dev'));
 

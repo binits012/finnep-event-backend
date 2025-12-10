@@ -35,6 +35,18 @@ router.route('/sendCareerApplication')
 router.route('/free-event-register')
     .post(front.handleFreeEventRegistration)
 
+/** public seat selection endpoints */
+router.route('/event/:eventId/seats')
+    .get(front.getEventSeatsPublic)
+router.route('/event/:eventId/seats/reserve')
+    .post(front.reserveSeatsPublic)
+router.route('/event/:eventId/seats/release')
+    .post(front.releaseSeatsPublic)
+router.route('/event/:eventId/seats/send-otp')
+    .post(front.sendSeatOTP)
+router.route('/event/:eventId/seats/verify-otp')
+    .post(front.verifySeatOTP)
+
 /** guest ticket access */
 router.route('/guest/check-email')
     .post(guest.checkEmail)

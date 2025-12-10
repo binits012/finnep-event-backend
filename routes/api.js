@@ -8,6 +8,7 @@ import * as express from 'express'
 const router = express.Router()
 import * as api  from '../controllers/api.controller.js'
 import * as report from '../controllers/report.controller.js'
+import { authenticate, requireAdmin } from '../middleware/auth.middleware.js'
 
 router.route('/auth/user/login').post(api.login)
 router.route('/auth/user/changePassword').post(api.changePassword)
@@ -107,5 +108,44 @@ router.route('/merchant/:id')
     .patch(api.updateMerchantById)
 router.route('/merchant/:id/otherInfo')
     .patch(api.addOrUpdateOtherInfo)
-    
+
+// Venue management for merchants (authenticated, no admin required)
+router.route('/merchant/:merchantId/venue')
+    .get(authenticate, api.getVenuesByMerchant)
+
+// Venue management (admin only)
+router.route('/venue')
+    .post(authenticate, requireAdmin, api.createVenue)
+    .get(authenticate, requireAdmin, api.getVenues)
+router.route('/venue/:id')
+    .get(authenticate, requireAdmin, api.getVenueById)
+    .put(authenticate, requireAdmin, api.updateVenueById)
+    .delete(authenticate, requireAdmin, api.deleteVenueById)
+router.route('/venue/:id/sections')
+    .put(authenticate, requireAdmin, api.updateVenueSections)
+
+// Manifest management (admin only)
+router.route('/manifest')
+    .post(authenticate, requireAdmin, api.createManifest)
+    .get(authenticate, requireAdmin, api.getManifests)
+router.post('/manifest/generate', authenticate, requireAdmin, api.generateManifest)
+router.route('/manifest/venue/:venueId')
+    .get(authenticate, requireAdmin, api.getManifestsByVenue)
+router.route('/manifest/:id')
+    .get(authenticate, requireAdmin, api.getManifestById)
+    .put(authenticate, requireAdmin, api.updateManifest)
+    .delete(authenticate, requireAdmin, api.deleteManifest)
+router.route('/manifest/:id/place')
+    .post(authenticate, requireAdmin, api.addOrUpdatePlace)
+router.route('/manifest/:id/place/:placeId')
+    .delete(authenticate, requireAdmin, api.deletePlace)
+router.post('/manifest/:manifestId/sync', authenticate, requireAdmin, api.syncManifestToEventMerchant)
+
+// Seat management endpoints (authenticated, no admin required for frontend access)
+router.route('/event/:eventId/seats')
+	.get(authenticate, api.getEventSeats)
+	.post(authenticate, api.reserveSeats)
+router.post('/event/:eventId/seats/confirm', authenticate, api.confirmSeats)
+router.delete('/event/:eventId/seats/release', authenticate, api.releaseSeats)
+
 export default router

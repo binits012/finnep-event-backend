@@ -9,6 +9,7 @@ import redisClient from '../model/redisConnect.js'
 import { v4 as uuidv4 } from 'uuid'
 import * as OutboxMessage from '../model/outboxMessage.js'
 import { messageConsumer } from '../rabbitMQ/services/messageConsumer.js'
+import { manifestLockService } from '../src/services/manifestLockService.js'
 
 export const createEvent = async (req, res, next) =>{
     const token = req.headers.authorization
@@ -358,6 +359,41 @@ export const updateEventStatusById = async (req,res,next) =>{
             }
             const updatedEvent =  await Event.updateEventById(id,{active:active, featured:featured})
             try {
+                // 1. Lock manifest if event is being activated and has seat selection
+                if (active === true && updatedEvent.venue && updatedEvent.venue?.venueId) {
+                    try {
+                        // Check if manifest is already locked
+                        const isLocked = await manifestLockService.isManifestLocked(id);
+
+                        if (!isLocked) {
+                            // Lock manifest for event
+                            const venueId = updatedEvent.venue.venueId;
+                            const pricingConfig = updatedEvent.venue.pricing || {};
+
+                            info(`Locking manifest for event ${id}, venue ${venueId}`);
+                            const lockResult = await manifestLockService.lockManifestForEvent(
+                                id,
+                                venueId,
+                                pricingConfig
+                            );
+
+                            // Update event with locked manifest reference
+                            await Event.updateEventById(id, {
+                                'venue.lockedManifestId': lockResult.manifestId,
+                                'venue.manifestS3Key': lockResult.s3Key
+                            });
+
+                            info(`Manifest locked for event ${id}: ${lockResult.manifestId}`);
+                        } else {
+                            info(`Manifest already locked for event ${id}`);
+                        }
+                    } catch (lockError) {
+                        error(`Error locking manifest for event ${id}:`, lockError);
+                        // Continue with event update even if manifest locking fails
+                        // The event can still be activated, but seat selection won't work
+                    }
+                }
+
                 // 2. Create outbox message entry
                 const correlationId = uuidv4()
                 const messageId = uuidv4()

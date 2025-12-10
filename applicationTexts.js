@@ -29,6 +29,7 @@ export const CONTACT_DELETE_FAILED = 'User contact delete failed.';
 
 //
 export const BAD_REQUEST = 'Bad Request, check the payload.';
+export const INVALID_DATA = 'Invalid data provided.';
 export const INVALID_ID = 'Invalid Id.';
 
 // Event

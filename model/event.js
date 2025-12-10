@@ -38,6 +38,17 @@ export class Event {
     }
     async saveToDB() {
         try {
+            // Validate pricingModel when hasSeatSelection is true
+            if (this.venue && this.venue.hasSeatSelection === true) {
+                if (!this.venue.pricingModel || (this.venue.pricingModel !== 'ticket_info' && this.venue.pricingModel !== 'pricing_configuration')) {
+                    throw new Error('pricingModel must be set to either "ticket_info" or "pricing_configuration" when hasSeatSelection is true');
+                }
+            } else if (this.venue && this.venue.hasSeatSelection === false) {
+                // Default to 'ticket_info' when hasSeatSelection is false
+                if (!this.venue.pricingModel) {
+                    this.venue.pricingModel = 'ticket_info';
+                }
+            }
 
             const event = new model.Event({
                 eventTitle: this.eventTitle,

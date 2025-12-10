@@ -250,7 +250,7 @@ const ticketInfoSchema = new mongoose.Schema({
 	},
 	price: {
 	  type: Number,
-	  required: true, // Price is required
+	  required: true, // Price is required (basePrice)
 	  min: [0, 'Price cannot be negative'] // Allow 0 for free events
 	},
 	quantity: {
@@ -267,6 +267,28 @@ const ticketInfoSchema = new mongoose.Schema({
 		default: 0,
 		min: [0, 'Service fee cannot be negative']
 	},
+	// Entertainment tax (percentage on basePrice) - e.g., 14% in Finland
+	entertainmentTax:{
+		type: Number,
+		default: 0,
+		min: [0, 'Entertainment tax cannot be negative'],
+		max: [100, 'Entertainment tax cannot exceed 100%']
+	},
+	// Service tax/VAT (percentage on serviceFee) - e.g., 25.5% in Finland
+	serviceTax:{
+		type: Number,
+		default: 0,
+		min: [0, 'Service tax cannot be negative'],
+		max: [100, 'Service tax cannot exceed 100%']
+	},
+	// Order fee (fixed amount per transaction)
+	orderFee:{
+		type: Number,
+		default: 0,
+		min: [0, 'Order fee cannot be negative']
+	},
+	// Legacy VAT field - kept for backward compatibility
+	// Note: serviceTax should be used instead for seat-based events
 	vat:{
 		type: Number,
 		default: 0,
@@ -327,7 +349,21 @@ const eventSchema = new mongoose.Schema({
 	merchant:{ type: mongoose.Schema.Types.ObjectId, ref: 'Merchant', required:true },
 	externalEventId: { type: String, required: true, index: true },
 	venue:{
-		type: mongoose.Schema.Types.Mixed
+		type: mongoose.Schema.Types.Mixed,
+		// Structure when hasSeatSelection is true:
+		// {
+		//   venueId: String,           // MongoDB venue ID
+		//   externalVenueId: String,   // External venue ID
+		//   hasSeatSelection: Boolean, // Whether seat selection is enabled
+		//   pricingModel: String,       // Pricing model: 'ticket_info' or 'pricing_configuration' (required when hasSeatSelection is true)
+		//   lockedManifestId: ObjectId, // Reference to locked manifest
+		//   manifestS3Key: String,      // S3 key for locked manifest
+		//   pricing: Map<Number>       // Section/zone pricing config
+		// }
+		// Structure when hasSeatSelection is false:
+		// {
+		//   pricingModel: String        // Defaults to 'ticket_info' (optional)
+		// }
 	},
 	// Featured and positioning system
 	featured: {
@@ -362,11 +398,38 @@ eventSchema.pre('findOneAndUpdate', function(next) {
 		return next(new Error('Duplicate entries found in ticketInfoArray array'));
 	  }
 	}
+
+	// Validate pricingModel when hasSeatSelection is being set to true
+	if (update && update.$set && update.$set['venue.hasSeatSelection'] === true) {
+		const pricingModel = update.$set['venue.pricingModel'];
+		if (!pricingModel || (pricingModel !== 'ticket_info' && pricingModel !== 'pricing_configuration')) {
+			return next(new Error('pricingModel must be set to either "ticket_info" or "pricing_configuration" when hasSeatSelection is true'));
+		}
+	} else if (update && update.$set && update.$set['venue.hasSeatSelection'] === false) {
+		// Default to 'ticket_info' when hasSeatSelection is set to false
+		if (!update.$set['venue.pricingModel']) {
+			update.$set['venue.pricingModel'] = 'ticket_info';
+		}
+	}
+
 	next()
 })
 
 eventSchema.pre('save', function(next){
 	this.eventDate =  moment.utc(this.eventDate)
+
+	// Validate pricingModel when hasSeatSelection is true
+	if (this.venue && this.venue.hasSeatSelection === true) {
+		if (!this.venue.pricingModel || (this.venue.pricingModel !== 'ticket_info' && this.venue.pricingModel !== 'pricing_configuration')) {
+			return next(new Error('pricingModel must be set to either "ticket_info" or "pricing_configuration" when hasSeatSelection is true'));
+		}
+	} else if (this.venue && this.venue.hasSeatSelection === false) {
+		// Default to 'ticket_info' when hasSeatSelection is false
+		if (!this.venue.pricingModel) {
+			this.venue.pricingModel = 'ticket_info';
+		}
+	}
+
 	next()
 })
 
@@ -633,6 +696,439 @@ const externalTicketSalesSchema = new mongoose.Schema({
 externalTicketSalesSchema.index({ eventId: 1, source: 1 });
 externalTicketSalesSchema.index({ externalEventId: 1, source: 1 });
 
+// Venue Schema
+const venueSchema = new mongoose.Schema({
+	name: { type: String, required: true },
+	venueType: {
+		type: String,
+		enum: ['stadium', 'theater', 'arena', 'general', 'custom'],
+		required: true
+	},
+	merchant: { type: mongoose.Schema.Types.ObjectId, ref: 'Merchant' }, // Optional - venues can exist without merchant association
+	externalVenueId: { type: String, index: true },
+	dimensions: {
+		width: { type: Number },
+		height: { type: Number },
+		unit: { type: String, default: 'meters' }
+	},
+	// Central feature (rink, stage, field, etc.)
+	centralFeature: {
+		type: {
+			type: String,
+			enum: ['none', 'stage', 'rink', 'field', 'court', 'custom']
+		},
+		name: { type: String }, // e.g., "Ice Rink", "Main Stage"
+		shape: {
+			type: String,
+			enum: ['rectangle', 'circle', 'ellipse', 'polygon'],
+			default: 'rectangle'
+		},
+		// Rectangle bounds
+		x: { type: Number },
+		y: { type: Number },
+		width: { type: Number },
+		height: { type: Number },
+		// Circle/Ellipse
+		centerX: { type: Number },
+		centerY: { type: Number },
+		radiusX: { type: Number },
+		radiusY: { type: Number },
+		// Polygon points
+		points: [{ x: { type: Number }, y: { type: Number } }],
+		color: { type: String, default: '#E3F2FD' },
+		strokeColor: { type: String, default: '#1976D2' },
+		// Image support for rink/field visualization
+		imageUrl: { type: String }, // URL or base64 data URL for the central feature image
+		imageWidth: { type: Number }, // Width to display the image (optional, uses shape dimensions if not set)
+		imageHeight: { type: Number }, // Height to display the image (optional, uses shape dimensions if not set)
+		imageOpacity: { type: Number, default: 1.0 }, // Opacity of the image overlay (0-1)
+		// Direction indicator label (shown as arrow on canvas)
+		directionLabel: { type: String, default: 'Kenttä' } // Label for direction arrow (e.g., "Kenttä", "Field", "Stage")
+	},
+	// Background SVG map for visual reference (optional)
+	backgroundSvg: {
+		svgContent: { type: String }, // Raw SVG XML content (sanitized)
+		sourceUrl: { type: String }, // Original URL or filename for reference
+		sourceType: {
+			type: String,
+			enum: ['url', 'upload'],
+			default: 'url'
+		},
+		// Display settings
+		opacity: {
+			type: Number,
+			default: 0.5,
+			min: 0,
+			max: 1
+		},
+		scale: {
+			type: Number,
+			default: 1.0,
+			min: 0.1,
+			max: 5
+		},
+		translateX: { type: Number, default: 0 }, // Horizontal offset in pixels
+		translateY: { type: Number, default: 0 }, // Vertical offset in pixels
+		rotation: { type: Number, default: 0 }, // Rotation in degrees (0-360)
+		isVisible: { type: Boolean, default: true }, // Toggle visibility
+		uploadedAt: { type: Date }, // Timestamp when SVG was added
+		// Seat display configuration (for consistent rendering across CMS and customer app)
+		displayConfig: {
+			dotSize: { type: Number, default: 8 }, // Seat dot radius in pixels
+			rowGap: { type: Number, default: 10 }, // Vertical spacing between rows
+			seatGap: { type: Number, default: 12 } // Horizontal spacing between seats
+		}
+	},
+	// Legacy stage support (for backward compatibility)
+	stage: {
+		x: { type: Number },
+		y: { type: Number },
+		width: { type: Number },
+		height: { type: Number }
+	},
+	sections: [{
+		id: { type: String, required: true },
+		name: { type: String, required: true },
+
+		// Section type
+		type: {
+			type: String,
+			enum: ['seating', 'standing', 'box', 'lounge', 'bar', 'accessible', 'vip', 'premium', 'general', 'custom'],
+			default: 'seating'
+		},
+
+		// Ticket sales availability
+		isTicketed: {
+			type: Boolean,
+			default: true // Most sections are for ticket sales
+		},
+		// Optional: reason why section is not ticketed (e.g., 'entrance', 'exit', 'concession', 'restroom', 'staff_area')
+		nonTicketedReason: { type: String },
+
+		// Shape definition - supports both rectangle and polygon
+		shape: {
+			type: String,
+			enum: ['rectangle', 'polygon'],
+			default: 'rectangle'
+		},
+
+		// Rectangle bounds (legacy support)
+		bounds: {
+			x1: { type: Number },
+			y1: { type: Number },
+			x2: { type: Number },
+			y2: { type: Number }
+		},
+
+		// Polygon points for irregular shapes
+		polygon: [{ x: { type: Number }, y: { type: Number } }],
+
+		// Visual properties
+		color: { type: String },
+		strokeColor: { type: String },
+		opacity: { type: Number, default: 0.7 },
+
+		// Capacity and configuration
+		capacity: { type: Number }, // Expected capacity for this section
+		rows: { type: Number }, // Number of rows (if applicable)
+		seatsPerRow: { type: Number }, // Seats per row (if uniform - use rowConfig for variable rows)
+
+		// Seating presentation style - how seats are arranged visually
+		presentationStyle: {
+			type: String,
+			enum: ['flat', 'cone', 'left_fixed', 'right_fixed'],
+			default: 'flat'
+		},
+
+		// Ground/field direction - which way the seats face (towards the field/stage)
+		// Optional: null means no direction indicator will be shown
+		groundDirection: {
+			type: String,
+			enum: ['up', 'down', 'left', 'right', null],
+			default: null // Optional - no arrow shown by default
+		},
+
+		// Seat numbering direction - which direction seat numbers increase
+		seatNumberingDirection: {
+			type: String,
+			enum: ['left-to-right', 'right-to-left'],
+			default: 'left-to-right' // Default: seat 1 is on the left, numbers increase to the right
+		},
+
+		// Show row labels on the seat map
+		showRowLabels: {
+			type: Boolean,
+			default: true // Default: show row labels
+		},
+
+		// Visual spacing and sizing configuration (optional, with defaults)
+		spacingConfig: {
+			topPadding: { type: Number, default: 40 }, // Top padding in pixels (default: 40px)
+			seatSpacingMultiplier: { type: Number, default: 0.65 }, // Seat spacing multiplier (0.65 = 35% reduction, default: 0.65)
+			rowSpacingMultiplier: { type: Number, default: 0.75 }, // Row spacing multiplier (0.75 = 25% reduction, default: 0.75)
+			curveDepthMultiplier: { type: Number, default: 0.7 }, // Curve depth as percentage of row spacing (default: 70%)
+			seatRadius: { type: Number, default: 7 }, // Seat dot radius in pixels (default: 7px)
+			seatSpacingVisual: { type: Number, default: 1.0 }, // Visual spacing between seats (frontend multiplier, 1.0 = no scaling)
+			rowSpacingVisual: { type: Number, default: 1.0 }, // Visual spacing between rows (frontend multiplier, 1.0 = no scaling)
+			topMargin: { type: Number, default: 30 }, // Top margin in pixels for frontend rendering (default: 30px)
+			rotationAngle: { type: Number, default: 0 }, // Seat rotation angle in degrees for angled sections (default: 0°)
+			curveDirection: { type: String, default: 'frown' }, // Curve direction: 'frown' (edges up) or 'smile' (edges down)
+			topMarginY: { type: Number }, // Top margin Y for row positioning
+			bottomMarginY: { type: Number } // Bottom margin Y for row positioning
+		},
+
+		// Advanced row configuration - allows different seat counts per row
+		rowConfig: [{
+			rowNumber: { type: Number }, // Row number (1-based)
+			rowLabel: { type: String }, // Optional custom row label (e.g., "A", "1", "Front")
+			seatCount: { type: Number }, // Number of seats in this row
+			startSeatNumber: { type: Number, default: 1 }, // Starting seat number for this row
+			aisleLeft: { type: Number, default: 0 }, // Number of seats to skip on the left (aisle)
+			aisleRight: { type: Number, default: 0 }, // Number of seats to skip on the right (aisle)
+			offsetX: { type: Number, default: 0 }, // Horizontal offset for this row (for curved/angled rows)
+			offsetY: { type: Number, default: 0 }, // Vertical offset adjustment for this row
+			blockedSeats: [{ type: Number }] // Array of seat positions to hide/block (e.g., [5, 6, 7] to hide seats 5-7 in the grid)
+		}],
+
+		// Pricing and metadata
+		priceTier: { type: String },
+		basePrice: { type: Number }, // Base price for this section (in cents)
+
+		// Accessibility and features
+		accessible: { type: Boolean, default: false },
+		features: [{ type: String }], // e.g., ['wheelchair', 'companion', 'elevator_access']
+
+		// Additional metadata
+		metadata: { type: mongoose.Schema.Types.Mixed },
+
+		// Display order
+		displayOrder: { type: Number, default: 0 },
+
+		// Obstructions/Blocked Areas within this section (entrances, pillars, etc.)
+		obstructions: [{
+			id: { type: String, required: true },
+			name: { type: String }, // e.g., "Entrance", "Pillar", "Aisle Block"
+			type: { type: String, enum: ['entrance', 'pillar', 'aisle', 'obstruction', 'custom'], default: 'obstruction' },
+			shape: { type: String, enum: ['rectangle', 'polygon'], default: 'rectangle' },
+			// Rectangle bounds
+			bounds: {
+				x1: { type: Number },
+				y1: { type: Number },
+				x2: { type: Number },
+				y2: { type: Number }
+			},
+			// Polygon points for irregular obstructions
+			polygon: [{ x: { type: Number }, y: { type: Number } }],
+			color: { type: String, default: '#CCCCCC' }, // Grey color for obstructions
+			strokeColor: { type: String, default: '#999999' }
+		}]
+	}],
+	aisles: [{
+		x1: { type: Number },
+		y1: { type: Number },
+		x2: { type: Number },
+		y2: { type: Number },
+		width: { type: Number }
+	}],
+	layoutConfig: {
+		seatSpacing: { type: Number, default: 0.5 },
+		rowSpacing: { type: Number, default: 0.8 },
+		sectionSpacing: { type: Number, default: 1.0 }
+	},
+	createdAt: { type: Date, default: Date.now },
+	updatedAt: { type: Date, default: Date.now }
+});
+venueSchema.index({ merchant: 1 });
+venueSchema.index({ externalVenueId: 1 });
+
+// Manifest Schema (Core - Supports Micro-Level Pricing)
+const manifestSchema = new mongoose.Schema({
+	venue: { type: mongoose.Schema.Types.ObjectId, ref: 'Venue', required: true },
+	name: { type: String }, // Optional manifest name/version
+	version: { type: Number, default: 1 }, // Version tracking
+	updateHash: { type: String }, // Hash for change detection
+	updateTime: { type: Number }, // Timestamp in milliseconds
+
+	// Places/Seats with micro-level pricing
+	places: [{
+		placeId: { type: String, required: true, index: true }, // Unique identifier
+		x: { type: Number }, // X coordinate (if available)
+		y: { type: Number }, // Y coordinate (if available)
+		row: { type: String }, // Row identifier
+		seat: { type: String }, // Seat number
+		section: { type: String, index: true }, // Section name
+		zone: { type: String, index: true }, // Pricing zone
+
+		// Micro-level pricing structure
+		pricing: {
+			basePrice: { type: Number, required: true }, // Base price in cents
+			currency: { type: String, default: 'EUR' },
+
+			// Dynamic pricing modifiers
+			modifiers: [{
+				type: {
+					type: String,
+					enum: ['percentage', 'fixed', 'multiplier', 'custom']
+				},
+				value: { type: Number }, // Modifier value
+				reason: { type: String }, // e.g., 'premium_seat', 'vip', 'early_bird'
+				validFrom: { type: Date }, // Time-based pricing start
+				validUntil: { type: Date }, // Time-based pricing end
+				conditions: { type: mongoose.Schema.Types.Mixed } // Custom conditions
+			}],
+
+			// Final calculated price (cached for performance)
+			currentPrice: { type: Number }, // Current effective price
+			priceUpdatedAt: { type: Date }, // When price was last calculated
+
+			// Price history (for analytics)
+			priceHistory: [{
+				price: { type: Number },
+				timestamp: { type: Date },
+				reason: { type: String }
+			}]
+		},
+
+		// Availability and status
+		available: { type: Boolean, default: true },
+		status: {
+			type: String,
+			enum: ['available', 'reserved', 'sold', 'blocked', 'unavailable'],
+			default: 'available'
+		},
+		reservedUntil: { type: Date }, // Reservation expiry
+
+		// Categories and tags for flexible grouping
+		categories: [{ type: String }], // e.g., ['vip', 'premium', 'accessible']
+		tags: [{ type: String }], // Flexible tagging system
+
+		// Metadata for extensibility
+		metadata: { type: mongoose.Schema.Types.Mixed }
+	}],
+
+	// Pricing strategies and rules
+	pricingStrategies: [{
+		name: { type: String },
+		type: {
+			type: String,
+			enum: ['static', 'dynamic', 'time_based', 'demand_based', 'zone_based', 'custom']
+		},
+		rules: { type: mongoose.Schema.Types.Mixed }, // Flexible rule structure
+		appliesTo: {
+			type: { type: String, enum: ['all', 'section', 'zone', 'category', 'tags', 'custom'] },
+			values: [{ type: String }] // Section names, zone IDs, category names, etc.
+		},
+		active: { type: Boolean, default: true },
+		validFrom: { type: Date },
+		validUntil: { type: Date }
+	}],
+
+	// Coordinate source and layout info
+	coordinateSource: {
+		type: String,
+		enum: ['api', 'pattern_inference', 'manual', 'imported']
+	},
+	layoutAlgorithm: {
+		type: String,
+		enum: ['grid', 'curved', 'general', 'custom', 'manual']
+	},
+
+	// Encoded format fields (Ticketmaster format for seat-based events)
+	eventId: { type: String, index: true }, // Link to event
+	isLocked: { type: Boolean, default: false }, // Whether manifest is locked for an event
+	encodedFormat: { type: Boolean, default: false }, // Ticketmaster format flag
+	placeIds: [{ type: String }], // Compressed placeIds array (for availability + display)
+	partitions: [{ type: Number }], // Price change boundaries (indices in placeIds array)
+	pricingZones: [{
+		start: { type: Number }, // Start index in placeIds array
+		end: { type: Number }, // End index in placeIds array
+		price: { type: Number }, // Price in cents
+		currency: { type: String, default: 'EUR' },
+		section: { type: String } // Section name
+	}],
+	availability: {
+		sold: [{ type: String }] // Array of sold placeIds
+	},
+	// Section metadata for display (from venue)
+	sections: [{
+		id: { type: String },
+		name: { type: String },
+		color: { type: String },
+		bounds: { type: mongoose.Schema.Types.Mixed }, // For section overlay
+		polygon: [{ x: { type: Number }, y: { type: Number } }]
+	}],
+	backgroundSvg: { type: String }, // SVG for background (from venue)
+
+	createdAt: { type: Date, default: Date.now },
+	updatedAt: { type: Date, default: Date.now }
+});
+
+// Indexes for performance
+manifestSchema.index({ venue: 1 });
+manifestSchema.index({ 'places.placeId': 1 });
+manifestSchema.index({ 'places.section': 1 });
+manifestSchema.index({ 'places.zone': 1 });
+manifestSchema.index({ 'places.status': 1 });
+manifestSchema.index({ 'places.pricing.currentPrice': 1 });
+manifestSchema.index({ updateHash: 1 });
+manifestSchema.index({ eventId: 1 }); // For event-based manifest lookup
+manifestSchema.index({ isLocked: 1, encodedFormat: 1 }); // For locked manifest queries
+
+// Event Manifest Schema (Encoded Ticketmaster format for events)
+// This is separate from the venue Manifest collection to avoid corrupting venue configuration
+// Venue manifests stay in the Manifest collection and are never modified
+const eventManifestSchema = new mongoose.Schema({
+	eventId: { type: String, required: true, index: true }, // Internal MongoDB event ID (_id as string) for direct association with Event collection
+	venue: { type: mongoose.Schema.Types.ObjectId, ref: 'Venue', required: true }, // Reference to venue (not a copy)
+
+	// Ticketmaster format fields only
+	updateHash: { type: String, required: true }, // MD5 hash of sorted placeIds
+	updateTime: { type: Number, required: true }, // Timestamp in milliseconds
+	placeIds: [{ type: String, required: true }], // Array of place IDs
+	partitions: [{ type: Number }], // Price change boundaries (indices in placeIds array)
+
+	// Availability tracking (for sold seats)
+	availability: {
+		sold: [{ type: String }] // Array of sold placeIds
+	},
+
+	// Pricing zones (for internal price lookup - not part of Ticketmaster format)
+	// This is needed to look up prices by placeId, but is not included in Ticketmaster-format output
+	pricingZones: [{
+		start: { type: Number }, // Start index in placeIds array
+		end: { type: Number }, // End index in placeIds array
+		price: { type: Number }, // Price in cents
+		currency: { type: String, default: 'EUR' },
+		section: { type: String } // Section name
+	}],
+
+	// Pricing configuration reference (compact, referenced by encoded placeIds)
+	pricingConfig: {
+		currency: { type: String, default: 'EUR' },
+		orderFee: { type: Number, default: 0 }, // Per-order fee (same for all seats)
+		orderTax: { type: Number, default: 0 }, // Order fee tax percentage
+		tiers: [{
+			id: { type: String, required: true }, // Tier identifier (encoded in placeId)
+			basePrice: { type: Number, required: true },
+			tax: { type: Number, default: 0 }, // VAT/Tax percentage
+			serviceFee: { type: Number, default: 0 },
+			serviceTax: { type: Number, default: 0 } // Service tax percentage
+		}]
+	},
+
+	// Metadata
+	s3Key: { type: String }, // S3 key for the enriched manifest (for reference)
+	pricingConfigurationId: { type: String }, // Reference to pricing configuration
+
+	createdAt: { type: Date, default: Date.now },
+	updatedAt: { type: Date, default: Date.now }
+});
+
+// Indexes for performance
+eventManifestSchema.index({ eventId: 1 });
+eventManifestSchema.index({ venue: 1 });
+eventManifestSchema.index({ updateHash: 1 });
+
 // 3. Apply the audit plugin to all schemas BEFORE creating any models
 const schemas = [
 	inboxMessageSchema,
@@ -640,7 +1136,8 @@ const schemas = [
 	merchantSchema,
 	orderTicketSchema,paymentSchema,settingSchema,ticketSchema,messageSchema,photoSchema,photoTypeSchema,
 	notificationSchema,notificationTypeSchema,tokenSchema,eventSchema,timeBasedPriceSchema,eventTypeSchema,
-	socialMediaSchema,contactSchema,cryptoSchema,roleSchema, userSchema, ticketAnalyticsSchema, externalTicketSalesSchema
+	socialMediaSchema,contactSchema,cryptoSchema,roleSchema, userSchema, ticketAnalyticsSchema, externalTicketSalesSchema,
+	venueSchema, manifestSchema, eventManifestSchema
 ];
 
 schemas.forEach(schema => {
@@ -668,6 +1165,9 @@ export const EventType = mongoose.model('EventType', eventTypeSchema)
 export const SocialMedia = mongoose.model('SocialMedia', socialMediaSchema )
 export const Contact = mongoose.model('Contact', contactSchema)
 export const Crypto = mongoose.model('Crypto', cryptoSchema)
+export const Venue = mongoose.model('Venue', venueSchema)
+export const Manifest = mongoose.model('Manifest', manifestSchema)
+export const EventManifest = mongoose.model('EventManifest', eventManifestSchema)
 export const Role = mongoose.model('Role', roleSchema)
 export const User = mongoose.model('User', userSchema)
 export const Merchant = mongoose.model('Merchant', merchantSchema);

@@ -1,7 +1,9 @@
 import { inboxModel } from '../../model/inboxMessage.js';
 import * as Event from '../../model/event.js';
 import { getMerchantByMerchantId } from '../../model/merchant.js';
-import { error } from '../../model/logger.js';
+import { error, info } from '../../model/logger.js';
+import { pricingManifestSyncService } from '../../src/services/pricingManifestSyncService.js';
+import { sendPricingSyncErrorEmail } from '../../util/sendMail.js';
 
 export const handleEventMessage = async (message) => {
     console.log('Processing event message:', message);
@@ -100,7 +102,8 @@ async function handleEventCreated(message) {
     const country = message?.country;
     const venueInfo = message?.venue_info;
     const externalEventId = message?.id;
-    const venue = message?.venue;
+    // venue from message should contain: venueId, externalVenueId, hasSeatSelection, etc.
+    const venue = message?.venue || {};
 
     await Event.createEvent(
         eventTitle, eventDescription, eventDate, occupancy,
@@ -155,7 +158,15 @@ async function handleEventUpdated(message) {
     const externalEventId = message?.id;
     const existingEvent = await Event.getEventByMerchantAndExternalId(externalMerchantId,
         externalEventId);
-    const venue = existingEvent?.venue || message?.venue;
+
+    // Merge venue data from message with existing venue
+    // message.venue should contain: venueId, externalVenueId, hasSeatSelection, etc.
+    const venue = message?.venue
+        ? {
+            ...(existingEvent?.venue || {}), // Preserve existing venue data
+            ...message.venue, // Override with message data (includes hasSeatSelection, venueId, etc.)
+        }
+        : existingEvent?.venue; // Fallback to existing venue if message doesn't have venue
 
     // If event doesn't exist, create it instead of throwing error (upsert behavior)
     // This handles cases where update message arrives before create message
@@ -177,6 +188,64 @@ async function handleEventUpdated(message) {
             city, country, venueInfo, venue}
         );
     }
+
+    // Handle pricing manifest sync if needed
+    // Check if pricing configuration needs to be synced and event has seat selection
+    const pricingConfiguration = message?.pricingConfiguration;
+    const hasSeatSelection = message?.hasSeatSelection || existingEvent?.hasSeatSelection;
+    const pricingModel = venue?.pricingModel || existingEvent?.venue?.pricingModel;
+
+    // Only sync pricing manifest if:
+    // 1. hasSeatSelection is true
+    // 2. pricingModel is 'pricing_configuration' (not 'ticket_info')
+    // 3. pricingConfiguration.needsSync is true
+    if (pricingConfiguration?.needsSync === true && hasSeatSelection === true && pricingModel === 'pricing_configuration') {
+        try {
+            info(`[handleEventUpdated] Starting pricing manifest sync for event ${externalEventId}`, {
+                eventId: existingEvent?._id,
+                pricingConfigurationId: pricingConfiguration.pricingConfigurationId,
+                venueId: pricingConfiguration.venueId,
+                s3Key: pricingConfiguration.s3Key
+            });
+
+            await pricingManifestSyncService.syncPricingManifest(existingEvent._id, externalEventId, {
+                s3Key: pricingConfiguration.s3Key,
+                venueId: pricingConfiguration.venueId,
+                pricingConfigurationId: pricingConfiguration.pricingConfigurationId
+            });
+
+            info(`[handleEventUpdated] Pricing manifest sync completed successfully for event ${externalEventId}`);
+        } catch (syncError) {
+            // Log error and send email notification, but don't fail the event update
+            error(`[handleEventUpdated] Error syncing pricing manifest for event ${externalEventId}:`, {
+                error: syncError.message,
+                stack: syncError.stack,
+                eventId: existingEvent?._id,
+                pricingConfiguration
+            });
+
+            // Send email notification to merchant
+            try {
+                const merchantEmail = process.env.REPORTING_EMAIL || 'binits09@gmail.com';
+                const eventTitle = message?.title || existingEvent?.eventTitle || 'Unknown Event';
+                const errorMessage = syncError?.message || String(syncError) || 'Unknown error';
+
+                await sendPricingSyncErrorEmail(
+                    merchantEmail,
+                    externalEventId,
+                    eventTitle,
+                    errorMessage
+                );
+            } catch (emailError) {
+                error(`[handleEventUpdated] Failed to send pricing sync error email:`, {
+                    error: emailError?.message || String(emailError),
+                    stack: emailError?.stack,
+                    eventId: externalEventId
+                });
+            }
+        }
+    }
+
     await inboxModel.markProcessed(message?.metaData?.causationId);
 }
 
