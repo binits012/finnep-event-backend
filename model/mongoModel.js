@@ -515,7 +515,7 @@ const ticketSchema = new mongoose.Schema({
 	validUntil:{type:Date},
 	merchant:{type: mongoose.Schema.Types.ObjectId, ref: 'Merchant', required:true},
 	externalMerchantId:{type:String, required:true},
-	otp:{type:String, required:true}
+	otp:{type:String, required:true, unique:true}
 })
 
 
@@ -706,6 +706,26 @@ const venueSchema = new mongoose.Schema({
 	},
 	merchant: { type: mongoose.Schema.Types.ObjectId, ref: 'Merchant' }, // Optional - venues can exist without merchant association
 	externalVenueId: { type: String, index: true },
+	// Location/Address properties
+	address: { type: String }, // Street address
+	city: { type: String }, // City name
+	state: { type: String }, // State/Province/Region
+	country: { type: String, index: true }, // Country name
+	postalCode: { type: String }, // Postal/ZIP code
+	// Geographic coordinates
+	coordinates: {
+		latitude: { type: Number }, // Latitude in decimal degrees
+		longitude: { type: Number }, // Longitude in decimal degrees
+		geocode: { type: String } // Geocoded address string (from Nominatim or similar)
+	},
+	// Timezone for the venue location
+	timezone: { type: String }, // IANA timezone (e.g., 'Europe/Helsinki', 'America/New_York')
+	// Contact information
+	phone: { type: String }, // Venue phone number
+	email: { type: String }, // Venue email
+	website: { type: String }, // Venue website URL
+	// Description
+	description: { type: String }, // Venue description
 	dimensions: {
 		width: { type: Number },
 		height: { type: Number },
@@ -940,6 +960,8 @@ const venueSchema = new mongoose.Schema({
 });
 venueSchema.index({ merchant: 1 });
 venueSchema.index({ externalVenueId: 1 });
+venueSchema.index({ country: 1 }); // Index for country-based filtering
+venueSchema.index({ city: 1, country: 1 }); // Compound index for city/country queries
 
 // Manifest Schema (Core - Supports Micro-Level Pricing)
 const manifestSchema = new mongoose.Schema({

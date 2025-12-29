@@ -18,7 +18,7 @@ import * as report from './report.controller.js'
 import * as manifestController from './manifest.controller.js'
 import * as venueController from './venue.controller.js'
 import * as seatController from './seat.controller.js'
-
+import * as systemResources from '../util/systemResources.js'
 
 /** USER STUFF BEGINGS */
 export const login = async (req, res, next) => {
@@ -732,4 +732,43 @@ export const getVenuesByMerchant = async (req, res, next) => {
 	await venueController.getVenuesByMerchant(req, res, next)
 }
 /** Venue Ends */
+
+/** Queue Service Configuration */
+export const getEmailConfig = async (req, res, next) => {
+	try {
+		const port = parseInt(process.env.EMAIL_PORT) || 587;
+
+		// Only expose necessary email configuration for queue service alerts
+		const emailConfig = {
+			host: process.env.EMAIL_SERVER,
+			port: port,
+			secure: port === 465, // SSL for port 465, STARTTLS for others
+			auth: {
+				user: process.env.EMAIL_USERNAME,
+				pass: process.env.EMAIL_PASSWORD
+			},
+			from: process.env.EMAIL_USERNAME,
+			sendMail: process.env.SEND_MAIL === 'true' || process.env.SEND_MAIL === true,
+			companyEmail: process.env.COMPANY_EMAIL || 'contact@finnep.fi'
+		};
+
+		res.status(consts.HTTP_STATUS_OK).json({
+			success: true,
+			emailConfig
+		});
+	} catch (error) {
+		error('Error getting email configuration:', error);
+		res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
+			success: false,
+			message: 'Failed to retrieve email configuration',
+			error: appText.INTERNAL_SERVER_ERROR
+		});
+	}
+}
+
+export const getSystemMetrics = async (req, res, next) => {
+    await systemResources.getSystemMetrics(req, res, next);
+
+}
+/** Queue Service Configuration Ends */
 

@@ -48,6 +48,13 @@ router.route('/notification/:id')
     .patch(api.updateNotificationById)
     .delete(api.deleteNotificationById)
 
+// Queue service configuration endpoints (no auth needed - internal service communication)
+router.route('/queue/config/email')
+    .get(api.getEmailConfig)
+
+router.route('/queue/config/metrics')
+    .get(api.getSystemMetrics)
+
 
 router.route('/event')
     .post(api.createEvent)

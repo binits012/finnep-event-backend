@@ -61,8 +61,6 @@ export const getDataForFront = async (req, res, next) => {
     // Check cache first, then fallback to getSetting()
     let setting = await commonUtil.getCacheByKey(redisClient, SETTINGS_CACHE_KEY)
     if (!setting || setting instanceof Error || setting === null) {
-
-        console.log('no setting in cache, getting from database');
         setting = await Setting.getSetting()
     }
     const data = {
@@ -77,7 +75,6 @@ export const getEventById = async (req, res, next) => {
     const id = req.params.id
     try {
         const event = await Event.getEventById(id)
-        console.log(event)
         if (event) {
             const {  ...restOfEvent } = event?._doc
 
@@ -383,8 +380,20 @@ const validatePaymentRequest = (reqBody) => {
         throw new Error('Missing required fields: amount and currency are required');
     }
 
-    if (!metadata.eventId || !metadata.ticketId || !metadata.merchantId) {
-        throw new Error('Missing required metadata: eventId, ticketId, and merchantId are required');
+    // Validate required fields
+    // For pricing_configuration model, ticketId can be null if seatTickets is provided
+    const hasSeatTickets = metadata.seatTickets && (
+        (typeof metadata.seatTickets === 'string' && metadata.seatTickets.trim() !== '[]' && metadata.seatTickets.trim() !== '') ||
+        (Array.isArray(metadata.seatTickets) && metadata.seatTickets.length > 0)
+    );
+
+    if (!metadata.eventId || !metadata.merchantId) {
+        throw new Error('Missing required metadata: eventId and merchantId are required');
+    }
+
+    // ticketId is required unless seatTickets is provided (pricing_configuration model)
+    if (!metadata.ticketId && !hasSeatTickets) {
+        throw new Error('Missing required metadata: ticketId is required (or seatTickets for pricing_configuration model)');
     }
 
     // Validate amount range (prevent extremely large amounts)
@@ -400,15 +409,48 @@ const validatePaymentRequest = (reqBody) => {
     // Validate and sanitize metadata fields
     const sanitizedMetadata = {
         eventId: sanitizeString(metadata.eventId, 50),
-        ticketId: sanitizeString(metadata.ticketId, 50),
+        ticketId: metadata.ticketId ? sanitizeString(metadata.ticketId, 50) : null, // Allow null for pricing_configuration
         merchantId: sanitizeString(metadata.merchantId, 50),
-        externalMerchantId: sanitizeString(metadata.externalMerchantId, 50),
+        externalMerchantId: sanitizeString(metadata.externalMerchantId || '', 50),
         email: sanitizeString(metadata.email, 100),
         quantity: sanitizeString(metadata.quantity, 10),
         eventName: sanitizeString(metadata.eventName, 200),
         ticketName: sanitizeString(metadata.ticketName, 100),
-        country: sanitizeString(metadata.country, 50)
+        country: sanitizeString(metadata.country, 50),
+        fullName: metadata.fullName ? sanitizeString(metadata.fullName, 200) : null,
+        nonce: metadata.nonce ? sanitizeString(metadata.nonce, 128) : null // Preserve nonce for duplicate submission prevention
     };
+
+    // Preserve seatTickets and placeIds for pricing_configuration model
+    if (metadata.seatTickets) {
+        sanitizedMetadata.seatTickets = metadata.seatTickets;
+    }
+    if (metadata.placeIds) {
+        sanitizedMetadata.placeIds = metadata.placeIds;
+    }
+
+    // Preserve pricing fields for pricing_configuration model
+    if (metadata.price !== undefined) sanitizedMetadata.price = parseFloat(metadata.price) || 0;
+    if (metadata.basePrice !== undefined) sanitizedMetadata.basePrice = parseFloat(metadata.basePrice) || 0;
+    if (metadata.serviceFee !== undefined) sanitizedMetadata.serviceFee = parseFloat(metadata.serviceFee) || 0;
+    if (metadata.vat !== undefined) sanitizedMetadata.vat = parseFloat(metadata.vat) || 0;
+    if (metadata.vatRate !== undefined) sanitizedMetadata.vatRate = parseFloat(metadata.vatRate) || 0;
+    if (metadata.vatAmount !== undefined) sanitizedMetadata.vatAmount = parseFloat(metadata.vatAmount) || 0;
+    if (metadata.entertainmentTax !== undefined) sanitizedMetadata.entertainmentTax = parseFloat(metadata.entertainmentTax) || 0;
+    if (metadata.serviceTax !== undefined) sanitizedMetadata.serviceTax = parseFloat(metadata.serviceTax) || 0;
+    if (metadata.orderFee !== undefined) sanitizedMetadata.orderFee = parseFloat(metadata.orderFee) || 0;
+
+    // Preserve additional pricing breakdown fields
+    if (metadata.subtotal !== undefined) sanitizedMetadata.subtotal = parseFloat(metadata.subtotal) || 0;
+    if (metadata.entertainmentTaxAmount !== undefined) sanitizedMetadata.entertainmentTaxAmount = parseFloat(metadata.entertainmentTaxAmount) || 0;
+    if (metadata.serviceTaxAmount !== undefined) sanitizedMetadata.serviceTaxAmount = parseFloat(metadata.serviceTaxAmount) || 0;
+    if (metadata.orderFeeServiceTax !== undefined) sanitizedMetadata.orderFeeServiceTax = parseFloat(metadata.orderFeeServiceTax) || 0;
+    if (metadata.perUnitSubtotal !== undefined) sanitizedMetadata.perUnitSubtotal = parseFloat(metadata.perUnitSubtotal) || 0;
+    if (metadata.perUnitTotal !== undefined) sanitizedMetadata.perUnitTotal = parseFloat(metadata.perUnitTotal) || 0;
+    if (metadata.totalBasePrice !== undefined) sanitizedMetadata.totalBasePrice = parseFloat(metadata.totalBasePrice) || 0;
+    if (metadata.totalServiceFee !== undefined) sanitizedMetadata.totalServiceFee = parseFloat(metadata.totalServiceFee) || 0;
+    if (metadata.totalVatAmount !== undefined) sanitizedMetadata.totalVatAmount = parseFloat(metadata.totalVatAmount) || 0;
+    if (metadata.totalAmount !== undefined) sanitizedMetadata.totalAmount = parseFloat(metadata.totalAmount) || 0;
 
     // Validate quantity
     if (sanitizedMetadata.quantity && (parseInt(sanitizedMetadata.quantity) < 1 || parseInt(sanitizedMetadata.quantity) > 100)) {
@@ -425,7 +467,8 @@ const validatePaymentRequest = (reqBody) => {
         throw new Error('Invalid event ID format');
     }
 
-    if (!/^[0-9a-fA-F]{24}$/.test(sanitizedMetadata.ticketId)) {
+    // ticketId validation - only required if not using pricing_configuration (seatTickets)
+    if (sanitizedMetadata.ticketId && !/^[0-9a-fA-F]{24}$/.test(sanitizedMetadata.ticketId)) {
         throw new Error('Invalid ticket ID format');
     }
 
@@ -474,6 +517,9 @@ const validateMerchantAndEvent = async (metadata) => {
             return { merchant, event, ticket: dummyTicket };
         } else {
             // For ticket_info mode, find the actual ticket configuration
+            if (!metadata.ticketId) {
+                throw new Error('Ticket ID is required for ticket_info pricing model');
+            }
             const ticketConfig = event.ticketInfo.find(ticket => ticket._id.toString() === metadata.ticketId);
             if (!ticketConfig) {
                 throw new Error('Ticket configuration is not available in this event');
@@ -483,6 +529,9 @@ const validateMerchantAndEvent = async (metadata) => {
     }
 
     // For non-seat events, find the ticket configuration
+    if (!metadata.ticketId) {
+        throw new Error('Ticket ID is required');
+    }
     const ticketConfig = event.ticketInfo.find(ticket => ticket._id.toString() === metadata.ticketId);
     if (!ticketConfig) {
         throw new Error('Ticket configuration is not available in this event');
@@ -532,91 +581,174 @@ const calculateExpectedPrice = (ticket, event, quantity, metadata = {}) => {
         entertainmentTax,
         serviceTax,
         orderFee,
-        hasSeatSelection
+        hasSeatSelection,
+        isPricingConfiguration,
+        hasSeatTickets: !!metadata.seatTickets,
+        seatTicketsType: typeof metadata.seatTickets,
+        isSeatTicketsArray: Array.isArray(metadata.seatTickets),
+        seatTicketsLength: Array.isArray(metadata.seatTickets) ? metadata.seatTickets.length : 0
     });
 
     if (hasSeatSelection) {
         // Check if using pricing_configuration (individual seat pricing)
         if (isPricingConfiguration && metadata.seatTickets && Array.isArray(metadata.seatTickets) && metadata.seatTickets.length > 0) {
-            // Calculate total from individual seat pricing
-            let seatsTotal = 0;
+            // Calculate totals first, then calculate percentages on totals (percentage should be on 100, not thousands)
+            let totalBasePrice = 0;
+            let totalServiceFee = 0;
             let orderFee = 0;
-            let orderFeeTax = 0;
+            let taxRate = 0;
+            let serviceTaxRate = 0;
 
-            // Sum up pricing for each seat
+            // Sum up base prices and service fees from all seats
+            // Ensure we're working with numbers (handle both string and number types)
             metadata.seatTickets.forEach(seatTicket => {
                 if (seatTicket.pricing) {
                     const pricing = seatTicket.pricing;
-                    const basePrice = parseFloat(pricing.basePrice) || 0;
-                    const taxPercent = (parseFloat(pricing.tax) || 0) / 100;
-                    const serviceFee = parseFloat(pricing.serviceFee) || 0;
-                    const serviceTaxPercent = (parseFloat(pricing.serviceTax) || 0) / 100;
+                    const basePrice = typeof pricing.basePrice === 'number' ? pricing.basePrice : (parseFloat(pricing.basePrice) || 0);
+                    const serviceFee = typeof pricing.serviceFee === 'number' ? pricing.serviceFee : (parseFloat(pricing.serviceFee) || 0);
 
-                    // Per seat: basePrice + (basePrice * tax) + serviceFee + (serviceFee * serviceTax)
-                    const seatPrice = basePrice + (basePrice * taxPercent) + serviceFee + (serviceFee * serviceTaxPercent);
-                    const seatPriceTruncated = Math.floor(seatPrice * 100) / 100;
-                    seatsTotal += seatPriceTruncated;
+                    totalBasePrice += basePrice;
+                    totalServiceFee += serviceFee;
+
+                    // Get rates from first seat (all seats have same rates in pricing_configuration)
+                    if (taxRate === 0) {
+                        taxRate = parseFloat(pricing.tax) || 0;
+                        serviceTaxRate = parseFloat(pricing.serviceTax) || 0;
+                    }
 
                     // Order fee (take from first seat with order fee)
                     if (orderFee === 0 && pricing.orderFee) {
                         orderFee = parseFloat(pricing.orderFee) || 0;
-                        orderFeeTax = orderFee * serviceTaxPercent; // Service tax on order fee
                     }
                 }
             });
 
-            const seatsTotalTruncated = Math.floor(seatsTotal * 100) / 100;
-            const orderFeeTaxTruncated = Math.floor(orderFeeTax * 100) / 100;
-            const orderFeeTotal = orderFee + orderFeeTaxTruncated;
-            const orderFeeTotalTruncated = Math.floor(orderFeeTotal * 100) / 100;
+            // Calculate percentages on EXACT totals (not truncated), then truncate result to 3 decimals
+            const totalEntertainmentTaxAmount = Math.round((totalBasePrice * taxRate / 100) * 1000) / 1000;
+            const totalServiceTaxAmount = Math.round((totalServiceFee * serviceTaxRate / 100) * 1000) / 1000;
 
-            // Grand total (truncate to 2 decimal places, don't round up)
-            const totalAmount = seatsTotalTruncated + orderFeeTotalTruncated;
-            const totalAmountTruncated = Math.floor(totalAmount * 100) / 100;
+            // Now truncate the base totals for consistency
+            const totalBasePriceTruncated = Math.round(totalBasePrice * 1000) / 1000;
+            const totalServiceFeeTruncated = Math.round(totalServiceFee * 1000) / 1000;
+            const orderFeeTax = Math.round((orderFee * serviceTaxRate / 100) * 1000) / 1000;
+
+            // Calculate seat totals: basePrice + tax + serviceFee + serviceTax
+            // Use round (not floor) to handle floating-point representation errors when summing
+            const seatsTotalTruncated = Math.round((totalBasePriceTruncated + totalEntertainmentTaxAmount + totalServiceFeeTruncated + totalServiceTaxAmount) * 1000) / 1000;
+            const orderFeeTotalTruncated = Math.round((orderFee + orderFeeTax) * 1000) / 1000;
+
+            // Grand total (round to handle floating-point errors)
+            const totalAmount = Math.round((seatsTotalTruncated + orderFeeTotalTruncated) * 1000) / 1000;
 
             console.log('Pricing configuration seat-based price calculation:', {
                 seatTickets: metadata.seatTickets,
-                seatsTotal,
-                seatsTotalTruncated,
+                totalBasePrice: totalBasePriceTruncated,
+                totalServiceFee: totalServiceFeeTruncated,
+                totalEntertainmentTaxAmount,
+                totalServiceTaxAmount,
+                seatsTotal: seatsTotalTruncated,
                 orderFee,
                 orderFeeTax,
-                orderFeeTaxTruncated,
-                orderFeeTotal,
-                orderFeeTotalTruncated,
-                totalAmount,
-                totalAmountTruncated
+                orderFeeTotal: orderFeeTotalTruncated,
+                totalAmount
             });
 
             return {
                 perUnitSubtotal: 0, // Not applicable for individual pricing
                 perUnitVat: 0, // Not applicable for individual pricing
                 perUnitTotal: 0, // Not applicable for individual pricing
-                totalAmount: totalAmountTruncated
+                totalAmount: totalAmount
             };
         }
 
-        // For seat-based purchases with ticket pricing model, use the new pricing model
+        // For seat-based purchases with ticket pricing model
+        // If seatTickets array is provided, calculate price for each seat's ticket individually
+        if (metadata.seatTickets && Array.isArray(metadata.seatTickets) && metadata.seatTickets.length > 0) {
+            // Calculate total from individual seat tickets
+            let seatsTotal = 0;
+            let orderFee = 0;
+            let orderFeeTax = 0;
+
+            // Sum up pricing for each seat's ticket
+            metadata.seatTickets.forEach(seatTicket => {
+                // Get ticket config for this seat
+                const seatTicketId = seatTicket.ticketId;
+                if (!seatTicketId) return;
+
+                const seatTicketConfig = event?.ticketInfo?.find(t => t._id?.toString() === seatTicketId.toString());
+                if (!seatTicketConfig) {
+                    // Fallback to main ticket if seat ticket not found
+                    console.warn(`Ticket ${seatTicketId} not found for seat ${seatTicket.placeId}, using main ticket`);
+                }
+
+                const seatTicketData = seatTicketConfig || ticket;
+                const basePrice = parseFloat(seatTicketData.price) || 0;
+                const entertainmentTaxRate = (parseFloat(seatTicketData.entertainmentTax) || 0) / 100;
+                const serviceFee = parseFloat(seatTicketData.serviceFee) || 0;
+                const serviceTaxRate = (parseFloat(seatTicketData.serviceTax) || 0) / 100;
+
+                // Per seat: basePrice + (basePrice * entertainmentTax) + serviceFee + (serviceFee * serviceTax)
+                const seatPrice = basePrice + (basePrice * entertainmentTaxRate) + serviceFee + (serviceFee * serviceTaxRate);
+                const seatPriceTruncated = Math.round(seatPrice * 1000) / 1000;
+                seatsTotal += seatPriceTruncated;
+
+                // Order fee (take from first seat with order fee)
+                if (orderFee === 0) {
+                    orderFee = parseFloat(seatTicketData.orderFee) || 0;
+                    // Truncate order fee tax to 3 decimals
+                    orderFeeTax = Math.round((orderFee * serviceTaxRate) * 1000) / 1000; // Service tax on order fee
+                }
+            });
+
+            // Use round (not floor) to handle floating-point representation errors when summing
+            const seatsTotalTruncated = Math.round(seatsTotal * 1000) / 1000;
+            const orderFeeTaxTruncated = Math.round(orderFeeTax * 1000) / 1000;
+            // Use round (not floor) to handle floating-point representation errors
+            const orderFeeTotalTruncated = Math.round((orderFee + orderFeeTaxTruncated) * 1000) / 1000;
+
+            // Grand total (round to handle floating-point errors)
+            const totalAmount = Math.round((seatsTotalTruncated + orderFeeTotalTruncated) * 1000) / 1000;
+
+            console.log('Ticket info seat-based price calculation (individual tickets):', {
+                seatTickets: metadata.seatTickets,
+                seatsTotal,
+                seatsTotalTruncated,
+                orderFee,
+                orderFeeTax,
+                orderFeeTaxTruncated,
+                orderFeeTotalTruncated,
+                totalAmount
+            });
+
+            return {
+                perUnitSubtotal: 0, // Not applicable for individual pricing
+                perUnitVat: 0, // Not applicable for individual pricing
+                perUnitTotal: 0, // Not applicable for individual pricing
+                totalAmount: totalAmount
+            };
+        }
+
+        // Fallback: For seat-based purchases with single ticket type, use the new pricing model
         // Per ticket calculation: basePrice + (basePrice * entertainmentTax%) + serviceFee + (serviceFee * serviceTax%)
-        const entertainmentTaxAmount = ticketPrice * (entertainmentTax / 100);
-        const serviceTaxAmount = serviceFee * (serviceTax / 100);
-        const perTicketPrice = ticketPrice + entertainmentTaxAmount + serviceFee + serviceTaxAmount;
+        // Truncate each intermediate calculation to 3 decimals
+        const entertainmentTaxAmount = Math.round((ticketPrice * (entertainmentTax / 100)) * 1000) / 1000;
+        const serviceTaxAmount = Math.round((serviceFee * (serviceTax / 100)) * 1000) / 1000;
+        const perTicketPrice = Math.round((ticketPrice + entertainmentTaxAmount + serviceFee + serviceTaxAmount) * 1000) / 1000;
 
         // Total for all tickets (truncate each calculation to avoid rounding errors)
-        const perTicketPriceTruncated = Math.floor(perTicketPrice * 100) / 100;
+        const perTicketPriceTruncated = perTicketPrice; // Already truncated above
         const ticketsTotal = perTicketPriceTruncated * qty;
-        const ticketsTotalTruncated = Math.floor(ticketsTotal * 100) / 100;
+        // Use round (not floor) to handle floating-point representation errors
+        const ticketsTotalRounded = Math.round(ticketsTotal * 1000) / 1000;
 
         // Order fee (once per transaction) + service tax on order fee
-        const orderFeeTax = orderFee * (serviceTax / 100);
-        const orderFeeTaxTruncated = Math.floor(orderFeeTax * 100) / 100;
-        const orderFeeTotal = orderFee + orderFeeTaxTruncated;
-        const orderFeeTotalTruncated = Math.floor(orderFeeTotal * 100) / 100;
+        const orderFeeTax = Math.round((orderFee * (serviceTax / 100)) * 1000) / 1000;
+        const orderFeeTotalRounded = Math.round((orderFee + orderFeeTax) * 1000) / 1000;
 
-        // Grand total (truncate to 2 decimal places, don't round up)
-        const totalAmount = ticketsTotalTruncated + orderFeeTotalTruncated;
-        const totalAmountTruncated = Math.floor(totalAmount * 100) / 100;
+        // Grand total (round to handle floating-point errors)
+        const totalAmount = Math.round((ticketsTotalRounded + orderFeeTotalRounded) * 1000) / 1000;
 
-        console.log('Seat-based price calculation:', {
+        console.log('Seat-based price calculation (single ticket type):', {
             ticketPrice,
             entertainmentTax,
             entertainmentTaxAmount,
@@ -627,44 +759,57 @@ const calculateExpectedPrice = (ticket, event, quantity, metadata = {}) => {
             perTicketPriceTruncated,
             qty,
             ticketsTotal,
-            ticketsTotalTruncated,
+            ticketsTotalRounded,
             orderFee,
             orderFeeTax,
-            orderFeeTaxTruncated,
-            orderFeeTotal,
-            orderFeeTotalTruncated,
-            totalAmount,
-            totalAmountTruncated
+            orderFeeTotalRounded,
+            totalAmount
         });
 
         return {
             perUnitSubtotal: ticketPrice + serviceFee,
             perUnitVat: entertainmentTaxAmount + serviceTaxAmount,
             perUnitTotal: perTicketPriceTruncated,
-            totalAmount: totalAmountTruncated
+            totalAmount: totalAmount
         };
     } else {
         // Legacy calculation for non-seat purchases (backward compatibility)
         // Calculate per unit subtotal (price + service fee)
         const perUnitSubtotal = ticketPrice + serviceFee;
 
-        // Calculate VAT amount per unit
-        const perUnitVat = perUnitSubtotal * (vatRate / 100);
+        // Calculate VAT amount per unit (VAT is only on base price, not service fee)
+        const perUnitVat = ticketPrice * (vatRate / 100);
+
+        // Calculate service tax on service fee (per unit)
+        const perUnitServiceTax = (serviceFee > 0 && serviceTax > 0)
+            ? serviceFee * (serviceTax / 100)
+            : 0;
 
         // Calculate total per unit
-        const perUnitTotal = perUnitSubtotal + perUnitVat;
+        const perUnitTotal = perUnitSubtotal + perUnitVat + perUnitServiceTax;
 
-        // Calculate total for all units
-        const totalAmount = perUnitTotal * qty;
+        // Calculate service tax on order fee (per transaction, not per unit)
+        const orderFeeServiceTax = (orderFee > 0 && serviceTax > 0)
+            ? orderFee * (serviceTax / 100)
+            : 0;
+
+        // Calculate total for all units + order fee + service tax on order fee
+        // Order fee is per transaction, not per unit
+        const totalAmount = (perUnitTotal * qty) + orderFee + orderFeeServiceTax;
 
         console.log('Legacy price calculation:', {
             ticketPrice,
             serviceFee,
             vatRate,
+            serviceTax,
+            orderFee,
             perUnitSubtotal,
             perUnitVat,
+            perUnitServiceTax,
             perUnitTotal,
             qty,
+            orderFee,
+            orderFeeServiceTax,
             totalAmount
         });
 
@@ -672,16 +817,20 @@ const calculateExpectedPrice = (ticket, event, quantity, metadata = {}) => {
             perUnitSubtotal,
             perUnitVat,
             perUnitTotal,
-            totalAmount: Math.round(totalAmount * 100) / 100 // Round to 2 decimal places
+            totalAmount: Math.round(totalAmount * 1000) / 1000 // Round to handle floating-point errors
         };
     }
 };
 
 const validatePriceCalculation = (clientAmount, expectedPrice, tolerance = 0.02) => {
+    // Truncate both values to 3 decimal places for comparison (no rounding)
+    const clientAmountTruncated = Math.round(clientAmount * 1000) / 1000;
+    const expectedAmountTruncated = Math.round(expectedPrice.totalAmount * 1000) / 1000;
+
     // For seat-based purchases, allow slightly more tolerance due to multiple ticket types
-    const difference = Math.abs(clientAmount - expectedPrice.totalAmount);
+    const difference = Math.abs(clientAmountTruncated - expectedAmountTruncated);
     if (difference > tolerance) {
-        throw new Error(`Price calculation mismatch. Expected: ${expectedPrice.totalAmount}, Received: ${clientAmount}`);
+        throw new Error(`Price calculation mismatch. Expected: ${expectedAmountTruncated}, Received: ${clientAmountTruncated}`);
     }
 };
 
@@ -767,11 +916,56 @@ export const createPaymentIntent = async (req, res, next) => {
         // Security Layer 2: Input validation and sanitization
         const { amount, currency, metadata } = validatePaymentRequest(req.body);
 
+        // Security Layer 2.5: Nonce validation to prevent duplicate form submissions
+        if (!metadata.nonce || typeof metadata.nonce !== 'string' || metadata.nonce.length < 32) {
+            throw new Error('Invalid or missing nonce. Please refresh the page and try again.');
+        }
+
+        // Check if nonce has already been used and store atomically
+        // Use SET with NX (only set if not exists) to prevent race conditions
+        const nonceKey = `payment_nonce:${metadata.nonce}`;
+        const nonceValue = JSON.stringify({
+            eventId: metadata.eventId,
+            email: metadata.email,
+            timestamp: new Date().toISOString(),
+            clientId: getClientIdentifier(req)
+        });
+
+        // Atomically check and set: returns null if key already exists, 'OK' if set successfully
+        const setResult = await redisClient.set(nonceKey, nonceValue, {
+            NX: true, // Only set if key does not exist
+            EX: 300  // 5 minutes TTL
+        });
+
+        if (setResult === null) {
+            // Nonce already exists - this is a duplicate submission
+            // Get the existing nonce data for logging
+            const existingNonce = await redisClient.get(nonceKey);
+            let existingData = null;
+            try {
+                existingData = existingNonce ? JSON.parse(existingNonce) : null;
+            } catch (e) {
+                // Ignore parse errors
+            }
+
+            console.warn('Duplicate payment intent submission detected:', {
+                nonce: metadata.nonce,
+                eventId: metadata.eventId,
+                email: metadata.email,
+                clientId: getClientIdentifier(req),
+                timestamp: new Date().toISOString(),
+                existingData: existingData
+            });
+            throw new Error('This form has already been submitted. Please refresh the page if you need to make another payment.');
+        }
+
+        // Nonce successfully stored - this is a new, valid submission
+
         // Security Layer 3: Business logic validation
         const { merchant, event, ticket } = await validateMerchantAndEvent(metadata);
 
         // Security Layer 4: Price validation
-        // Parse placeIds if present (for seat-based purchases)
+        // Parse placeIds and seatTickets if present (for seat-based purchases)
         let parsedMetadata = { ...metadata };
         if (metadata.placeIds) {
             if (typeof metadata.placeIds === 'string') {
@@ -792,13 +986,38 @@ export const createPaymentIntent = async (req, res, next) => {
             }
         }
 
+        // Parse seatTickets if present (for pricing_configuration model)
+        if (metadata.seatTickets) {
+            if (typeof metadata.seatTickets === 'string') {
+                try {
+                    parsedMetadata.seatTickets = JSON.parse(metadata.seatTickets);
+                } catch (e) {
+                    // If parsing fails, keep as is
+                    parsedMetadata.seatTickets = metadata.seatTickets;
+                }
+            }
+            // Ensure it's an array if it's a string that looks like JSON array
+            if (typeof parsedMetadata.seatTickets === 'string' && parsedMetadata.seatTickets.trim().startsWith('[')) {
+                try {
+                    parsedMetadata.seatTickets = JSON.parse(parsedMetadata.seatTickets);
+                } catch (e) {
+                    // Keep as is
+                }
+            }
+        }
+
         console.log('Price calculation - metadata check:', {
             hasPlaceIds: !!metadata.placeIds,
             placeIdsType: typeof metadata.placeIds,
             placeIdsValue: metadata.placeIds,
             parsedPlaceIds: parsedMetadata.placeIds,
             parsedPlaceIdsType: typeof parsedMetadata.placeIds,
-            isArray: Array.isArray(parsedMetadata.placeIds)
+            isArray: Array.isArray(parsedMetadata.placeIds),
+            hasSeatTickets: !!metadata.seatTickets,
+            seatTicketsType: typeof metadata.seatTickets,
+            parsedSeatTickets: parsedMetadata.seatTickets,
+            parsedSeatTicketsType: typeof parsedMetadata.seatTickets,
+            isSeatTicketsArray: Array.isArray(parsedMetadata.seatTickets)
         });
 
         const expectedPrice = calculateExpectedPrice(ticket, event, parseInt(metadata.quantity), parsedMetadata);
@@ -832,6 +1051,10 @@ export const createPaymentIntent = async (req, res, next) => {
         const baseAmount = Math.round(amount);
         let stripePaymentIntentPayload;
 
+        // Exclude large arrays from Stripe metadata (seatTickets and placeIds can exceed 500 char limit)
+        // These are stored in the database and passed in request body, so they don't need to be in Stripe metadata
+        const { seatTickets, placeIds, ...stripeMetadata } = metadata;
+
         // Only apply connected account logic if merchant is NOT the platform account
         if(merchant.stripeAccount !== process.env.STRIPE_PLATFORM_ACCOUNT_ID) {
 
@@ -848,7 +1071,7 @@ export const createPaymentIntent = async (req, res, next) => {
                 amount: baseAmount, // Customer pays base + application fee + Stripe fee
                 currency: currency.toLowerCase(),
                 metadata: {
-                    ...metadata,
+                    ...stripeMetadata,
                     merchantId: metadata.merchantId,
                     externalMerchantId: metadata.externalMerchantId,
                     timestamp: new Date().toISOString(),
@@ -877,7 +1100,7 @@ export const createPaymentIntent = async (req, res, next) => {
                 amount: baseAmount,
                 currency: currency.toLowerCase(),
                 metadata: {
-                    ...metadata,
+                    ...stripeMetadata,
                     merchantId: metadata.merchantId,
                     externalMerchantId: metadata.externalMerchantId,
                     timestamp: new Date().toISOString(),
@@ -944,76 +1167,21 @@ export const handlePaymentSuccess = async (req, res, next) => {
             throw new Error('Missing required fields');
         }
 
+        // Security Layer 2.5: Nonce validation to prevent duplicate form submissions
+        // Nonce can come from request metadata or Stripe payment intent metadata (fallback)
+        // We'll validate after retrieving payment intent, as nonce might be in Stripe metadata
+
         // Security Layer 3: Validate payment intent ID format
         if (!/^pi_[a-zA-Z0-9_]+$/.test(paymentIntentId)) {
             throw new Error('Invalid payment intent ID format');
         }
 
-        // Security Layer 4: Validate and sanitize metadata
-        // Parse placeIds if it's a string
-        let parsedPlaceIds = metadata.placeIds || [];
-        if (typeof parsedPlaceIds === 'string') {
-            try {
-                parsedPlaceIds = JSON.parse(parsedPlaceIds);
-            } catch (e) {
-                parsedPlaceIds = [];
-            }
-        }
-        if (!Array.isArray(parsedPlaceIds)) {
-            parsedPlaceIds = [];
-        }
+        // Security Layer 3.5: Check if paymentIntentId has already been processed (prevent duplicate ticket creation)
+        // We'll check this AFTER retrieving payment intent from Stripe, but before creating ticket
+        // This will be done atomically using Redis SET with NX
 
-        // Parse seatTickets if it's a string
-        let parsedSeatTickets = metadata.seatTickets || [];
-        if (typeof parsedSeatTickets === 'string') {
-            try {
-                parsedSeatTickets = JSON.parse(parsedSeatTickets);
-            } catch (e) {
-                parsedSeatTickets = [];
-            }
-        }
-        if (!Array.isArray(parsedSeatTickets)) {
-            parsedSeatTickets = [];
-        }
-
-        const sanitizedMetadata = {
-            eventId: sanitizeString(metadata.eventId, 50),
-            ticketId: sanitizeString(metadata.ticketId, 50),
-            merchantId: sanitizeString(metadata.merchantId, 50),
-            externalMerchantId: sanitizeString(metadata.externalMerchantId, 50),
-            email: sanitizeString(metadata.email, 100),
-            quantity: sanitizeString(metadata.quantity, 10),
-            eventName: sanitizeString(metadata.eventName, 200),
-            ticketName: sanitizeString(metadata.ticketName, 200),
-            marketingOptIn: sanitizeBoolean(metadata?.marketingOptIn || false),
-            placeIds: parsedPlaceIds, // Array of place IDs for seat-based events
-            seatTickets: parsedSeatTickets, // Array of { placeId, ticketId, ticketName } for seat-ticket mapping
-            // Additional metadata fields for ticket record
-            fullName: metadata.fullName ? sanitizeString(metadata.fullName, 200) : null,
-            basePrice: metadata.basePrice ? sanitizeString(metadata.basePrice, 20) : null,
-            serviceFee: metadata.serviceFee ? sanitizeString(metadata.serviceFee, 20) : null,
-            vatRate: metadata.vatRate ? sanitizeString(metadata.vatRate, 20) : null,
-            entertainmentTax: metadata.entertainmentTax ? sanitizeString(metadata.entertainmentTax, 20) : null,
-            serviceTax: metadata.serviceTax ? sanitizeString(metadata.serviceTax, 20) : null,
-            orderFee: metadata.orderFee ? sanitizeString(metadata.orderFee, 20) : null,
-            country: metadata.country ? sanitizeString(metadata.country, 100) : null,
-            sessionId: metadata.sessionId ? sanitizeString(metadata.sessionId, 100) : null
-        };
-
-        // Validate ID formats
-        if (!/^[0-9a-fA-F]{24}$/.test(sanitizedMetadata.eventId) ||
-            !/^[0-9a-fA-F]{24}$/.test(sanitizedMetadata.ticketId) ||
-            !/^[0-9a-fA-F]{24}$/.test(sanitizedMetadata.merchantId) ) {
-            throw new Error('Invalid MongoDB ObjectId format');
-        }
-
-        // Merchant ID is a numeric string (PostgreSQL style)
-        if (!/^\d+$/.test(sanitizedMetadata.externalMerchantId)) {
-            throw new Error('Invalid merchant ID format - must be numeric');
-        }
-
-        // Security Layer 5: Timeout for Stripe API call
-        const stripeTimeout = new Promise((_, reject) => {
+         // Security Layer 4: Timeout for Stripe API call
+         const stripeTimeout = new Promise((_, reject) => {
             setTimeout(() => reject(new Error('Stripe API timeout')), 10000);
         });
 
@@ -1025,6 +1193,112 @@ export const handlePaymentSuccess = async (req, res, next) => {
                 error: 'Payment not successful'
             });
         }
+
+        // Use paymentIntent.metadata as fallback when req.body.metadata is null or missing fields
+        // paymentIntent.metadata is the source of truth from Stripe
+        const stripeMetadata = paymentIntent.metadata || {};
+        const requestMetadata = metadata || {};
+
+        // Merge metadata: request body takes precedence, but fall back to Stripe metadata
+        // NOTE: seatTickets and placeIds are excluded from Stripe metadata due to 500 char limit
+        // They MUST always be provided in the request body for seat-based events
+        const mergedMetadata = {
+            ...stripeMetadata,
+            ...requestMetadata,
+            // For arrays, prefer request body if present, otherwise use Stripe metadata
+            // seatTickets and placeIds are too large for Stripe metadata, so they should always come from request body
+            placeIds: requestMetadata.placeIds !== undefined ? requestMetadata.placeIds : [],
+            seatTickets: requestMetadata.seatTickets !== undefined ? requestMetadata.seatTickets : [],
+            // Nonce: prefer request body, fallback to Stripe metadata
+            nonce: requestMetadata.nonce || stripeMetadata.nonce
+        };
+
+        // Validate nonce after merging (can come from request or Stripe metadata)
+        const nonce = mergedMetadata.nonce;
+        if (!nonce || typeof nonce !== 'string' || nonce.length < 32) {
+            throw new Error('Invalid or missing nonce. Please refresh the page and try again.');
+        }
+
+        // Re-parse placeIds and seatTickets from merged metadata if they're strings
+        let finalPlaceIds = mergedMetadata.placeIds || [];
+        if (typeof finalPlaceIds === 'string') {
+            try {
+                finalPlaceIds = JSON.parse(finalPlaceIds);
+            } catch (e) {
+                finalPlaceIds = [];
+            }
+        }
+        if (!Array.isArray(finalPlaceIds)) {
+            finalPlaceIds = [];
+        }
+
+        let finalSeatTickets = mergedMetadata.seatTickets || [];
+        if (typeof finalSeatTickets === 'string') {
+            try {
+                finalSeatTickets = JSON.parse(finalSeatTickets);
+            } catch (e) {
+                finalSeatTickets = [];
+            }
+        }
+        if (!Array.isArray(finalSeatTickets)) {
+            finalSeatTickets = [];
+        }
+
+        const sanitizedMetadata = {
+            eventId: sanitizeString(mergedMetadata.eventId, 50),
+            ticketId: mergedMetadata.ticketId ? sanitizeString(mergedMetadata.ticketId, 50) : null, // Allow null for pricing_configuration
+            merchantId: sanitizeString(mergedMetadata.merchantId, 50),
+            externalMerchantId: sanitizeString(mergedMetadata.externalMerchantId, 50),
+            email: sanitizeString(mergedMetadata.email, 100),
+            quantity: sanitizeString(mergedMetadata.quantity, 10),
+            eventName: sanitizeString(mergedMetadata.eventName, 200),
+            ticketName: sanitizeString(mergedMetadata.ticketName, 200),
+            marketingOptIn: sanitizeBoolean(mergedMetadata?.marketingOptIn || false),
+            placeIds: finalPlaceIds, // Array of place IDs for seat-based events
+            seatTickets: finalSeatTickets, // Array of { placeId, ticketId, ticketName } for seat-ticket mapping
+            // Additional metadata fields for ticket record - use merged metadata
+            fullName: mergedMetadata.fullName ? sanitizeString(mergedMetadata.fullName, 200) : null,
+            basePrice: mergedMetadata.basePrice ? sanitizeString(mergedMetadata.basePrice, 20) : null,
+            serviceFee: mergedMetadata.serviceFee ? sanitizeString(mergedMetadata.serviceFee, 20) : null,
+            vatRate: mergedMetadata.vatRate ? sanitizeString(mergedMetadata.vatRate, 20) : null,
+            vatAmount: mergedMetadata.vatAmount !== undefined && mergedMetadata.vatAmount !== null ? sanitizeString(String(mergedMetadata.vatAmount), 20) : null,
+            entertainmentTax: mergedMetadata.entertainmentTax !== undefined && mergedMetadata.entertainmentTax !== null ? sanitizeString(String(mergedMetadata.entertainmentTax), 20) : null,
+            serviceTax: mergedMetadata.serviceTax ? sanitizeString(mergedMetadata.serviceTax, 20) : null,
+            orderFee: mergedMetadata.orderFee ? sanitizeString(mergedMetadata.orderFee, 20) : null,
+            country: mergedMetadata.country ? sanitizeString(mergedMetadata.country, 100) : null,
+            sessionId: mergedMetadata.sessionId ? sanitizeString(mergedMetadata.sessionId, 100) : null,
+            orderFeeServiceTax: mergedMetadata.orderFeeServiceTax ? sanitizeString(mergedMetadata.orderFeeServiceTax, 20) : null,
+            serviceTaxAmount: mergedMetadata.serviceTaxAmount ? sanitizeString(mergedMetadata.serviceTaxAmount, 20) : null,
+            totalBasePrice: mergedMetadata.totalBasePrice !== undefined && mergedMetadata.totalBasePrice !== null ? sanitizeString(String(mergedMetadata.totalBasePrice), 20) : null,
+            totalServiceFee: mergedMetadata.totalServiceFee !== undefined && mergedMetadata.totalServiceFee !== null ? sanitizeString(String(mergedMetadata.totalServiceFee), 20) : null
+        };
+
+        console.log('sanitizedMetadata', sanitizedMetadata);
+        // Validate ID formats
+        // For pricing_configuration model, ticketId can be null if seatTickets is provided
+        const hasSeatTickets = finalSeatTickets && Array.isArray(finalSeatTickets) && finalSeatTickets.length > 0;
+
+        if (!/^[0-9a-fA-F]{24}$/.test(sanitizedMetadata.eventId) ||
+            !/^[0-9a-fA-F]{24}$/.test(sanitizedMetadata.merchantId) ) {
+            throw new Error('Invalid MongoDB ObjectId format');
+        }
+
+        // ticketId validation - only required if not using pricing_configuration (seatTickets)
+        if (sanitizedMetadata.ticketId && !/^[0-9a-fA-F]{24}$/.test(sanitizedMetadata.ticketId)) {
+            throw new Error('Invalid MongoDB ObjectId format');
+        }
+
+        // If ticketId is null, seatTickets must be provided
+        if (!sanitizedMetadata.ticketId && !hasSeatTickets) {
+            throw new Error('Missing required field: ticketId (or seatTickets for pricing_configuration model)');
+        }
+
+        // Merchant ID is a numeric string (PostgreSQL style)
+        if (!/^\d+$/.test(sanitizedMetadata.externalMerchantId)) {
+            throw new Error('Invalid merchant ID format - must be numeric');
+        }
+
+
 
         // Generate secure OTP using the existing createCode utility
         const otp = await commonUtil.createCode(8); // 8-character alphanumeric OTP
@@ -1050,15 +1324,29 @@ export const handlePaymentSuccess = async (req, res, next) => {
             ticketId: sanitizedMetadata.ticketId,
             // Additional metadata fields
             fullName: sanitizedMetadata.fullName || null,
-            basePrice: sanitizedMetadata.basePrice ? parseFloat(sanitizedMetadata.basePrice) : null,
-            serviceFee: sanitizedMetadata.serviceFee ? parseFloat(sanitizedMetadata.serviceFee) : null,
-            vatRate: sanitizedMetadata.vatRate ? parseFloat(sanitizedMetadata.vatRate) : null,
-            entertainmentTax: sanitizedMetadata.entertainmentTax ? parseFloat(sanitizedMetadata.entertainmentTax) : null,
-            serviceTax: sanitizedMetadata.serviceTax ? parseFloat(sanitizedMetadata.serviceTax) : null,
-            orderFee: sanitizedMetadata.orderFee ? parseFloat(sanitizedMetadata.orderFee) : null,
-            country: sanitizedMetadata.country || null
+            // Pricing fields - use sanitizedMetadata values (already parsed as floats)
+            basePrice: sanitizedMetadata.basePrice !== undefined ? sanitizedMetadata.basePrice : null,
+            serviceFee: sanitizedMetadata.serviceFee !== undefined ? sanitizedMetadata.serviceFee : null,
+            vatRate: sanitizedMetadata.vatRate !== undefined ? sanitizedMetadata.vatRate : null,
+            vat: sanitizedMetadata.vat !== undefined ? sanitizedMetadata.vat : null,
+            vatAmount: sanitizedMetadata.vatAmount !== undefined ? sanitizedMetadata.vatAmount : null,
+            entertainmentTax: sanitizedMetadata.entertainmentTax !== undefined ? sanitizedMetadata.entertainmentTax : stripeMetadata.vatRate,
+            // Calculate entertainmentTaxAmount if not provided (for backward compatibility)
+            // entertainmentTaxAmount = basePrice * (entertainmentTax / 100) * quantity
+            entertainmentTaxAmount: sanitizedMetadata.entertainmentTaxAmount !== undefined
+                ? sanitizedMetadata.entertainmentTaxAmount
+                : (sanitizedMetadata.basePrice && sanitizedMetadata.entertainmentTax && sanitizedMetadata.quantity
+                    ? (sanitizedMetadata.basePrice * parseFloat(sanitizedMetadata.entertainmentTax) / 100) * parseFloat(sanitizedMetadata.quantity)
+                    : null),
+            serviceTax: sanitizedMetadata.serviceTax !== undefined ? sanitizedMetadata.serviceTax : stripeMetadata.serviceTax,
+            orderFee: sanitizedMetadata.orderFee !== undefined ? sanitizedMetadata.orderFee : stripeMetadata.orderFee,
+            orderFeeServiceTax: sanitizedMetadata.orderFeeServiceTax !== undefined ? sanitizedMetadata.orderFeeServiceTax : stripeMetadata.orderFeeServiceTax,
+            serviceTaxAmount: sanitizedMetadata.serviceTaxAmount !== undefined ? sanitizedMetadata.serviceTaxAmount : stripeMetadata.serviceTaxAmount,
+            country: sanitizedMetadata.country || null,
+            // Store total values for seated events with different ticket types
+            totalBasePrice: sanitizedMetadata.totalBasePrice !== undefined ? sanitizedMetadata.totalBasePrice : null,
+            totalServiceFee: sanitizedMetadata.totalServiceFee !== undefined ? sanitizedMetadata.totalServiceFee : null
         };
-
         // Add venue information if available
         if (event && event.venue) {
             ticketInfo.venue = {
@@ -1080,6 +1368,49 @@ export const handlePaymentSuccess = async (req, res, next) => {
             ticketInfo.seats = sanitizedMetadata.placeIds.map(placeId => ({
                 placeId: placeId
             }));
+        }
+
+        // Security Layer 3.5 (continued): Atomically check and reserve paymentIntentId to prevent duplicate ticket creation
+        // This must happen AFTER Stripe validation but BEFORE ticket creation
+        const paymentIntentReserveKey = `payment_intent_processed:${paymentIntentId}`;
+        const paymentIntentReserveValue = JSON.stringify({
+            eventId: sanitizedMetadata.eventId,
+            email: sanitizedMetadata.email,
+            timestamp: new Date().toISOString(),
+            clientId: getClientIdentifier(req),
+            status: 'processing' // Mark as processing
+        });
+
+        // Atomically check and reserve paymentIntentId (SET with NX)
+        const reserveResult = await redisClient.set(paymentIntentReserveKey, paymentIntentReserveValue, {
+            NX: true, // Only set if key does not exist
+            EX: 600 // 10 minutes TTL
+        });
+
+        if (reserveResult === null) {
+            // Payment intent has already been processed - this is a duplicate request
+            const existingDataStr = await redisClient.get(paymentIntentReserveKey);
+            let existingData = null;
+            try {
+                existingData = existingDataStr ? JSON.parse(existingDataStr) : null;
+            } catch (e) {
+                // Ignore parse errors
+            }
+
+            console.warn('Duplicate payment success request detected:', {
+                paymentIntentId,
+                eventId: sanitizedMetadata.eventId,
+                email: sanitizedMetadata.email,
+                clientId: getClientIdentifier(req),
+                timestamp: new Date().toISOString(),
+                existingData: existingData
+            });
+            // Return success with message (idempotent) - prevents errors if client retries after network issue
+            return res.status(consts.HTTP_STATUS_OK).json({
+                success: true,
+                message: 'Payment already processed',
+                duplicate: true
+            });
         }
 
         // Get or create crypto hash for email (using efficient search)
@@ -1162,6 +1493,25 @@ export const handlePaymentSuccess = async (req, res, next) => {
             clientId: clientId
         });
 
+        // Update paymentIntentId in Redis with final ticket data (already reserved above)
+        // Update the existing key with ticket information
+        const paymentIntentStoreKey = `payment_intent_processed:${paymentIntentId}`;
+        const paymentIntentValue = JSON.stringify({
+            ticketId: ticket._id.toString(),
+            eventId: sanitizedMetadata.eventId,
+            email: sanitizedMetadata.email,
+            timestamp: new Date().toISOString(),
+            clientId: clientId,
+            status: 'completed' // Mark as completed
+        });
+
+        // Update the existing key (it was already set above with NX, now we update it)
+        await redisClient.set(paymentIntentStoreKey, paymentIntentValue, {
+            EX: 86400 // 24 hours TTL (86400 seconds)
+        }).catch(err => {
+            // Log but don't fail - ticket is already created
+            console.warn('Failed to update paymentIntentId in Redis (non-critical):', err);
+        });
 
         res.status(consts.HTTP_STATUS_OK).json({
             success: true,
@@ -1773,54 +2123,84 @@ export const handleFreeEventRegistration = async (req, res, next) => {
  */
 
 /**
- * Decode a Ticketmaster-style placeId back to position data
- * @param {string} placeId - Encoded place ID (e.g., "J4WUAGE5DCMA")
+ * Decode placeId back to position data
+ * @param {string} placeId - Encoded place ID
  * @returns {Object|null} Decoded data or null if invalid
  */
 function decodePlaceId(placeId) {
 	try {
-		if (!placeId || typeof placeId !== 'string' || placeId.length < 12) {
+		if (!placeId || typeof placeId !== 'string') {
 			return null;
 		}
 
 		// Check if new format (with | separators) or old format
 		if (placeId.includes('|')) {
-			// New format: VENUE_PREFIX + SECTION_B64 + "|" + TIER_CODE + "|" + POSITION_CODE
 			const parts = placeId.split('|');
-			if (parts.length !== 3) {
+
+			// New format with available and tags: VENUE_PREFIX + SECTION_B64 + "|" + TIER_CODE + "|" + POSITION_CODE + "|" + AVAILABLE_FLAG + "|" + TAGS_CODE
+			if (parts.length === 5) {
+				const venuePrefix = parts[0].substring(0, 4);
+				const sectionB64 = parts[0].substring(4);
+				const tierCode = parts[1];
+				const positionCode = parts[2];
+				const availableFlag = parts[3];
+				const tagsCode = parts[4];
+
+				const section = base64UrlDecode(sectionB64);
+				const position = decodePosition(positionCode);
+				if (!position) {
+					return null;
+				}
+
+				const available = availableFlag === '1';
+				const tags = tagsCode ? base64UrlDecode(tagsCode).split(',').filter(Boolean) : [];
+
+				return {
+					section: section,
+					tierCode: tierCode,
+					row: position.row,
+					seat: position.seat,
+					x: position.x,
+					y: position.y,
+					available: available,
+					tags: tags
+				};
+			}
+			// Legacy format: VENUE_PREFIX + SECTION_B64 + "|" + TIER_CODE + "|" + POSITION_CODE
+			else if (parts.length === 3) {
+				const venuePrefix = parts[0].substring(0, 4);
+				const sectionB64 = parts[0].substring(4);
+				const tierCode = parts[1];
+				const positionCode = parts[2];
+
+				const section = base64UrlDecode(sectionB64);
+				const position = decodePosition(positionCode);
+				if (!position) {
+					return null;
+				}
+
+				return {
+					section: section,
+					tierCode: tierCode,
+					row: position.row,
+					seat: position.seat,
+					x: position.x,
+					y: position.y,
+					available: true,
+					tags: []
+				};
+			} else {
 				return null;
 			}
-
-			const venuePrefix = parts[0].substring(0, 4);
-			const sectionB64 = parts[0].substring(4);
-			const tierCode = parts[1];
-			const positionCode = parts[2];
-
-			// Decode section from base64url
-			const section = base64UrlDecode(sectionB64);
-
-			// Decode position code
-			const position = decodePosition(positionCode);
-			if (!position) {
-				return null;
-			}
-
-			return {
-				section: section,
-				tierCode: tierCode,
-				row: position.row,
-				seat: position.seat,
-				x: position.x,
-				y: position.y
-			};
 		} else {
-			// Old format: VENUE_PREFIX + SECTION_CHAR + TIER_CODE + POSITION_CODE
-			const venuePrefix = placeId.substring(0, 4);
-			const sectionChar = placeId.substring(4, 5);
-			const tierCode = placeId.substring(5, 6);
+			// Old format: VENUE_PREFIX + TIER_CODE + SECTION_CHAR + POSITION_CODE
+			if (placeId.length < 12) {
+				return null;
+			}
+			const tierCode = placeId.substring(4, 5);
+			const sectionChar = placeId.substring(5, 6);
 			const positionCode = placeId.substring(6);
 
-			// Decode position code
 			const position = decodePosition(positionCode);
 			if (!position) {
 				return null;
@@ -1832,7 +2212,9 @@ function decodePlaceId(placeId) {
 				row: position.row,
 				seat: position.seat,
 				x: position.x,
-				y: position.y
+				y: position.y,
+				available: true,
+				tags: []
 			};
 		}
 	} catch (err) {
@@ -1901,10 +2283,8 @@ function decodePosition(positionCode) {
  * Returns EventManifest data - frontend will merge with enriched manifest from S3
  */
 export const getEventSeatsPublic = async (req, res, next) => {
-    console.log('getEventSeatsPublic');
 	try {
 		const externalEventId = req.params.eventId; // External event ID from route
-        console.log('externalEventId', externalEventId);
 
 		// 1. Get event by external ID to check if it has seat selection enabled
 		const event = await Event.getEventById(externalEventId);
@@ -1929,12 +2309,8 @@ export const getEventSeatsPublic = async (req, res, next) => {
 
 		const encodedManifest = await EventManifest.findOne({ eventId: eventMongoId })
 			.populate('venue');
-        console.log('encodedManifest found:', !!encodedManifest);
-        if (encodedManifest) {
-          console.log('pricingConfig exists:', !!encodedManifest.pricingConfig);
-          console.log('pricingConfig tiers:', encodedManifest.pricingConfig?.tiers?.length || 0);
-          console.log('placeIds count:', encodedManifest.placeIds?.length || 0);
-        }
+
+
 		if (!encodedManifest) {
 			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
 				message: 'Manifest not found for this event',
@@ -1945,8 +2321,7 @@ export const getEventSeatsPublic = async (req, res, next) => {
 
 		// 3. Get venue's manifest (contains sections, backgroundSvg, places with coordinates)
 		const venueManifest = await Manifest.findOne({ venue: encodedManifest.venue._id })
-			.sort({ createdAt: -1 }); // Get latest manifest for venue
-        console.log('venueManifest', venueManifest);
+			.sort({ createdAt: -1 });
 		if (!venueManifest) {
 			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
 				message: 'Venue manifest not found',
@@ -1954,9 +2329,43 @@ export const getEventSeatsPublic = async (req, res, next) => {
 			});
 		}
 
-		// 4. If pricingModel is 'pricing_configuration', decode pricing from placeIds using pricingConfig
-		// EventManifest should have pricingConfig with tier mappings encoded into placeIds during sync
+		// 4. Decode placeIds to extract available and tags, and merge with places
+		// This works for both pricing_configuration and ticket_info models
 		let places = venueManifest.places || [];
+		const encodedPlaceIds = encodedManifest.placeIds || [];
+
+		// Create a map of location key (section-row-seat) to decoded placeId data
+		const locationToDecodedMap = new Map();
+
+		// Decode all placeIds to extract available and tags
+		encodedPlaceIds.forEach(encodedPlaceId => {
+			try {
+				const decoded = decodePlaceId(encodedPlaceId);
+				if (decoded && decoded.section && decoded.row !== null && decoded.seat !== null) {
+					// Create multiple possible keys to handle string/number mismatches
+					const keys = [
+						`${decoded.section}-${decoded.row}-${decoded.seat}`,
+						`${decoded.section}-${String(decoded.row)}-${String(decoded.seat)}`,
+						`${decoded.section}-${decoded.row}-${String(decoded.seat)}`,
+						`${decoded.section}-${String(decoded.row)}-${decoded.seat}`
+					];
+					keys.forEach(key => {
+						if (!locationToDecodedMap.has(key)) {
+							locationToDecodedMap.set(key, {
+								encodedPlaceId,
+								available: decoded.available !== undefined ? decoded.available : true,
+								tags: decoded.tags || [],
+								tierCode: decoded.tierCode
+							});
+						}
+					});
+				}
+			} catch (error) {
+				console.warn('Failed to decode placeId:', encodedPlaceId, error);
+			}
+		});
+
+		// If pricingModel is 'pricing_configuration', also decode pricing from placeIds
 		if (event.venue?.pricingModel === 'pricing_configuration' && encodedManifest.pricingConfig) {
 			// Create a map of tier id to pricing configuration
 			const tierMap = new Map();
@@ -1964,34 +2373,7 @@ export const getEventSeatsPublic = async (req, res, next) => {
 				tierMap.set(tier.id, tier);
 			});
 
-			// Match places with encoded placeIds from EventManifest
-			const encodedPlaceIds = encodedManifest.placeIds || [];
-			const matchedPlaces = [];
-
-			// Create lookup map from original placeId to encoded placeId
-			const placeIdToEncodedMap = new Map();
-
-			// For each encoded placeId, decode it and find matching original place
-			encodedPlaceIds.forEach(encodedPlaceId => {
-				try {
-					// Decode the placeId to get section, row, seat
-					const decoded = decodePlaceId(encodedPlaceId);
-					if (decoded) {
-						// Create multiple possible keys to handle string/number mismatches
-						const keys = [
-							`${decoded.section}-${decoded.row}-${decoded.seat}`,
-							`${decoded.section}-${String(decoded.row)}-${String(decoded.seat)}`,
-							`${decoded.section}-${decoded.row}-${String(decoded.seat)}`,
-							`${decoded.section}-${String(decoded.row)}-${decoded.seat}`
-						];
-						keys.forEach(key => placeIdToEncodedMap.set(key, encodedPlaceId));
-					}
-				} catch (error) {
-					console.warn('Failed to decode placeId:', encodedPlaceId, error);
-				}
-			});
-
-			// Merge pricing into places by matching section-row-seat
+			// Merge pricing and availability into places by matching section-row-seat
 			let placesWithPricing = 0;
 			places = places.map(place => {
 				// Create multiple possible keys to handle string/number mismatches
@@ -2002,47 +2384,100 @@ export const getEventSeatsPublic = async (req, res, next) => {
 					`${place.section}-${String(place.row)}-${place.seat}`
 				];
 
-				let encodedPlaceId = null;
+				let decodedData = null;
 				for (const key of keys) {
-					encodedPlaceId = placeIdToEncodedMap.get(key);
-					if (encodedPlaceId) break;
+					decodedData = locationToDecodedMap.get(key);
+					if (decodedData) break;
 				}
 
-				if (encodedPlaceId && encodedPlaceId.length >= 6) {
-					// Extract tier code from encoded placeId (6th character: VENUE_PREFIX + SECTION_CHAR + TIER_CODE)
-					const tierCode = encodedPlaceId.charAt(5); // Index 5 = TIER_CODE position
-					console.log(`Place ${place.section}-${place.row}-${place.seat}: placeId=${encodedPlaceId}, tierCode=${tierCode}`);
-					const tierPricing = tierMap.get(tierCode);
+				const enrichedPlace = { ...place };
 
-					if (tierPricing) {
-						placesWithPricing++;
-						// Merge pricing data from decoded tier
-						return {
-							...place,
-							pricing: {
+				// Add available and tags from decoded placeId
+				if (decodedData) {
+					enrichedPlace.available = decodedData.available;
+					enrichedPlace.tags = decodedData.tags;
+					enrichedPlace.wheelchairAccessible = decodedData.tags.includes('wheelchair');
+
+					// Extract tier code and add pricing
+					if (decodedData.tierCode) {
+						const tierPricing = tierMap.get(decodedData.tierCode);
+						if (tierPricing) {
+							placesWithPricing++;
+							enrichedPlace.pricing = {
 								basePrice: tierPricing.basePrice,
 								tax: tierPricing.tax,
 								serviceFee: tierPricing.serviceFee,
 								serviceTax: tierPricing.serviceTax,
 								orderFee: encodedManifest.pricingConfig.orderFee || 0,
 								currency: encodedManifest.pricingConfig.currency || 'EUR'
-							}
-						};
+							};
+						}
 					}
+				} else {
+					// Default values if not found in decoded data
+					enrichedPlace.available = place.available !== undefined ? place.available : true;
+					enrichedPlace.tags = place.tags || [];
+					enrichedPlace.wheelchairAccessible = (place.tags || []).includes('wheelchair');
 				}
-				return place;
-			});
-			console.log(`Merged pricing into ${placesWithPricing} out of ${places.length} places`);
 
+				return enrichedPlace;
+			});
+		} else {
+			// For ticket_info model, just add available and tags
+			places = places.map(place => {
+				// Create multiple possible keys to handle string/number mismatches
+				const keys = [
+					`${place.section}-${place.row}-${place.seat}`,
+					`${String(place.section)}-${String(place.row)}-${String(place.seat)}`,
+					`${place.section}-${place.row}-${String(place.seat)}`,
+					`${place.section}-${String(place.row)}-${place.seat}`
+				];
+
+				let decodedData = null;
+				for (const key of keys) {
+					decodedData = locationToDecodedMap.get(key);
+					if (decodedData) break;
+				}
+
+				if (decodedData) {
+					return {
+						...place,
+						available: decodedData.available,
+						tags: decodedData.tags,
+						wheelchairAccessible: decodedData.tags.includes('wheelchair')
+					};
+				} else {
+					// Default values if not found in decoded data
+					return {
+						...place,
+						available: place.available !== undefined ? place.available : true,
+						tags: place.tags || [],
+						wheelchairAccessible: (place.tags || []).includes('wheelchair')
+					};
+				}
+			});
 		}
 
         const venue = await Venue.findById(encodedManifest.venue._id);
-        console.log('venue', venue);
 		// 5. Get Redis reservations for event (using external event ID for Redis key)
 		const reservedMap = await seatReservationService.getReservedSeats(externalEventId);
 		const reservedPlaceIds = Array.from(reservedMap.keys());
 
-		// 6. Return EventManifest + Venue Manifest data (everything in one response)
+		// 6. Format sections from venue (contains polygon and spacingConfig)
+		const formattedSections = (venue.sections || []).map(section => ({
+			id: section.id || section._id?.toString() || section.name,
+			name: section.name,
+			color: section.color || '#2196F3',
+			bounds: section.bounds || null,
+			// Clean polygon points to remove MongoDB _id fields
+			polygon: section.polygon ? section.polygon.map(point => ({
+				x: point.x,
+				y: point.y
+			})) : null,
+			spacingConfig: section.spacingConfig || null
+		}));
+
+		// 7. Return EventManifest + Venue Manifest data (everything in one response)
 		return res.status(consts.HTTP_STATUS_OK).json({
 			data: {
 				// EventManifest fields (Ticketmaster format)
@@ -2063,12 +2498,13 @@ export const getEventSeatsPublic = async (req, res, next) => {
 
 				// Venue Manifest data (sections, backgroundSvg, places with coordinates)
 				backgroundSvg: venue.backgroundSvg || null,
-				sections: venueManifest.sections || [],
-				//places: places,
+				sections: formattedSections, // Use venue.sections with polygon and spacingConfig
+				places: places, // Enriched places with available, tags, and wheelchairAccessible
 
 				// Metadata
 				venue: {
-					pricingModel: event.venue?.pricingModel || 'ticket_info' // Include pricingModel from event
+					pricingModel: event.venue?.pricingModel || 'ticket_info', // Include pricingModel from event
+					sections: formattedSections // Also include in venue object for frontend compatibility
 				},
 				pricingConfigurationId: encodedManifest.pricingConfigurationId
 			}

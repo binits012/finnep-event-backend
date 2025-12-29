@@ -12,7 +12,7 @@ import { info, error, warn } from '../model/logger.js';
  * Run with: node scripts/migrate-schemas.js
  */
 
-const MIGRATION_VERSION = '2025-11-17-001';
+const MIGRATION_VERSION = '2025-12-24-001';
 
 async function waitForConnection() {
     let retries = 0;
@@ -162,6 +162,71 @@ async function migrateSettingOtherInfo() {
     }
 }
 
+async function migrateTicketOtpUniqueIndex() {
+    info('Starting migration: Ticket OTP unique index');
+
+    try {
+        const Ticket = mongoModel.Ticket;
+
+        // First, check for duplicate OTPs
+        info('Checking for duplicate OTPs...');
+        const duplicateOtps = await Ticket.aggregate([
+            {
+                $match: {
+                    otp: { $exists: true, $ne: null }
+                }
+            },
+            {
+                $group: {
+                    _id: '$otp',
+                    count: { $sum: 1 },
+                    ticketIds: { $push: '$_id' }
+                }
+            },
+            {
+                $match: {
+                    count: { $gt: 1 }
+                }
+            }
+        ]);
+
+        if (duplicateOtps.length > 0) {
+            warn(`Found ${duplicateOtps.length} duplicate OTP(s). This must be resolved before creating unique index.`);
+            warn('Duplicate OTPs:');
+            duplicateOtps.forEach(dup => {
+                warn(`  OTP: ${dup._id}, Count: ${dup.count}, Ticket IDs: ${dup.ticketIds.join(', ')}`);
+            });
+            throw new Error(`Cannot create unique index: Found ${duplicateOtps.length} duplicate OTP(s). Please resolve duplicates first.`);
+        }
+
+        info('No duplicate OTPs found. Proceeding with index creation...');
+
+        // Check if index already exists
+        const existingIndexes = await Ticket.collection.indexes();
+        const otpIndexExists = existingIndexes.some(idx => {
+            const keys = Object.keys(idx.key);
+            return keys.length === 1 && keys[0] === 'otp' && idx.unique === true;
+        });
+
+        if (otpIndexExists) {
+            info('Unique index on otp field already exists');
+            return { created: false, skipped: true };
+        }
+
+        // Create unique index on otp field
+        await Ticket.collection.createIndex(
+            { otp: 1 },
+            { unique: true, background: true, name: 'otp_1_unique' }
+        );
+
+        info('Unique index on otp field created successfully');
+        return { created: true, skipped: false };
+    } catch (err) {
+        error('Error migrating Ticket OTP unique index:', err);
+        throw err;
+    }
+}
+
 async function ensureIndexes() {
     info('Ensuring indexes are created');
 
@@ -287,12 +352,14 @@ async function runMigrations() {
         const results = {
             merchantOtherInfo: {},
             settingOtherInfo: {},
+            ticketOtpIndex: {},
             indexes: 'ensured'
         };
 
         // Run migrations
         results.merchantOtherInfo = await migrateMerchantOtherInfo();
         results.settingOtherInfo = await migrateSettingOtherInfo();
+        results.ticketOtpIndex = await migrateTicketOtpUniqueIndex();
         await ensureIndexes();
 
         // Track migration
@@ -303,6 +370,7 @@ async function runMigrations() {
         console.log(`Version: ${MIGRATION_VERSION}`);
         console.log(`Merchant otherInfo: ${results.merchantOtherInfo.updated} updated, ${results.merchantOtherInfo.skipped} skipped`);
         console.log(`Setting otherInfo: ${results.settingOtherInfo.updated} updated, ${results.settingOtherInfo.skipped} skipped`);
+        console.log(`Ticket OTP Index: ${results.ticketOtpIndex.created ? 'Created' : results.ticketOtpIndex.skipped ? 'Already exists' : 'Failed'}`);
         console.log('Indexes: Ensured');
         console.log('========================\n');
 

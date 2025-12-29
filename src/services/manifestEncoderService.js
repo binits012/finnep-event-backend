@@ -3,17 +3,17 @@ import crypto from 'crypto';
 
 /**
  * Manifest Encoder Service
- * Converts full manifest (with places array) to Ticketmaster-encoded format
+ * Converts full manifest (with places array) to encoded format
  * for efficient storage and availability tracking
  */
 export class ManifestEncoderService {
 	/**
-	 * Encode a full manifest to Ticketmaster format
-	 * Returns minimal Ticketmaster-compatible format: eventId, updateHash, updateTime, placeIds, partitions
+	 * Encode a full manifest to encoded format
+	 * Returns minimal encoded format: eventId, updateHash, updateTime, placeIds, partitions
 	 * Full venue configuration (sections, backgroundSvg, places with coordinates) should remain in Venue collection
 	 * @param {Object} fullManifest - Full manifest with places array
 	 * @param {Object} pricingConfig - Pricing configuration (Map of section/zone -> price)
-	 * @returns {Object} Encoded manifest in Ticketmaster format (minimal structure)
+	 * @returns {Object} Encoded manifest (minimal structure)
 	 */
 	encodeManifest(fullManifest, pricingConfig = {}) {
 		try {
@@ -24,9 +24,15 @@ export class ManifestEncoderService {
 			// 1. Sort places by section → row → seat for consistent ordering
 			const sortedPlaces = this._sortPlaces(fullManifest.places);
 
-		// 2. Generate Ticketmaster-style encoded placeIds
-		// Format: VENUE_PREFIX(4) + SECTION_CHAR(1) + POSITION_CODE(6-8)
-		// Ticketmaster uses longer encoded strings (e.g., "JUWUETZ2GIYDUNRYHA") instead of simple hex
+		// 2. Generate encoded placeIds
+		// Format: VENUE_PREFIX(4) + SECTION_B64(variable) + "|" + TIER_CODE(1) + "|" + POSITION_CODE(6-8) + "|" + AVAILABLE_FLAG(1) + "|" + TAGS_CODE(variable)
+		// Example: "MIK3QQ|0|2RRXSRPNZ4|1|d2hlZWxjaGFpcg"
+		// - VENUE_PREFIX: 4-char base36 prefix from venueId
+		// - SECTION_B64: base64url encoded section name
+		// - TIER_CODE: 1-char base36 tier identifier (0-9, A-Z)
+		// - POSITION_CODE: base36 encoded position (row, seat, x, y)
+		// - AVAILABLE_FLAG: "1" for available, "0" for not available
+		// - TAGS_CODE: base64url encoded comma-separated tags (empty if no tags)
 		// Store mapping: originalPlaceId -> encodedPlaceId for client lookup
 		// Extract venueId (could be ObjectId object or string)
 		let venueId = fullManifest.venue || null;
@@ -35,17 +41,17 @@ export class ManifestEncoderService {
 		} else if (venueId) {
 			venueId = String(venueId);
 		}
-		const { placeIds, placeIdMapping, pricingConfig: encodedPricingConfig } = this._generateTicketmasterPlaceIds(sortedPlaces, venueId);
+		const { placeIds, placeIdMapping, pricingConfig: encodedPricingConfig } = this._generateEncodedPlaceIds(sortedPlaces, venueId);
 
-			// 3. Calculate partitions (price change boundaries) - Ticketmaster format only uses partitions
-			// Note: pricingZones are calculated but not included in Ticketmaster format output
+			// 3. Calculate partitions (price change boundaries)
+			// Note: pricingZones are calculated but not included in encoded format output
 			// Use sortedPlaces with original placeIds for partition calculation
 			const { partitions } = this.calculatePartitions(sortedPlaces, pricingConfig);
 
-			// 4. Generate updateHash from sorted placeIds (Ticketmaster format)
+			// 4. Generate updateHash from sorted placeIds
 			const updateHash = this._generateUpdateHash(placeIds);
 
-			// 5. Build minimal Ticketmaster-format encoded manifest
+			// 5. Build minimal encoded manifest
 			// Includes: eventId, updateHash, updateTime, placeIds, partitions, pricingConfig
 			// Full venue configuration (sections, backgroundSvg, places with coordinates) stays in Venue collection
 			const encodedManifest = {
@@ -55,11 +61,11 @@ export class ManifestEncoderService {
 				placeIds: placeIds,
 				partitions: partitions,
 				pricingConfig: encodedPricingConfig, // Pricing configuration with tier mappings
-				// Store mapping internally for lookups (not part of Ticketmaster format, but needed)
+				// Store mapping internally for lookups (not part of encoded format, but needed)
 				_placeIdMapping: placeIdMapping
 			};
 
-			info(`Manifest encoded (Ticketmaster format): ${placeIds.length} places, ${partitions.length} partitions`);
+			info(`Manifest encoded: ${placeIds.length} places, ${partitions.length} partitions`);
 			return encodedManifest;
 		} catch (err) {
 			error('Error encoding manifest:', err);
@@ -305,7 +311,7 @@ export class ManifestEncoderService {
 	}
 
 	/**
-	 * Generate update hash (MD5 of sorted placeIds) - Ticketmaster format
+	 * Generate update hash (MD5 of sorted placeIds)
 	 * @private
 	 * @param {Array<string>} placeIdsArray - Array of place IDs
 	 * @returns {string} 32-character hex hash
@@ -317,18 +323,24 @@ export class ManifestEncoderService {
 	}
 
 	/**
-	 * Generate Ticketmaster-style encoded placeIds with pricing tier encoding
-	 * Format: VENUE_PREFIX(4) + SECTION_CHAR(1) + TIER_CODE(1) + POSITION_CODE(6-8)
-	 * Example: "J4WU" + "A" + "2" + "GE5DCMA" = "J4WUA2GE5DCMA"
+	 * Generate encoded placeIds with pricing tier encoding
+	 * Format: VENUE_PREFIX(4) + SECTION_B64(variable) + "|" + TIER_CODE(1) + "|" + POSITION_CODE(6-8) + "|" + AVAILABLE_FLAG(1) + "|" + TAGS_CODE(variable)
+	 * Example: "MIK3QQ|0|2RRXSRPNZ4|1|d2hlZWxjaGFpcg"
+	 * - VENUE_PREFIX: 4-char base36 prefix from venueId
+	 * - SECTION_B64: base64url encoded section name (variable length)
+	 * - TIER_CODE: 1-char base36 tier identifier (0-9, A-Z)
+	 * - POSITION_CODE: base36 encoded position (row, seat, x, y)
+	 * - AVAILABLE_FLAG: "1" for available, "0" for not available
+	 * - TAGS_CODE: base64url encoded comma-separated tags (empty if no tags)
 	 *
 	 * Position code encodes: row, seat, x, y coordinates using hierarchical encoding
 	 * Tier code encodes: pricing tier index (0-35, maps to pricing configuration)
 	 * @private
-	 * @param {Array<Object>} sortedPlaces - Sorted array of place objects with section, row, seat, x, y, pricing
+	 * @param {Array<Object>} sortedPlaces - Sorted array of place objects with section, row, seat, x, y, pricing, available, tags
 	 * @param {string} venueId - Venue ID (MongoDB ObjectId) for generating consistent prefix
 	 * @returns {Object} Object with placeIds array, placeIdMapping, and pricingConfig
 	 */
-	_generateTicketmasterPlaceIds(sortedPlaces, venueId = null) {
+	_generateEncodedPlaceIds(sortedPlaces, venueId = null) {
 		// Generate a consistent 4-character venue prefix from venueId
 		// Same venue = same prefix across all events
 		const venuePrefix = this._generateVenuePrefix(venueId);
@@ -364,8 +376,16 @@ export class ManifestEncoderService {
 			// Encode position: row + seat + x + y using hierarchical encoding
 			const positionCode = this._encodePosition(row, seat, x, y);
 
-			// Combine: VENUE_PREFIX + SECTION_B64 + "|" + TIER_CODE + "|" + POSITION_CODE
-			const encodedPlaceId = `${venuePrefix}${sectionB64}|${tierCode}|${positionCode}`;
+			// Extract available flag (default to true if not specified)
+			const available = place.available !== false ? '1' : '0';
+
+			// Encode tags (comma-separated, base64url encoded)
+			const tags = place.tags || [];
+			const tagsStr = tags.length > 0 ? tags.join(',') : '';
+			const tagsCode = tagsStr ? this._base64UrlEncode(tagsStr) : '';
+
+			// Combine: VENUE_PREFIX + SECTION_B64 + "|" + TIER_CODE + "|" + POSITION_CODE + "|" + AVAILABLE_FLAG + "|" + TAGS_CODE
+			const encodedPlaceId = `${venuePrefix}${sectionB64}|${tierCode}|${positionCode}|${available}|${tagsCode}`;
 
 			encodedPlaceIds.push(encodedPlaceId);
 			placeIdMapping[originalPlaceId] = encodedPlaceId;

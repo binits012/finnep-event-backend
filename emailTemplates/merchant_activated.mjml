@@ -1,0 +1,106 @@
+<mjml>
+  <mj-head>
+    <mj-font name="Fira Sans" href="https://fonts.googleapis.com/css?family=Fira+Sans:ital,wght@0,100;1,100;0,200;1,200;0,300;1,300;0,400;1,400;0,500;1,500;0,600;1,600;0,700;1,700;0,800;1,800;0,900;1,900" />
+    <mj-title>Merchant Status Updated - Account Activated</mj-title>
+    <mj-attributes>
+      <mj-all font-family="Fira Sans, Arial, sans-serif" />
+      <mj-text color="#2D3A41" />
+    </mj-attributes>
+    <mj-style>
+      @media (max-width: 620px) {
+        body, table, td, div {
+          max-width: 100% !important;
+          box-sizing: border-box !important;
+        }
+        table {
+          width: 100% !important;
+          table-layout: fixed !important;
+        }
+        td {
+          word-wrap: break-word !important;
+        }
+        img {
+          max-width: 100% !important;
+          height: auto !important;
+        }
+        table[align="center"][style*="inline-table"] {
+          width: 42px !important;
+          min-width: 42px !important;
+          max-width: 42px !important;
+          display: inline-table !important;
+          margin: 0 8px !important;
+        }
+        table[align="center"][style*="inline-table"] td {
+          width: 42px !important;
+          min-width: 42px !important;
+          max-width: 42px !important;
+          padding: 4px !important;
+        }
+        table[align="center"][style*="inline-table"] table {
+          width: 42px !important;
+          min-width: 42px !important;
+          max-width: 42px !important;
+        }
+        table[align="center"][style*="inline-table"] img {
+          width: 42px !important;
+          height: 42px !important;
+          min-width: 42px !important;
+          max-width: 42px !important;
+        }
+        table[align="center"][style*="inline-table"] a {
+          display: block !important;
+          width: 42px !important;
+          height: 42px !important;
+          min-width: 42px !important;
+          max-width: 42px !important;
+        }
+      }
+    </mj-style>
+  </mj-head>
+  <mj-body background-color="#1F2937">
+    <mj-wrapper background-color="#1F2937">
+      <mj-section padding="40px 20px">
+        <mj-column>
+          <mj-text align="center" padding="0 0 30px 0">
+            <div style="background: rgba(255, 255, 255, 0.1); border-radius: 16px; padding: 25px; display: inline-block;">
+              <img src="https://finnep.s3.eu-central-1.amazonaws.com/Other/finnep_logo.png" width="200" height="auto" alt="Finnep Logo" style="display: block; border: 0;" />
+            </div>
+          </mj-text>
+        </mj-column>
+      </mj-section>
+
+      <mj-section padding="0 40px 40px 40px">
+        <mj-column>
+          <mj-text align="center" color="#FFFFFF" font-size="28px" font-weight="700" padding-bottom="20px">
+            🎉 Account Activated Successfully!
+          </mj-text>
+          <mj-text color="#F3F4F6" font-size="22px" font-weight="600" padding-bottom="30px">
+            Hi {{orgName}},
+          </mj-text>
+          <mj-text color="#D1D5DB" font-size="16px" line-height="1.6" padding-bottom="20px">
+            Great news! Your merchant account has been successfully activated. You're now ready to start creating amazing events and reaching your audience.
+          </mj-text>
+          <mj-text color="#D1D5DB" font-size="16px" line-height="1.6" padding-bottom="30px">
+            You can now access your dashboard and begin setting up your first event. Our platform offers powerful tools to help you create, manage, and promote your events effectively.
+          </mj-text>
+          <mj-button background-color="#F59E0B" color="#FFFFFF" font-size="16px" font-weight="600" border-radius="25px" href="{{dashboardUrl}}">
+            Access Dashboard →
+          </mj-button>
+        </mj-column>
+      </mj-section>
+
+      <mj-section background-color="#374151" padding="30px 40px">
+        <mj-column>
+          <mj-text align="center" color="#9CA3AF" font-size="12px" padding-bottom="10px">
+            Business ID: <span style="font-weight: 600; color: #F59E0B;">2589566-4</span>
+          </mj-text>
+          <mj-social font-size="15px" icon-size="42px" mode="horizontal">
+            <mj-social-element name="facebook" href="https://www.facebook.com/profile.php?id=61565375592900" />
+            <mj-social-element name="linkedin" href="https://www.linkedin.com/company/105069196/admin/dashboard/" />
+          </mj-social>
+        </mj-column>
+      </mj-section>
+    </mj-wrapper>
+  </mj-body>
+</mjml>
+

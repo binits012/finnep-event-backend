@@ -1,0 +1,105 @@
+<mjml>
+  <mj-head>
+    <mj-font name="Segoe UI" href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@400;600;700&display=swap" />
+    <mj-title>Thank You for Your Feedback</mj-title>
+    <mj-attributes>
+      <mj-all font-family="'Segoe UI', Tahoma, Geneva, Verdana, sans-serif" />
+      <mj-text color="#333" line-height="1.6" />
+    </mj-attributes>
+    <mj-style>
+      @media (max-width: 620px) {
+        body, table, td, div {
+          max-width: 100% !important;
+          box-sizing: border-box !important;
+        }
+        table {
+          width: 100% !important;
+          table-layout: fixed !important;
+        }
+        td {
+          word-wrap: break-word !important;
+        }
+      }
+    </mj-style>
+  </mj-head>
+  <mj-body background-color="#f8f9fa">
+    <mj-wrapper background-color="#ffffff" border-radius="10px">
+      <mj-section padding="40px">
+        <mj-column>
+          <mj-text align="center" padding="0 0 30px 0">
+            <div style="font-size: 28px; font-weight: bold; color: #4f46e5; margin-bottom: 10px;">Finnep</div>
+            <h1 style="font-size: 24px; color: #1f2937; margin: 0;">Thank You for Your Feedback!</h1>
+          </mj-text>
+        </mj-column>
+      </mj-section>
+
+      <mj-section padding="0 40px 40px 40px">
+        <mj-column>
+          <mj-text padding-bottom="20px">
+            Dear {{name}},
+          </mj-text>
+          <mj-text padding-bottom="20px">
+            Thank you for reaching out to us! We have successfully received your feedback and truly appreciate you taking the time to share your thoughts with us.
+          </mj-text>
+
+          <mj-section background-color="#f3f4f6" border-left="4px solid #4f46e5" border-radius="5px" padding="20px">
+            <mj-column>
+              <mj-text padding-bottom="10px">
+                <strong>Your message regarding:</strong> {{subject}}
+              </mj-text>
+              <mj-text padding="0">
+                <strong>Message:</strong> {{message}}
+              </mj-text>
+            </mj-column>
+          </mj-section>
+
+          <mj-text padding="20px 0">
+            We take all feedback seriously and will review your message carefully. Our team will get back to you as soon as possible, typically within 24-48 hours during business days.
+          </mj-text>
+
+          <mj-section background-color="#f9fafb" border-radius="8px" padding="20px">
+            <mj-column>
+              <mj-text font-size="18px" font-weight="700" color="#1f2937" padding-bottom="15px">
+                Submission Details:
+              </mj-text>
+              <mj-text padding="5px 0">
+                <strong>Name:</strong> {{name}}
+              </mj-text>
+              <mj-text padding="5px 0">
+                <strong>Email:</strong> {{email}}
+              </mj-text>
+              <mj-text padding="5px 0">
+                <strong>Subject:</strong> {{subject}}
+              </mj-text>
+              <mj-text padding="5px 0">
+                <strong>Date:</strong> {{date}}
+              </mj-text>
+            </mj-column>
+          </mj-section>
+
+          <mj-text padding="20px 0">
+            If you have any urgent matters or additional questions, please don't hesitate to contact us directly.
+          </mj-text>
+        </mj-column>
+      </mj-section>
+
+      <mj-section border-top="1px solid #e5e7eb" padding="40px">
+        <mj-column>
+          <mj-text align="center" padding="0 0 20px 0">
+            Best regards,<br /><strong>The Finnep Team</strong>
+          </mj-text>
+          <mj-text align="center" color="#6b7280" font-size="14px" padding-bottom="10px">
+            📧 Email: <a href="mailto:info@finnep.fi" style="color: #4f46e5; text-decoration: none;">info@finnep.fi</a>
+          </mj-text>
+          <mj-text align="center" color="#6b7280" font-size="14px" padding-bottom="10px">
+            🌐 Website: <a href="https://finnep.fi" style="color: #4f46e5; text-decoration: none;">finnep.fi</a>
+          </mj-text>
+          <mj-text align="center" color="#9ca3af" font-size="12px" padding-top="20px">
+            This is an automated confirmation email. Please do not reply to this message.
+          </mj-text>
+        </mj-column>
+      </mj-section>
+    </mj-wrapper>
+  </mj-body>
+</mjml>
+

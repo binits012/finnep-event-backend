@@ -1,0 +1,61 @@
+<mjml>
+  <mj-head>
+    <mj-title>Failure Report</mj-title>
+    <mj-attributes>
+      <mj-all font-family="Arial, sans-serif" />
+      <mj-text color="#333" />
+    </mj-attributes>
+    <mj-style>
+      @media (max-width: 620px) {
+        body, table, td, div {
+          max-width: 100% !important;
+          box-sizing: border-box !important;
+        }
+        table {
+          width: 100% !important;
+          table-layout: fixed !important;
+        }
+        td, th {
+          word-wrap: break-word !important;
+          padding: 6px 4px !important;
+          font-size: 12px !important;
+        }
+      }
+    </mj-style>
+  </mj-head>
+  <mj-body background-color="#ffffff">
+    <mj-section padding="40px 20px">
+      <mj-column>
+        <mj-text font-size="24px" font-weight="700" padding-bottom="20px">
+          Failed Emails
+        </mj-text>
+        <mj-text padding-bottom="10px">
+          Hi {{adminName}},
+        </mj-text>
+        <mj-text padding-bottom="30px">
+          Unfortunately, we have some dangling emails. Please do the needful
+        </mj-text>
+
+        <mj-text font-size="20px" font-weight="700" padding-bottom="15px">
+          Failure Email Lists
+        </mj-text>
+
+        <mj-raw>
+          <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+            <thead>
+              <tr style="background-color: #f2f2f2;">
+                <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Id</th>
+                <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Email</th>
+                <th style="padding: 8px; border: 1px solid #ddd; text-align: left;">Event</th>
+              </tr>
+            </thead>
+            <tbody>
+              {{{trData}}}
+            </tbody>
+          </table>
+        </mj-raw>
+      </mj-column>
+    </mj-section>
+  </mj-body>
+</mjml>
+

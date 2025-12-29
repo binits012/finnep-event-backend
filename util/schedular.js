@@ -15,6 +15,7 @@ import { messageConsumer } from '../rabbitMQ/services/messageConsumer.js';
 import { Event } from '../model/mongoModel.js';
 import { QUEUE_PREFETCH } from '../rabbitMQ/services/queueSetup.js';
 import { v4 as uuidv4 } from 'uuid';
+import { compileMjmlTemplate } from './emailTemplateLoader.js';
 
 dotenv.config();
 const __dirname = dirname(import.meta.url).slice(7);
@@ -440,10 +441,13 @@ function scheduleJobs() {
 // Email template helper
 const loadEmailTemplate = async (fileLocation, username, emailRows) => {
   try {
-    const emailData = (await fs.readFile(fileLocation, 'utf8'))
-      .replace('$adminName', username || 'Admin')
-      .replace('$trData', emailRows || '');
-    return emailData;
+    // Replace .html with .mjml in file path
+    const mjmlPath = fileLocation.replace('.html', '.mjml');
+    const variables = {
+      adminName: username || 'Admin',
+      trData: emailRows || '' // This will be inserted as unescaped HTML using {{{trData}}}
+    };
+    return await compileMjmlTemplate(mjmlPath, variables);
   } catch (err) {
     error('Error loading email template:', err);
     return `<p>Hello ${username || 'Admin'},</p><p>Failed email report:</p><table>${emailRows || ''}</table>`;

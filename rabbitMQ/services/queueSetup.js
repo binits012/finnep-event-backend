@@ -2,13 +2,15 @@ import { messageConsumer } from './messageConsumer.js';
 import { handleMerchantMessage } from '../handlers/merchantHandler.js';
 import { handleEventMessage } from '../handlers/eventHandler.js';
 import { handleExternalTicketSalesMessage } from '../handlers/externalTicketSalesHandler.js';
+import { handleSeatAvailabilityCheck } from '../handlers/seatAvailabilityHandler.js';
+import { handleSeatedEventTicketCreated } from '../handlers/seatedEventTicketHandler.js';
 import { info, error, warn } from '../../model/logger.js';
 
 // Track if queues have been set up to prevent duplicate setup
 let isSetupComplete = false;
 
 // Queue configuration - prefetch controls how many messages are processed concurrently
-export const QUEUE_PREFETCH = 10;
+export const QUEUE_PREFETCH = 20;
 
 const setupQueues = async () => {
     // Prevent duplicate queue setup
@@ -74,6 +76,28 @@ const setupQueues = async () => {
         await messageConsumer.consumeQueue('external-ticket-sales-queue', async (message) => {
             await handleExternalTicketSalesMessage(message);
         }, externalTicketSalesQueueOptions);
+
+        // Set up seat availability check queue consumption
+        const seatAvailabilityCheckQueueOptions = {
+            prefetch: QUEUE_PREFETCH,
+            deadLetterExchange: 'event-merchant-dlx',
+            deadLetterRoutingKey: 'dlq.external.seat.availability.check.retry-1'
+        };
+        info('Setting up external.seat.availability.check queue with options:', seatAvailabilityCheckQueueOptions);
+        await messageConsumer.consumeQueue('external.seat.availability.check', async (message) => {
+            await handleSeatAvailabilityCheck(message);
+        }, seatAvailabilityCheckQueueOptions);
+
+        // Set up external seated event ticket created queue consumption
+        const externalSeatedEventTicketQueueOptions = {
+            prefetch: QUEUE_PREFETCH,
+            deadLetterExchange: 'event-merchant-dlx',
+            deadLetterRoutingKey: 'dlq.external.seated.event.ticket.retry-1'
+        };
+        info('Setting up external.seated.event.ticket queue with options:', externalSeatedEventTicketQueueOptions);
+        await messageConsumer.consumeQueue('external.seated.event.ticket', async (message) => {
+            await handleSeatedEventTicketCreated(message);
+        }, externalSeatedEventTicketQueueOptions);
 
         isSetupComplete = true;
         info('All queues set up and consuming messages');

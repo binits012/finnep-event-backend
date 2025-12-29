@@ -7,6 +7,7 @@ import moment from 'moment-timezone'
 import dotenv from 'dotenv'
 import crypto from 'crypto'
 import { getSignedUrl } from "@aws-sdk/cloudfront-signer";
+import { compileMjmlTemplate } from './emailTemplateLoader.js';
 const privateKey = process.env.CLOUDFRONT_PRIVATE_KEY
 const keyPairId = process.env.CLOUDFRONT_KEY_PAIR
 dotenv.config()
@@ -176,75 +177,89 @@ export  const generateICS = async(event, ticketId)=>{
 
 }
 
-export  const loadEmailTemplate = async (fileLocation, eventTitle,eventPromotionalPhoto, qrCodeRef, otp) => {
-    const emailData = (await fs.readFile(fileLocation,'utf8'))
-    .replace('$eventTitle',eventTitle)
-    .replace('$eventTitle',eventTitle)
-    .replace('$eventTitle',eventTitle)
-    .replace('$eventPromotionalPhoto',eventPromotionalPhoto)
-    .replace('$qrcodeData',qrCodeRef)
-    .replace('$ticketCode',otp)
-    return emailData
+export  const loadEmailTemplate = async (fileLocation, variablesOrEventTitle, eventPromotionalPhoto, qrCodeRef, otp) => {
+    // Replace .html with .mjml in file path
+    const mjmlPath = fileLocation.replace('.html', '.mjml');
+
+    // Check if first parameter after fileLocation is an object (new signature) or string (legacy signature)
+    let variables;
+    if (typeof variablesOrEventTitle === 'object' && variablesOrEventTitle !== null && !Array.isArray(variablesOrEventTitle)) {
+      // New signature: (fileLocation, variablesObject)
+      variables = variablesOrEventTitle;
+    } else {
+      // Legacy signature: (fileLocation, eventTitle, eventPromotionalPhoto, qrCodeRef, otp)
+      variables = {
+        eventTitle: variablesOrEventTitle || '',
+        eventPromotionalPhoto: eventPromotionalPhoto || '',
+        qrcodeData: qrCodeRef || '',
+        ticketCode: otp || ''
+      };
+    }
+
+    return await compileMjmlTemplate(mjmlPath, variables);
   }
 
 export const loadEmailTemplateForMerchant = async (fileLocation, orgName, dashboardUrl) => {
-    const emailData = (await fs.readFile(fileLocation,'utf8'))
-    .replace('$orgName',orgName)
-    .replace('$dashboardUrl',dashboardUrl)
-
-    return emailData
+    // Replace .html with .mjml in file path
+    const mjmlPath = fileLocation.replace('.html', '.mjml');
+    const variables = {
+      orgName,
+      dashboardUrl
+    };
+    return await compileMjmlTemplate(mjmlPath, variables);
 }
 
 export const loadFeedbackTemplate = async (name, email, subject, message) => {
-    const fileLocation = './emailTemplates/feedback_acknowledgement.html';
-    const emailData = (await fs.readFile(fileLocation,'utf8'))
-    .replace(/\$name/g, name)
-    .replace(/\$email/g, email)
-    .replace(/\$subject/g, subject)
-    .replace(/\$message/g, message)
-    .replace(/\$date/g, new Date().toLocaleDateString('en-US', {
+    const fileLocation = './emailTemplates/feedback_acknowledgement.mjml';
+    const variables = {
+      name,
+      email,
+      subject,
+      message,
+      date: new Date().toLocaleDateString('en-US', {
         year: 'numeric',
         month: 'long',
         day: 'numeric',
         hour: '2-digit',
         minute: '2-digit'
-    }));
-
-    return emailData;
+      })
+    };
+    return await compileMjmlTemplate(fileLocation, variables);
 }
 
 export const loadCareerTemplate = async (name, email, phone, position, experience, availability) => {
-    const fileLocation = './emailTemplates/career_acknowledgement.html';
-    const emailData = (await fs.readFile(fileLocation,'utf8'))
-    .replace(/\$name/g, name)
-    .replace(/\$email/g, email)
-    .replace(/\$phone/g, phone || 'Not provided')
-    .replace(/\$position/g, position)
-    .replace(/\$experience/g, experience || 'Not provided')
-    .replace(/\$availability/g, availability || 'Not specified')
-    .replace(/\$date/g, new Date().toLocaleDateString('en-US', {
+    const fileLocation = './emailTemplates/career_acknowledgement.mjml';
+    const variables = {
+      name,
+      email,
+      phone: phone || 'Not provided',
+      position,
+      experience: experience || 'Not provided',
+      availability: availability || 'Not specified',
+      date: new Date().toLocaleDateString('en-US', {
         year: 'numeric',
         month: 'long',
         day: 'numeric',
         hour: '2-digit',
         minute: '2-digit'
-    }));
-
-    return emailData;
+      })
+    };
+    return await compileMjmlTemplate(fileLocation, variables);
 }
 
 export const loadVerificationCodeTemplate = async (code) => {
-    const fileLocation = './emailTemplates/verification_code.html';
+    const fileLocation = './emailTemplates/verification_code.mjml';
     const currentYear = new Date().getFullYear();
     const companyName = process.env.COMPANY_TITLE || 'Finnep';
     const contactEmail = process.env.EMAIL_USERNAME || 'info@finnep.fi';
 
-    const emailData = (await fs.readFile(fileLocation,'utf8'))
-        .replace(/\$verificationCode/g, code)
-        .replace(/\$currentYear/g, currentYear)
-        .replace(/\$companyName/g, companyName)
-        .replace(/\$contactEmail/g, contactEmail);
-    return emailData;
+    const variables = {
+      verificationCode: code,
+      currentYear,
+      companyName,
+      contactEmail
+    };
+    return await compileMjmlTemplate(fileLocation, variables);
 }
 
 export const getCloudFrontUrl = async (photoLink) =>{

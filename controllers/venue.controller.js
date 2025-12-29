@@ -27,6 +27,9 @@ export const getVenues = async (req, res, next) => {
 		const {
 			merchant,
 			search,
+			country,
+			city,
+			state,
 			page = 1,
 			limit = 10
 		} = req.query
@@ -37,9 +40,28 @@ export const getVenues = async (req, res, next) => {
 			query.merchant = merchant
 		}
 
-		// Search by name (case-insensitive)
+		// Location-based filters
+		if (country) {
+			query.country = { $regex: country.trim(), $options: 'i' }
+		}
+
+		if (city) {
+			query.city = { $regex: city.trim(), $options: 'i' }
+		}
+
+		if (state) {
+			query.state = { $regex: state.trim(), $options: 'i' }
+		}
+
+		// Search by name, address, city, or description (case-insensitive)
 		if (search && search.trim()) {
-			query.name = { $regex: search.trim(), $options: 'i' }
+			const searchRegex = { $regex: search.trim(), $options: 'i' }
+			query.$or = [
+				{ name: searchRegex },
+				{ address: searchRegex },
+				{ city: searchRegex },
+				{ description: searchRegex }
+			]
 		}
 
 		// Calculate pagination
@@ -231,7 +253,7 @@ export const getVenuesByMerchant = async (req, res, next) => {
 				const venues = await Venue.find(query)
 					.populate('merchant')
 					.sort({ createdAt: -1 })
-					.select('_id name venueType externalVenueId merchant createdAt updatedAt')
+					.select('_id name venueType externalVenueId merchant address city state country postalCode coordinates timezone phone email website description createdAt updatedAt')
 
 				return res.status(consts.HTTP_STATUS_OK).json({ data: venues })
 			} catch (err) {
