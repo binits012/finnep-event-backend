@@ -208,6 +208,12 @@ const generateSeatsWithRowConfig = (section, placeIds, spacing, bounds) => {
 	const sortedRows = [...(section.rowConfig || [])].sort((a, b) => (a.rowNumber || 0) - (b.rowNumber || 0))
 	const totalRows = sortedRows.length
 
+	// DEBUG: Log raw rowConfig data before processing
+	console.log(`[generateSeatsWithRowConfig] RAW rowConfig data for section "${section.name}":`)
+	sortedRows.forEach((r, i) => {
+		console.log(`  Row ${i}: rowNumber=${r.rowNumber}, rowLabel=${r.rowLabel}, offsetY=${r.offsetY} (type: ${typeof r.offsetY})`)
+	})
+
 	// CRITICAL FIX: Calculate consistent seat spacing based on the WIDEST row
 	// This ensures all seats align vertically across rows
 	const maxSeatsInRow = Math.max(...sortedRows.map(row => {
@@ -227,12 +233,16 @@ const generateSeatsWithRowConfig = (section, placeIds, spacing, bounds) => {
 
 	// Fixed seat spacing based on the widest row
 	// This ensures vertical alignment across all rows
-	const marginX = seatSpacing > 1 ? seatSpacing : 20
+	// Reduce marginX when using very small multipliers to allow tighter spacing
+	const marginX = configSeatSpacingMultiplier < 0.3 ? 5 : (seatSpacing > 1 ? seatSpacing : 20)
 	const availableWidth = sectionWidth - (marginX * 2)
 	// Use section-specific seat spacing multiplier
 	// IMPORTANT: Clamp multiplier to max 1.0 to ensure seats don't exceed section bounds
-	const clampedSeatSpacingMultiplier = Math.min(1.0, configSeatSpacingMultiplier)
+	// Allow very small multipliers (0.01 - 1.0) for tight spacing
+	const clampedSeatSpacingMultiplier = Math.max(0.01, Math.min(1.0, configSeatSpacingMultiplier))
 	const fixedSeatSpacing = maxSeatsInRow > 1 ? (availableWidth / (maxSeatsInRow - 1)) * clampedSeatSpacingMultiplier : availableWidth * clampedSeatSpacingMultiplier
+
+	console.log(`[generateSeatsWithRowConfig] Seat spacing calculation: availableWidth=${availableWidth.toFixed(2)}, maxSeatsInRow=${maxSeatsInRow}, multiplier=${clampedSeatSpacingMultiplier}, fixedSeatSpacing=${fixedSeatSpacing.toFixed(2)}`)
 
 	// Calculate row spacing with section-specific top padding
 	const topPadding = configTopPadding
@@ -244,6 +254,21 @@ const generateSeatsWithRowConfig = (section, placeIds, spacing, bounds) => {
 	// Get presentation style from section configuration
 	const presentationStyle = section.presentationStyle || 'flat'
 
+	// Check if any row has manual Y offsets - if so, use offset-based positioning instead of calculated spacing
+	const hasManualYOffsets = sortedRows.some(row => row.offsetY && row.offsetY !== 0)
+
+	// Debug: Log all row offsets to verify they're being read correctly
+	console.log(`[generateSeatsWithRowConfig] Section: ${section.name}`)
+	console.log(`[generateSeatsWithRowConfig] hasManualYOffsets: ${hasManualYOffsets}`)
+	console.log(`[generateSeatsWithRowConfig] Row offsets:`, sortedRows.map((r, i) => ({
+		index: i,
+		rowNumber: r.rowNumber,
+		rowLabel: r.rowLabel,
+		offsetY: r.offsetY,
+		offsetYType: typeof r.offsetY
+	})))
+	console.log(`[generateSeatsWithRowConfig] Calculated row spacing: ${calculatedRowSpacing.toFixed(2)}`)
+
 	let placeIndex = 0
 
 	sortedRows.forEach((rowConfig, rowArrayIndex) => {
@@ -254,10 +279,35 @@ const generateSeatsWithRowConfig = (section, placeIds, spacing, bounds) => {
 		const aisleLeft = rowConfig.aisleLeft || 0
 		const aisleRight = rowConfig.aisleRight || 0
 		const offsetX = rowConfig.offsetX || 0
-		const offsetY = rowConfig.offsetY || 0
+		// Ensure offsetY is a number, handle string conversion
+		const offsetY = typeof rowConfig.offsetY === 'string' ? parseFloat(rowConfig.offsetY) || 0 : (rowConfig.offsetY || 0)
 
-		// Calculate base Y position for this row (with section-specific top padding)
-		const baseY = y1 + configTopPadding + rowSpacing + (rowArrayIndex * calculatedRowSpacing) + offsetY
+		// Calculate base Y position for this row
+		// If manual Y offsets are used, ignore calculated spacing and use offsets as spacing from previous row
+		// Otherwise, use calculated spacing with optional offset for fine-tuning
+		let baseY
+		if (hasManualYOffsets) {
+			// Manual offset mode: offsetY represents spacing from the PREVIOUS row
+			// First row starts at topPadding + its own offsetY
+			// Each subsequent row is positioned at: previous row's Y + current row's offsetY
+			if (rowArrayIndex === 0) {
+				baseY = y1 + configTopPadding + offsetY
+			} else {
+				// Calculate previous row's baseY by iterating through all previous rows
+				let prevBaseY = y1 + configTopPadding
+				for (let i = 0; i < rowArrayIndex; i++) {
+					const prevOffsetY = typeof sortedRows[i].offsetY === 'string' ? parseFloat(sortedRows[i].offsetY) || 0 : (sortedRows[i].offsetY || 0)
+					prevBaseY += prevOffsetY
+				}
+				// Current row's position = previous row's position + current row's offsetY
+				baseY = prevBaseY + offsetY
+			}
+			console.log(`[Row ${rowLabel}] Manual offset mode: rowArrayIndex=${rowArrayIndex}, offsetY=${offsetY}, baseY=${baseY.toFixed(2)}, y1=${y1.toFixed(2)}, topPadding=${configTopPadding}`)
+		} else {
+			// Automatic spacing mode: Use calculated spacing with optional fine-tuning offset
+			baseY = y1 + configTopPadding + rowSpacing + (rowArrayIndex * calculatedRowSpacing) + offsetY
+			console.log(`[Row ${rowLabel}] Auto spacing mode: rowArrayIndex=${rowArrayIndex}, calculatedRowSpacing=${calculatedRowSpacing.toFixed(2)}, offsetY=${offsetY}, baseY=${baseY.toFixed(2)}`)
+		}
 
 		// Calculate total positions needed (seats + aisles)
 		const totalPositions = seatCount + aisleLeft + aisleRight
@@ -624,19 +674,24 @@ const generateSeatsInPolygonWithRowConfig = (section, placeIds, spacing, seatOff
 		return seatCount + aisleLeft + aisleRight
 	}))
 
-	const availableWidth = sectionWidth - (marginX * 2)
+	// Reduce marginX when using very small multipliers to allow tighter spacing
+	const adjustedMarginX = configSeatSpacingMultiplier < 0.3 ? 5 : marginX
+	const availableWidth = sectionWidth - (adjustedMarginX * 2)
 	// Use section-specific seat spacing multiplier
 	// IMPORTANT: Multipliers should constrain seats to fit within the polygon
 	// A multiplier < 1.0 makes seats tighter (smaller area used)
 	// A multiplier of 1.0 uses the full available space
-	// Clamp to max 1.0 and ensure minimum 0.75 for comfortable spacing
-	const clampedSeatSpacingMultiplier = Math.max(0.75, Math.min(1.0, configSeatSpacingMultiplier))
-	// More generous spacing: use 80% of available space for comfortable visual spacing
-	const spacingFactor = 0.99 // Use 80% of available width for seats
+	// Allow very small multipliers (0.01 - 1.0) for tight spacing - removed 0.75 minimum
+	const clampedSeatSpacingMultiplier = Math.max(0.01, Math.min(1.0, configSeatSpacingMultiplier))
+	// Adjust spacingFactor based on multiplier: very small multipliers need more available space
+	// For tight spacing (multiplier < 0.3), use full width; for normal spacing, use 99%
+	const spacingFactor = clampedSeatSpacingMultiplier < 0.3 ? 1.0 : 0.99
 	const effectiveWidth = availableWidth * spacingFactor
+	console.log(`[generateSeatsInPolygonWithRowConfig] Seat spacing calculation: availableWidth=${availableWidth.toFixed(2)}, maxSeatsInRow=${maxSeatsInRow}, spacingFactor=${spacingFactor}, multiplier=${clampedSeatSpacingMultiplier}, effectiveWidth=${effectiveWidth.toFixed(2)}`)
 	const fixedSeatSpacing = maxSeatsInRow > 1 ?
 		(effectiveWidth / (maxSeatsInRow - 1)) * clampedSeatSpacingMultiplier :
 		effectiveWidth * clampedSeatSpacingMultiplier
+	console.log(`[generateSeatsInPolygonWithRowConfig] Final fixedSeatSpacing=${fixedSeatSpacing.toFixed(2)}`)
 
 	// Calculate row spacing with section-specific top padding
 	const topPadding = configTopPadding
@@ -711,6 +766,25 @@ const generateSeatsInPolygonWithRowConfig = (section, placeIds, spacing, seatOff
 	}
 	console.log(`  ----------------------------------------`)
 
+	// Check if any row has manual Y offsets - if so, use offset-based positioning instead of calculated spacing
+	const hasManualYOffsets = sortedRows.some(row => {
+		const oy = typeof row.offsetY === 'string' ? parseFloat(row.offsetY) : (row.offsetY || 0)
+		return oy !== 0
+	})
+
+	// Debug: Log all row offsets to verify they're being read correctly
+	console.log(`[generateSeatsInPolygonWithRowConfig] Section: ${section.name}`)
+	console.log(`[generateSeatsInPolygonWithRowConfig] hasManualYOffsets: ${hasManualYOffsets}`)
+	console.log(`[generateSeatsInPolygonWithRowConfig] Row offsets:`, sortedRows.map((r, i) => ({
+		index: i,
+		rowNumber: r.rowNumber,
+		rowLabel: r.rowLabel,
+		offsetY: r.offsetY,
+		offsetYType: typeof r.offsetY,
+		offsetYParsed: typeof r.offsetY === 'string' ? parseFloat(r.offsetY) : (r.offsetY || 0)
+	})))
+	console.log(`[generateSeatsInPolygonWithRowConfig] Row spacing for all rows: ${rowSpacingForAllRows.toFixed(2)}`)
+
 	let placeIndex = 0
 
 	sortedRows.forEach((rowConfig, rowArrayIndex) => {
@@ -721,11 +795,35 @@ const generateSeatsInPolygonWithRowConfig = (section, placeIds, spacing, seatOff
 		const aisleLeft = rowConfig.aisleLeft || 0
 		const aisleRight = rowConfig.aisleRight || 0
 		const offsetX = rowConfig.offsetX || 0
-		const offsetY = rowConfig.offsetY || 0
+		// Ensure offsetY is a number, handle string conversion
+		const offsetY = typeof rowConfig.offsetY === 'string' ? parseFloat(rowConfig.offsetY) || 0 : (rowConfig.offsetY || 0)
 
-		// Calculate base Y position for this row using pre-calculated spacing
-		// Uses firstRowY and rowSpacingForAllRows calculated above to ensure ALL rows fit
-		const baseY = firstRowY + (rowArrayIndex * rowSpacingForAllRows) + offsetY
+		// Calculate base Y position for this row
+		// If manual Y offsets are used, ignore calculated spacing and use offsets as spacing from previous row
+		// Otherwise, use calculated spacing with optional offset for fine-tuning
+		let baseY
+		if (hasManualYOffsets) {
+			// Manual offset mode: offsetY represents spacing from the PREVIOUS row
+			// First row starts at firstRowY + its own offsetY
+			// Each subsequent row is positioned at: previous row's Y + current row's offsetY
+			if (rowArrayIndex === 0) {
+				baseY = firstRowY + offsetY
+			} else {
+				// Calculate previous row's baseY by iterating through all previous rows
+				let prevBaseY = firstRowY
+				for (let i = 0; i < rowArrayIndex; i++) {
+					const prevOffsetY = typeof sortedRows[i].offsetY === 'string' ? parseFloat(sortedRows[i].offsetY) || 0 : (sortedRows[i].offsetY || 0)
+					prevBaseY += prevOffsetY
+				}
+				// Current row's position = previous row's position + current row's offsetY
+				baseY = prevBaseY + offsetY
+			}
+			console.log(`[Row ${rowLabel}] Manual offset mode (polygon): rowArrayIndex=${rowArrayIndex}, offsetY=${offsetY}, baseY=${baseY.toFixed(2)}, firstRowY=${firstRowY.toFixed(2)}`)
+		} else {
+			// Automatic spacing mode: Use calculated spacing with optional fine-tuning offset
+			baseY = firstRowY + (rowArrayIndex * rowSpacingForAllRows) + offsetY
+			console.log(`[Row ${rowLabel}] Auto spacing mode (polygon): rowArrayIndex=${rowArrayIndex}, rowSpacingForAllRows=${rowSpacingForAllRows.toFixed(2)}, offsetY=${offsetY}, baseY=${baseY.toFixed(2)}`)
+		}
 
 		// Debug: Log row Y position calculations
 		console.log(`  [Row ${rowLabel}] Processing...`)

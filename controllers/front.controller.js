@@ -29,7 +29,24 @@ import { EventManifest, Manifest } from '../model/mongoModel.js';
 import { Venue } from '../model/mongoModel.js'
 
 export const getDataForFront = async (req, res, next) => {
-    const photo = await Photo.listPhoto()
+    // Get client IP and start country detection in parallel (non-blocking)
+    const clientIP = await getClientIdentifier(req);
+    const countryPromise = await getCountryFromIP(clientIP); // Don't await - run in parallel
+    console.log("countryPromise", countryPromise)
+    // Fetch all data in parallel
+    const [photo, notification, event, setting] = await Promise.all([
+        Photo.listPhoto(),
+        Notification.getAllNotification(),
+        Event.getEventsWithTicketCounts(),
+        (async () => {
+            let setting = await commonUtil.getCacheByKey(redisClient, SETTINGS_CACHE_KEY);
+            if (!setting || setting instanceof Error || setting === null) {
+                setting = await Setting.getSetting();
+            }
+            return setting;
+        })()
+    ]);
+
     const photosWithCloudFrontUrls = await Promise.all(photo.map(async el => {
 
         const cacheKey = `signedUrl:${el.id}`;
@@ -52,21 +69,27 @@ export const getDataForFront = async (req, res, next) => {
         }
         return el
     }));
-    const notification = await Notification.getAllNotification()
-    let event = await Event.getEventsWithTicketCounts()
 
-    if (event) {
-        event = event.filter(e => e.active)
+    // Filter events by active status
+    let filteredEvents = event ? event.filter(e => e.active) : [];
+
+    // Await country detection only when needed for filtering (non-blocking)
+    // Always returns a country code (defaults to 'FI' if lookup fails)
+    const detectedCountry = countryPromise;
+    if (filteredEvents.length > 0) {
+        filteredEvents = filteredEvents.filter(e => {
+            // Show event if:
+            // 1. Event has no country set (available to all)
+            // 2. Event country matches detected country
+            return !e.country || e.country === detectedCountry;
+        });
     }
-    // Check cache first, then fallback to getSetting()
-    let setting = await commonUtil.getCacheByKey(redisClient, SETTINGS_CACHE_KEY)
-    if (!setting || setting instanceof Error || setting === null) {
-        setting = await Setting.getSetting()
-    }
+
+
     const data = {
         photo: photosWithCloudFrontUrls?.filter(e => e.publish),
         notification: notification,
-        event: event,
+        event: filteredEvents,
         setting: setting
     }
     res.status(consts.HTTP_STATUS_OK).json(data)
@@ -347,8 +370,62 @@ export const listEvent = async (req, res, next) => {
 }
 
 // Request validation and security helpers
-const getClientIdentifier = (req) => {
-    return req.ip || req.connection.remoteAddress || req.socket.remoteAddress || 'unknown';
+const getClientIdentifier = async (req) => {
+    // Check proxy headers first (x-forwarded-for, x-real-ip)
+    const forwardedFor = req.headers['x-forwarded-for'];
+    if (forwardedFor) {
+        // x-forwarded-for can contain multiple IPs, take the first one
+        const firstIP = forwardedFor.split(',')[0].trim();
+        if (firstIP) return firstIP;
+    }
+
+    const realIP = req.headers['x-real-ip'];
+    if (realIP) return realIP.trim();
+
+    // Fallback to Express req.ip or connection info
+    return req.ip || req.connection?.remoteAddress || req.socket?.remoteAddress || 'unknown';
+};
+
+/**
+ * Get country name from client IP using geoip-service
+ * @param {string} clientIP - Client IP address
+ * @returns {Promise<string>} Country name (e.g., 'Finland', 'United States'), defaults to 'Finland' if lookup fails
+ */
+const getCountryFromIP = async (clientIP) => {
+    try {
+        // Skip if IP is invalid or localhost - default to Finland
+        if (!clientIP || clientIP === 'unknown' || clientIP === '127.0.0.1' || clientIP === '::1') {
+            return 'Finland';
+        }
+
+        const geoipServiceUrl = process.env.GEOIP_SERVICE_URL || 'http://localhost:3005';
+        const apiKey = process.env.GEOIP_API_KEY;
+
+        if (!apiKey) {
+            console.warn('⚠️  GEOIP_API_KEY not configured, defaulting to Finland');
+            return 'Finland';
+        }
+
+        const response = await fetch(`${geoipServiceUrl}/api/lookup/${clientIP}`, {
+            method: 'GET',
+            headers: {
+                'X-API-Key': apiKey,
+                'Content-Type': 'application/json'
+            },
+            signal: AbortSignal.timeout(2000) // 2 second timeout
+        });
+
+        const data = await response.json();
+        if (data.success && data.data?.country?.name) {
+            return data.data.country.name;
+        }
+
+        return 'Finland'; // Default to Finland if no country data
+    } catch (error) {
+        // Silently fail - default to Finland if geoip service is unavailable
+        console.warn(`⚠️  GeoIP lookup failed for ${clientIP}, defaulting to Finland:`, error.message);
+        return 'Finland';
+    }
 };
 
 const validateRequestSize = (reqBody) => {
@@ -2287,6 +2364,7 @@ export const getEventSeatsPublic = async (req, res, next) => {
 		const externalEventId = req.params.eventId; // External event ID from route
 
 		// 1. Get event by external ID to check if it has seat selection enabled
+		// Use .lean() for faster queries (returns plain objects, not Mongoose documents)
 		const event = await Event.getEventById(externalEventId);
 		if (!event) {
 			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
@@ -2307,9 +2385,10 @@ export const getEventSeatsPublic = async (req, res, next) => {
 		// EventManifest.eventId stores the internal MongoDB event ID (as string)
 		const eventMongoId = String(event._id);
 
+		// Use .lean() for faster query - returns plain object instead of Mongoose document
 		const encodedManifest = await EventManifest.findOne({ eventId: eventMongoId })
-			.populate('venue');
-
+			.populate('venue')
+			.lean();
 
 		if (!encodedManifest) {
 			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
@@ -2318,10 +2397,11 @@ export const getEventSeatsPublic = async (req, res, next) => {
 			});
 		}
 
-
 		// 3. Get venue's manifest (contains sections, backgroundSvg, places with coordinates)
+		// Use .lean() for faster query
 		const venueManifest = await Manifest.findOne({ venue: encodedManifest.venue._id })
-			.sort({ createdAt: -1 });
+			.sort({ createdAt: -1 })
+			.lean();
 		if (!venueManifest) {
 			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
 				message: 'Venue manifest not found',
@@ -2458,7 +2538,16 @@ export const getEventSeatsPublic = async (req, res, next) => {
 			});
 		}
 
-        const venue = await Venue.findById(encodedManifest.venue._id);
+		// 4. Use already-populated venue from encodedManifest (no need to query again!)
+		// With .lean(), the populated venue is already a plain object
+		const venue = encodedManifest.venue;
+		if (!venue || !venue.sections || !venue.backgroundSvg) {
+			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+				message: 'Venue not found in manifest or missing required data',
+				error: RESOURCE_NOT_FOUND
+			});
+		}
+
 		// 5. Get Redis reservations for event (using external event ID for Redis key)
 		const reservedMap = await seatReservationService.getReservedSeats(externalEventId);
 		const reservedPlaceIds = Array.from(reservedMap.keys());
@@ -2478,37 +2567,39 @@ export const getEventSeatsPublic = async (req, res, next) => {
 		}));
 
 		// 7. Return EventManifest + Venue Manifest data (everything in one response)
-		return res.status(consts.HTTP_STATUS_OK).json({
-			data: {
-				// EventManifest fields (Ticketmaster format)
-				eventId: encodedManifest.eventId,
-				updateHash: encodedManifest.updateHash,
-				updateTime: encodedManifest.updateTime,
-				placeIds: encodedManifest.placeIds || [],
-				partitions: encodedManifest.partitions || [],
+		// With .lean(), encodedManifest and venue are already plain objects (no .toObject() needed)
+		// This significantly speeds up JSON serialization
 
-				// Availability
-				sold: encodedManifest.availability?.sold || [],
-				reserved: reservedPlaceIds, // From Redis
-				// Pricing zones (for price lookup)
-				//pricingZones: encodedManifest.pricingZones || [],
+		// Build response data object (plain JavaScript objects for fast serialization)
+		const responseData = {
+			// EventManifest fields (Ticketmaster format)
+			eventId: encodedManifest.eventId,
+			updateHash: encodedManifest.updateHash,
+			updateTime: encodedManifest.updateTime,
+			placeIds: encodedManifest.placeIds || [],
+			partitions: encodedManifest.partitions || [],
 
-				// Pricing configuration (when pricing is encoded in placeIds)
-				pricingConfig: encodedManifest.pricingConfig || null,
+			// Availability
+			sold: encodedManifest.availability?.sold || [],
+			reserved: reservedPlaceIds, // From Redis
 
-				// Venue Manifest data (sections, backgroundSvg, places with coordinates)
-				backgroundSvg: venue.backgroundSvg || null,
-				sections: formattedSections, // Use venue.sections with polygon and spacingConfig
-				places: places, // Enriched places with available, tags, and wheelchairAccessible
+			// Pricing configuration (when pricing is encoded in placeIds)
+			pricingConfig: encodedManifest.pricingConfig || null,
 
-				// Metadata
-				venue: {
-					pricingModel: event.venue?.pricingModel || 'ticket_info', // Include pricingModel from event
-					sections: formattedSections // Also include in venue object for frontend compatibility
-				},
-				pricingConfigurationId: encodedManifest.pricingConfigurationId
-			}
-		});
+			// Venue Manifest data (sections, backgroundSvg, places with coordinates)
+			backgroundSvg: venue.backgroundSvg || null,
+			sections: formattedSections, // Use venue.sections with polygon and spacingConfig
+			places: places, // Enriched places with available, tags, and wheelchairAccessible
+
+			// Metadata
+			venue: {
+				pricingModel: event.venue?.pricingModel || 'ticket_info', // Include pricingModel from event
+				sections: formattedSections // Also include in venue object for frontend compatibility
+			},
+			pricingConfigurationId: encodedManifest.pricingConfigurationId
+		};
+
+		return res.status(consts.HTTP_STATUS_OK).json({ data: responseData });
 	} catch (err) {
 		error('Error getting event seats (public):', err);
 		next(err);

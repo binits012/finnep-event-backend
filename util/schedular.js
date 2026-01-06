@@ -12,7 +12,7 @@ import { ROLE_ADMIN } from '../const.js';
 import { dirname } from 'path';
 import { getOutboxMessagesForRetry, updateOutboxMessageById, createOutboxMessagesBatch } from '../model/outboxMessage.js';
 import { messageConsumer } from '../rabbitMQ/services/messageConsumer.js';
-import { Event } from '../model/mongoModel.js';
+import { Event, OutboxMessage } from '../model/mongoModel.js';
 import { QUEUE_PREFETCH } from '../rabbitMQ/services/queueSetup.js';
 import { v4 as uuidv4 } from 'uuid';
 import { compileMjmlTemplate } from './emailTemplateLoader.js';
@@ -126,11 +126,30 @@ function defineJobs() {
 
       // Get messages that are ready for retry
       // Use same concurrency as queue prefetch for consistency
-      const BATCH_SIZE = 50;
+      const BATCH_SIZE = 100;
       const messagesToRetry = await getOutboxMessagesForRetry(BATCH_SIZE);
+
+      // Debug: Check total pending messages
+      const totalPending = await mongoose.connection.collection('outboxmessages').countDocuments({
+        status: 'pending'
+      });
+      info(`Total pending outbox messages: ${totalPending}`);
 
       if (!messagesToRetry || messagesToRetry.length === 0) {
         info('No outbox messages to retry');
+        // Debug: Check why messages aren't being found
+        const debugPending = await mongoose.connection.collection('outboxmessages').find({
+          status: 'pending'
+        }).limit(5).toArray();
+        if (debugPending.length > 0) {
+          info(`Sample pending message: ${JSON.stringify({
+            _id: debugPending[0]._id,
+            status: debugPending[0].status,
+            attempts: debugPending[0].attempts,
+            nextRetryAt: debugPending[0].nextRetryAt,
+            routingKey: debugPending[0].routingKey
+          })}`);
+        }
         return;
       }
 
@@ -161,7 +180,8 @@ function defineJobs() {
 
               results.success.push({
                 _id: message._id,
-                messageId: message.messageId
+                messageId: message.messageId,
+                status: message.status // Keep original status for debugging
               });
 
             } catch (err) {
@@ -197,8 +217,26 @@ function defineJobs() {
 
       // Batch update successful messages
       if (results.success.length > 0) {
-        const successIds = results.success.map(m => m._id);
-        await mongoose.connection.collection('outboxmessages').updateMany(
+        // Ensure all _ids are proper ObjectIds
+        const successIds = results.success.map(m => {
+          // If _id is already an ObjectId, use it; otherwise convert
+          if (m._id instanceof mongoose.Types.ObjectId) {
+            return m._id;
+          }
+          return new mongoose.Types.ObjectId(m._id);
+        });
+
+        const trackedMessageId = '1d5f0b76-fbb9-404c-8880-8ac0318bd7fb';
+        const trackedMessage = results.success.find(m => m.messageId === trackedMessageId);
+
+        info(`Attempting to update ${results.success.length} messages with IDs: ${successIds.slice(0, 3).map(id => id.toString()).join(', ')}...`);
+
+        if (trackedMessage) {
+          info(`Tracked message ${trackedMessageId} is in success list with _id: ${trackedMessage._id} (type: ${trackedMessage._id?.constructor?.name})`);
+        }
+
+        // Use Mongoose model for better compatibility
+        const updateResult = await OutboxMessage.updateMany(
           { _id: { $in: successIds } },
           {
             $set: {
@@ -208,26 +246,105 @@ function defineJobs() {
             }
           }
         );
-        info(`Successfully retried ${results.success.length} messages`);
+
+        info(`Update result: matched ${updateResult.matchedCount}, modified ${updateResult.modifiedCount} out of ${results.success.length} successful messages`);
+
+        // If not all messages were updated, try individual updates for the ones that failed
+        if (updateResult.modifiedCount !== results.success.length) {
+          error(`Warning: Expected to update ${results.success.length} messages but only updated ${updateResult.modifiedCount}. Matched: ${updateResult.matchedCount}`);
+
+          // Get the IDs that weren't updated
+          const notUpdatedIds = successIds.filter(id => {
+            // We'll check these individually
+            return true;
+          });
+
+          // Try individual updates for messages that weren't updated
+          const individualUpdatePromises = results.success.map(async (m) => {
+            const verify = await OutboxMessage.findOne({ _id: m._id, status: 'pending' });
+            if (verify) {
+              // This one wasn't updated, try individual update
+              const individualResult = await OutboxMessage.updateOne(
+                { _id: m._id },
+                {
+                  $set: {
+                    status: 'sent',
+                    sentAt: now,
+                    processedAt: now
+                  }
+                }
+              );
+              if (individualResult.modifiedCount > 0) {
+                info(`Individual update succeeded for message ${m.messageId}`);
+              } else {
+                error(`Individual update failed for message ${m.messageId}, matched: ${individualResult.matchedCount}`);
+              }
+            }
+          });
+
+          await Promise.allSettled(individualUpdatePromises);
+        }
+
+        // Verify tracked message was updated
+        if (trackedMessage) {
+          const verifyMessage = await OutboxMessage.findOne({ messageId: trackedMessageId });
+          if (verifyMessage) {
+            info(`Tracked message status after update: ${verifyMessage.status} (expected: sent)`);
+            if (verifyMessage.status !== 'sent') {
+              error(`Tracked message ${trackedMessageId} was NOT updated! Current status: ${verifyMessage.status}`);
+              // Try direct update
+              const directUpdate = await OutboxMessage.updateOne(
+                { messageId: trackedMessageId },
+                { $set: { status: 'sent', sentAt: now, processedAt: now } }
+              );
+              info(`Direct update attempt for tracked message: matched ${directUpdate.matchedCount}, modified ${directUpdate.modifiedCount}`);
+            }
+          }
+        }
+
+        if (updateResult.modifiedCount !== results.success.length) {
+          error(`Warning: Expected to update ${results.success.length} messages but only updated ${updateResult.modifiedCount}. Matched: ${updateResult.matchedCount}`);
+
+          // Debug: Check if messages still exist with pending status
+          const stillPending = await OutboxMessage.countDocuments({
+            _id: { $in: successIds },
+            status: 'pending'
+          });
+          if (stillPending > 0) {
+            error(`Found ${stillPending} messages that should have been updated but are still pending`);
+
+            // Get sample of messages that weren't updated
+            const notUpdated = await OutboxMessage.find({
+              _id: { $in: successIds },
+              status: 'pending'
+            }).limit(3).lean();
+            error(`Sample of not-updated messages: ${JSON.stringify(notUpdated.map(m => ({ _id: m._id, status: m.status, messageId: m.messageId })))}`);
+          }
+        }
       }
 
       // Batch update failed messages
       if (results.failed.length > 0) {
-        const bulkOps = results.failed.map(m => ({
-          updateOne: {
-            filter: { _id: m._id },
-            update: {
-              $set: {
-                attempts: m.attempts,
-                lastError: m.lastError,
-                status: m.status,
-                nextRetryAt: m.nextRetryAt
+        // Update failed messages one by one using Mongoose model for better reliability
+        const updatePromises = results.failed.map(async (m) => {
+          try {
+            await OutboxMessage.updateOne(
+              { _id: m._id },
+              {
+                $set: {
+                  attempts: m.attempts,
+                  lastError: m.lastError,
+                  status: m.status,
+                  nextRetryAt: m.nextRetryAt
+                }
               }
-            }
+            );
+          } catch (err) {
+            error(`Failed to update outbox message ${m._id}:`, err);
           }
-        }));
+        });
 
-        await mongoose.connection.collection('outboxmessages').bulkWrite(bulkOps);
+        await Promise.allSettled(updatePromises);
         info(`Updated ${results.failed.length} failed messages`);
       }
 
@@ -301,80 +418,115 @@ function defineJobs() {
   agenda.define('inactive past events', async(job) => {
     try {
       const now = new Date();
-      console.log('inactive past events ================== now', now);
+      // Add 5 hour buffer to account for events that might still be ongoing
+      // Only deactivate events that ended at least 5 hours ago
+      const fiveHoursAgo = new Date(now.getTime() - (5 * 60 * 60 * 1000));
+      info('inactive past events ================== Starting job at', now);
+      info(`Deactivating events with eventDate before: ${fiveHoursAgo} (5 hours buffer)`);
+
+      // First, find all past events that need to be deactivated (before updating)
+      // Primary condition: eventDate is at least 5 hours in the past
+      // This accounts for events that might still be ongoing even if eventDate has passed
+      // We deactivate ALL such events regardless of:
+      //   - Current status (up-coming, on-going, etc.)
+      //   - Active state (true or false)
+      // The only optimization: skip events already marked as 'completed' to avoid unnecessary updates
+      const eventsToDeactivate = await Event.find({
+        eventDate: { $lt: fiveHoursAgo }, // PRIMARY CONDITION: Event date is at least 5 hours in the past
+        status: { $ne: 'completed' } // Optimization: skip already-completed events
+      }).lean();
+
+      info(`Found ${eventsToDeactivate.length} past events to deactivate`);
+
+      if (eventsToDeactivate.length === 0) {
+        info('No past events to deactivate');
+        return;
+      }
+
+      // Get event IDs for the update query
+      const eventIds = eventsToDeactivate.map(event => event._id);
+
       // Batch update all past events to inactive in a single operation
+      // Primary condition: eventDate < (now - 5 hours) to account for ongoing events
+      // We update ALL past events regardless of their current status or active state
       const result = await Event.updateMany(
         {
-          eventDate: { $lt: now },
-          active: { $ne: false }, // Only update events that are currently active
-          status: { $ne: 'completed' } // Only exclude events that are already completed
+          _id: { $in: eventIds },
+          eventDate: { $lt: fiveHoursAgo } // Primary condition: event date is at least 5 hours in the past
+          // No status filter - we update all past events found above
         },
         {
-          $set: { active: false, status: 'completed', updatedAt:new Date() }
+          $set: { active: false, status: 'completed', updatedAt: new Date() }
         }
       );
 
-      console.log('inactive past events ================== result', result);
+      info(`inactive past events ================== Updated ${result.modifiedCount} events`);
+
       if (result.modifiedCount > 0) {
         info(`Deactivated ${result.modifiedCount} past events`);
 
-        // Get the deactivated events to create outbox messages
-        const pastEvents = await Event.find({
-          eventDate: { $lt: now },
-          status: { $eq: 'completed' },
-          active: { $ne: true }
-        });
-        const routingKey = 'external.event.status.updated'
+        // Use the events we found before the update to create outbox messages
+        // Filter to only include events that have externalMerchantId
+        const routingKey = 'external.event.status.updated';
         const eventType = 'EventDeactivated';
-        if (pastEvents && pastEvents.length > 0) {
-          // Prepare outbox messages for all deactivated events
-          const outboxMessages = pastEvents
-            .filter(event => {
-              // Validate required fields
-              if (!event.externalMerchantId) {
-                error(`Event ${event._id} missing externalMerchantId, skipping outbox message`);
-                return false;
-              }
-              return true;
-            })
-            .map(event => {
-              const correlationId = uuidv4();
-              const messageId = uuidv4();
 
-              return {
-                messageId: messageId,
-                exchange: 'event-merchant-exchange',
-                routingKey: routingKey,
-                messageBody: {
-                  eventType: eventType,
-                  aggregateId: event._id.toString(),
-                  data: {
-                    merchantId: event.externalMerchantId,
-                    eventId: event.externalEventId,
-                    before: {},
-                    after: event,
-                    updatedBy: 'system',
-                    updatedAt: now
-                  },
-                  metadata: {
-                    correlationId: correlationId,
-                    causationId: messageId,
-                    timestamp: new Date().toISOString(),
-                    version: 1
-                  }
-                },
-                headers: {
-                  'content-type': 'application/json',
-                  'message-type': eventType,
-                  'correlation-id': correlationId
-                },
-                correlationId: correlationId,
+        const validEvents = eventsToDeactivate.filter(event => {
+          if (!event.externalMerchantId) {
+            error(`Event ${event._id} missing externalMerchantId, skipping outbox message`);
+            return false;
+          }
+          return true;
+        });
+
+        if (validEvents.length > 0) {
+          // Prepare outbox messages for all deactivated events
+          const outboxMessages = validEvents.map(event => {
+            const correlationId = uuidv4();
+            const messageId = uuidv4();
+
+            return {
+              messageId: messageId,
+              exchange: 'event-merchant-exchange',
+              routingKey: routingKey,
+              messageBody: {
                 eventType: eventType,
                 aggregateId: event._id.toString(),
-                status: 'pending',
-                exchangeType: 'topic'
-              };
-            });
+                data: {
+                  merchantId: event.externalMerchantId,
+                  eventId: event.externalEventId,
+                  before: {
+                    active: event.active,
+                    status: event.status
+                  },
+                  after: {
+                    active: false,
+                    status: 'completed'
+                  },
+                  updatedBy: 'system',
+                  updatedAt: now
+                },
+                metadata: {
+                  correlationId: correlationId,
+                  causationId: messageId,
+                  timestamp: new Date().toISOString(),
+                  version: 1
+                }
+              },
+              headers: {
+                'content-type': 'application/json',
+                'message-type': eventType,
+                'correlation-id': correlationId
+              },
+              correlationId: correlationId,
+              eventType: eventType,
+              aggregateId: event._id.toString(),
+              status: 'pending',
+              attempts: 0, // Explicitly set to ensure query works
+              maxRetries: 3, // Explicitly set max retries
+              createdAt: new Date(), // Explicitly set createdAt for proper sorting
+              exchangeType: 'topic'
+            };
+          });
 
           if (outboxMessages.length > 0) {
             // Batch write to outbox
@@ -382,9 +534,12 @@ function defineJobs() {
             info(`Created ${outboxMessages.length} outbox messages for completed events`);
           }
         }
+      } else {
+        info('No events were modified (they may have already been deactivated)');
       }
     } catch (err) {
       error('inactive past events ================== Error in inactive past events job:', err);
+      throw err; // Re-throw to let Agenda handle the error
     }
   });
 

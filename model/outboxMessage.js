@@ -154,15 +154,54 @@ export const getOutboxMessagesForRetry = async (limit = 10) => {
         const now = new Date()
         const retryMessages = await OutboxMessage.find({
             status: { $in: ['failed', 'retrying','pending'] },
-            attempts: { $lt: 3 }, // Less than maxRetries
-            $or: [
-                { nextRetryAt: { $exists: false } },
-                { nextRetryAt: { $lte: now } }
+            $and: [
+                {
+                    $or: [
+                        { attempts: { $exists: false } }, // Handle messages without attempts field
+                        { attempts: null }, // Handle null attempts
+                        { attempts: { $lt: 3 } } // Less than maxRetries
+                    ]
+                },
+                {
+                    $or: [
+                        { nextRetryAt: { $exists: false } },
+                        { nextRetryAt: null },
+                        { nextRetryAt: { $lte: now } }
+                    ]
+                }
             ]
         })
-        .sort({ createdAt: 1 })
+        .sort({
+            // Sort by _id first (contains timestamp), then createdAt for messages that have it
+            _id: 1
+        })
         .limit(limit)
         .exec()
+
+        // Backfill missing fields for messages that don't have them
+        const messagesToBackfill = retryMessages.filter(msg =>
+            !msg.attempts && msg.attempts !== 0 ||
+            !msg.createdAt ||
+            !msg.maxRetries
+        );
+
+        if (messagesToBackfill.length > 0) {
+            const backfillOps = messagesToBackfill.map(msg => ({
+                updateOne: {
+                    filter: { _id: msg._id },
+                    update: {
+                        $set: {
+                            attempts: msg.attempts ?? 0,
+                            maxRetries: msg.maxRetries ?? 3,
+                            createdAt: msg.createdAt || msg._id.getTimestamp() // Use _id timestamp if createdAt missing
+                        }
+                    }
+                }
+            }));
+
+            await OutboxMessage.bulkWrite(backfillOps, { ordered: false });
+            info(`Backfilled ${messagesToBackfill.length} messages with missing fields`);
+        }
 
         return retryMessages
     } catch (err) {

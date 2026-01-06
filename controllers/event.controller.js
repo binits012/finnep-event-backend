@@ -10,6 +10,7 @@ import { v4 as uuidv4 } from 'uuid'
 import * as OutboxMessage from '../model/outboxMessage.js'
 import { messageConsumer } from '../rabbitMQ/services/messageConsumer.js'
 import { manifestLockService } from '../src/services/manifestLockService.js'
+import { EventManifest } from '../model/mongoModel.js'
 
 export const createEvent = async (req, res, next) =>{
     const token = req.headers.authorization
@@ -234,7 +235,52 @@ export const getEventById = async (req, res, next) => {
                 });
                 */
                 data.eventPhoto = photoWithCloudFrontUrls
-                return res.status(consts.HTTP_STATUS_OK).json({ data: data,  timeZone:process.env.TIME_ZONE })
+
+                // Fetch pricingConfig from EventManifest if event uses pricing_configuration model
+                let pricingConfig = null;
+                if (data.venue?.venueId && data.venue?.pricingModel === 'pricing_configuration') {
+                    try {
+                        let eventManifest = null;
+
+                        // Try lockedManifestId first (fastest - primary key lookup)
+                        // Only if it exists and we're confident it points to EventManifest
+                        if (data.venue?.lockedManifestId) {
+                            try {
+                                eventManifest = await EventManifest.findById(data.venue.lockedManifestId).lean();
+                            } catch (findByIdErr) {
+                                // lockedManifestId might point to old Manifest collection, fall through to eventId lookup
+                                info(`lockedManifestId ${data.venue.lockedManifestId} not found in EventManifest, trying eventId lookup`);
+                            }
+                        }
+
+                        // Fallback to eventId lookup (more reliable - designed way to link EventManifest to Event)
+                        // This is consistent with how other parts of the codebase query EventManifest
+                        if (!eventManifest) {
+                            eventManifest = await EventManifest.findOne({
+                                eventId: String(data._id)
+                            }).lean();
+                        }
+
+                        if (eventManifest?.pricingConfig) {
+                            pricingConfig = eventManifest.pricingConfig;
+                        }
+                        // If EventManifest doesn't exist or has no pricingConfig, pricingConfig remains null
+                        // This is acceptable - event might not have pricing configured yet
+                    } catch (err) {
+                        error('Error fetching EventManifest for pricingConfig:', err);
+                        // Fail the request if we can't fetch EventManifest when it's expected
+                        return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
+                            message: 'Failed to fetch pricing configuration',
+                            error: 'PRICING_CONFIG_FETCH_FAILED'
+                        });
+                    }
+                }
+
+                return res.status(consts.HTTP_STATUS_OK).json({
+                    data: data,
+                    timeZone: process.env.TIME_ZONE,
+                    pricingConfig: pricingConfig
+                })
             }).catch(err=>{
                 error('error',err)
                 return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
