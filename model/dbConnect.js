@@ -2,7 +2,16 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv'
 dotenv.config()
-const dbURI = `mongodb://${encodeURIComponent(process.env.MONGODB_USER)}:${encodeURIComponent(process.env.MONGODB_PWD)}@${process.env.MONGODB_HOST}:${process.env.MONGODB_PORT}/${process.env.MONGODB_NAME}?authSource=admin&useNewUrlParser=true`;
+// Build MongoDB connection URI
+// Note: authSource must match the database where the user was created
+const user = encodeURIComponent(process.env.MONGODB_USER || 'eventapp');
+const pwd = encodeURIComponent(process.env.MONGODB_PWD || '');
+const host = process.env.MONGODB_HOST || 'localhost';
+const port = process.env.MONGODB_PORT || '27017';
+const dbName = process.env.MONGODB_NAME || 'eventapp';
+const authSource = process.env.MONGODB_AUTH_SOURCE || dbName;
+
+const dbURI = `mongodb://${user}:${pwd}@${host}:${port}/${dbName}?authSource=${authSource}`;
 
 const options = {
   useNewUrlParser: true,
@@ -19,10 +28,25 @@ const options = {
 // Connect to MongoDB
 async function dbConnect() {
   try {
+    // Log connection attempt (mask password for security)
+    const maskedURI = dbURI.replace(/:([^:@]+)@/, ':***@');
+    console.log('Attempting MongoDB connection to:', maskedURI);
+    console.log('User:', user ? decodeURIComponent(user) : 'not set');
+    console.log('Host:', host);
+    console.log('Port:', port);
+    console.log('Database:', dbName);
+    console.log('AuthSource:', authSource);
+
     await mongoose.connect(dbURI, options)
-    console.log('Mongoose connected to ' + dbURI)
+    console.log('✅ Mongoose connected successfully!')
   } catch (err) {
-    console.log('Mongoose connection error: ' + err + dbURI)
+    const maskedURI = dbURI.replace(/:([^:@]+)@/, ':***@');
+    console.error('❌ Mongoose connection error:', err.message);
+    console.error('Error code:', err.code);
+    console.error('Error codeName:', err.codeName);
+    console.error('Connection string used:', maskedURI);
+    console.error('Full error:', err);
+
     // Retry connection after 5 seconds
     setTimeout(() => {
       console.log('Retrying MongoDB connection...')
