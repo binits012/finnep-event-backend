@@ -1,0 +1,17 @@
+{
+  "subject": "Din Bekreftelseskode - {{companyName}}",
+  "title": "Din Bekreftelseskode",
+  "greeting": "Hei,",
+  "body": "Du har bedt om tilgang til billettene dine. Bruk bekreftelseskoden nedenfor for å fullføre innloggingen:",
+  "important": "Viktig:",
+  "expiry": "Denne koden utløper om",
+  "expiryMinutes": "5 minutter",
+  "expiryNote": "Vennligst skriv den inn raskt for å få tilgang til billettene dine.",
+  "securityNote": "Hvis du ikke har bedt om denne bekreftelseskoden, ignorer denne e-posten. Kontoen din forblir sikker.",
+  "footer": "Dette er en automatisk melding fra",
+  "footerPlatform": "Arrangementplattform",
+  "footerNoReply": "Vennligst ikke svar på denne e-posten.",
+  "copyright": "Alle rettigheter reservert.",
+  "help": "Trenger du hjelp? Kontakt oss på"
+}
+

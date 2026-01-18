@@ -1,7 +1,7 @@
 <mjml>
   <mj-head>
     <mj-font name="Inter" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" />
-    <mj-title>Your Event Ticket - {{eventTitle}}</mj-title>
+    <mj-title>{{t.subjectPrefix}}{{eventTitle}}{{t.subjectSuffix}}</mj-title>
     <mj-attributes>
       <mj-all font-family="Inter, Arial, sans-serif" />
       <mj-text color="#1e293b" line-height="1.6" />
@@ -82,7 +82,7 @@
       <!-- Header: Logo + Event Image -->
       <mj-section background-color="#6366F1" padding="10px 40px 0 40px">
         <mj-column>
-          <mj-image src="{{companyLogo}}" alt= Logo" align="center" width="160px" />
+          <mj-image src="{{companyLogo}}" alt="Logo" align="center" width="160px" />
         </mj-column>
       </mj-section>
       <mj-section padding="0">
@@ -96,7 +96,7 @@
         <mj-column>
           <mj-text align="center" padding-bottom="20px">
             <div style="display: inline-block; background-color: #10B981; color: #ffffff; padding: 10px 24px; border-radius: 20px; font-size: 13px; font-weight: 700; letter-spacing: 0.5px;">
-              ✓ TICKET CONFIRMED
+              ✓ {{t.ticketConfirmed}}
             </div>
           </mj-text>
 
@@ -105,18 +105,18 @@
           </mj-text>
 
           <mj-text align="center" color="#64748b" font-size="16px" line-height="1.6" padding-bottom="30px">
-            Hi {{attendeeName}}, thank you for your purchase! We're excited to see you at the event. Your ticket details are below.
+            {{t.greetingPrefix}}{{attendeeName}}{{t.greetingSuffix}}
           </mj-text>
 
           <!-- Ticket Code -->
           <mj-text align="center" padding-bottom="20px">
             <div class="ticket-code-container" style="background: linear-gradient(135deg, #EEF2FF 0%, #E0E7FF 100%); border: 2px dashed #6366F1; border-radius: 12px; padding: 40px 30px;">
-              <p style="margin: 0 0 16px 0; color: #64748b; font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;">Your Entry Code</p>
+              <p style="margin: 0 0 16px 0; color: #64748b; font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;">{{t.yourEntryCode}}</p>
               <div class="ticket-code-inner" style="background-color: #ffffff; border-radius: 8px; padding: 24px 40px; box-shadow: 0 2px 8px rgba(99, 102, 241, 0.1); margin-bottom: 16px;">
                 <p class="ticket-code" style="margin: 0; color: #0f172a; font-size: 36px; font-weight: 800; letter-spacing: 12px; font-family: 'Courier New', monospace;">{{ticketCode}}</p>
               </div>
-              <p style="margin: 0 0 8px 0; color: #475569; font-size: 14px; font-weight: 600;">Present this code at check-in</p>
-              <p style="margin: 0; color: #64748b; font-size: 13px;">Save this email or screenshot your code</p>
+              <p style="margin: 0 0 8px 0; color: #475569; font-size: 14px; font-weight: 600;">{{t.presentCode}}</p>
+              <p style="margin: 0; color: #64748b; font-size: 13px;">{{t.saveEmail}}</p>
             </div>
           </mj-text>
         </mj-column>
@@ -127,7 +127,7 @@
         <mj-column>
           <!-- Event Details -->
           <mj-text color="#0f172a" font-size="16px" font-weight="700" text-transform="uppercase" letter-spacing="1px" padding-bottom="20px">
-            Event Details
+            {{t.eventDetails}}
           </mj-text>
           <mj-text padding-bottom="20px">
             <table width="100%" border="0" cellspacing="0" cellpadding="0" class="info-table">
@@ -136,10 +136,10 @@
                   <span style="font-size: 24px;">📅</span>
                 </td>
                 <td style="padding: 8px 0; vertical-align: top;">
-                  <p style="margin: 0 0 4px 0; color: #64748b; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Date & Time</p>
+                  <p style="margin: 0 0 4px 0; color: #64748b; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">{{t.dateTime}}</p>
                   <p style="margin: 0; color: #0f172a; font-size: 16px; font-weight: 600;">{{eventDate}}</p>
                   <p style="margin: 4px 0 0 0; color: #0f172a; font-size: 16px; font-weight: 600;">{{eventTime}}</p>
-                  <p style="margin: 8px 0 0 0; color: #64748b; font-size: 13px;">Doors open: {{doorsOpenTime}}</p>
+                  <p style="margin: 8px 0 0 0; color: #64748b; font-size: 13px;">{{t.doorsOpen}} {{doorsOpenTime}}</p>
                 </td>
               </tr>
             </table>
@@ -151,10 +151,10 @@
                   <span style="font-size: 24px;">📍</span>
                 </td>
                 <td style="padding: 8px 0; vertical-align: top;">
-                  <p style="margin: 0 0 4px 0; color: #64748b; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Venue</p>
+                  <p style="margin: 0 0 4px 0; color: #64748b; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">{{t.venue}}</p>
                   <p style="margin: 0; color: #0f172a; font-size: 16px; font-weight: 600;">{{venueName}}</p>
                   <p style="margin: 4px 0 0 0; color: #475569; font-size: 14px; line-height: 1.5;">{{venueAddress}}</p>
-                  <p style="margin: 8px 0 0 0;"><a href="{{venueMapLink}}" style="color: #6366F1; font-size: 14px; font-weight: 600; text-decoration: none;">View on map →</a></p>
+                  <p style="margin: 8px 0 0 0;"><a href="{{venueMapLink}}" style="color: #6366F1; font-size: 14px; font-weight: 600; text-decoration: none;">{{t.viewOnMap}}</a></p>
                 </td>
               </tr>
             </table>
@@ -163,16 +163,16 @@
           <!-- Order Summary -->
           <mj-divider border-color="#e2e8f0" border-width="1px" padding="20px 0" />
           <mj-text color="#0f172a" font-size="16px" font-weight="700" text-transform="uppercase" letter-spacing="1px" padding-bottom="20px" padding-top="10px">
-            Order Summary
+            {{t.orderSummary}}
           </mj-text>
           <mj-text padding-bottom="16px">
             <table width="100%" border="0" cellspacing="0" cellpadding="0" style="margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #e2e8f0;" class="order-table">
               <tr>
-                <td style="padding: 4px 0;"><p style="margin: 0; color: #475569; font-size: 14px;">Purchase Date</p></td>
+                <td style="padding: 4px 0;"><p style="margin: 0; color: #475569; font-size: 14px;">{{t.purchaseDate}}</p></td>
                 <td align="right" style="padding: 4px 0;"><p style="margin: 0; color: #0f172a; font-size: 14px; font-weight: 600;">{{purchaseDate}}</p></td>
               </tr>
               <tr>
-                <td style="padding: 4px 0;"><p style="margin: 0; color: #475569; font-size: 14px;">Ticket Name</p></td>
+                <td style="padding: 4px 0;"><p style="margin: 0; color: #475569; font-size: 14px;">{{t.ticketName}}</p></td>
                 <td align="right" style="padding: 4px 0;"><p style="margin: 0; color: #0f172a; font-size: 14px; font-weight: 600;">{{ticketName}}</p></td>
               </tr>
             </table>
@@ -180,17 +180,17 @@
           <mj-text padding-bottom="12px">
             <table width="100%" border="0" cellspacing="0" cellpadding="0" style="margin-bottom: 12px;" class="order-table">
               <tr>
-                <td style="padding: 4px 0;"><p style="margin: 0; color: #475569; font-size: 14px;">Price{{#if quantity}} (x{{quantity}}){{/if}}</p></td>
+                <td style="padding: 4px 0;"><p style="margin: 0; color: #475569; font-size: 14px;">{{t.price}}{{#if quantity}} (x{{quantity}}){{/if}}</p></td>
                 <td align="right" style="padding: 4px 0;"><p style="margin: 0; color: #0f172a; font-size: 14px; font-weight: 600;">{{basePrice}}</p></td>
               </tr>
               <tr>
-                <td style="padding: 4px 0;"><p style="margin: 0; color: #475569; font-size: 14px;">Service Fee{{#if quantity}} (x{{quantity}}){{/if}}</p></td>
+                <td style="padding: 4px 0;"><p style="margin: 0; color: #475569; font-size: 14px;">{{t.serviceFee}}{{#if quantity}} (x{{quantity}}){{/if}}</p></td>
                 <td align="right" style="padding: 4px 0;"><p style="margin: 0; color: #0f172a; font-size: 14px; font-weight: 600;">{{serviceFee}}</p></td>
               </tr>
               {{#if serviceTaxAmount}}
               {{#if serviceTaxRate}}
               <tr>
-                <td style="padding: 4px 0;"><p style="margin: 0; color: #475569; font-size: 14px;">Service Tax ({{serviceTaxRate}}%) on Service Fee{{#if quantity}} (x{{quantity}}){{/if}}</p></td>
+                <td style="padding: 4px 0;"><p style="margin: 0; color: #475569; font-size: 14px;">{{t.serviceTaxOnServiceFeePrefix}}{{serviceTaxRate}}{{t.serviceTaxOnServiceFeeSuffix}}{{#if quantity}} (x{{quantity}}){{/if}}</p></td>
                 <td align="right" style="padding: 4px 0;"><p style="margin: 0; color: #0f172a; font-size: 14px; font-weight: 600;">{{serviceTaxAmount}}</p></td>
               </tr>
               {{/if}}
@@ -198,20 +198,20 @@
               {{#if vatAmount}}
               {{#if vatRate}}
               <tr>
-                <td style="padding: 4px 0;"><p style="margin: 0; color: #475569; font-size: 14px;">VAT ({{vatRate}}%)</p></td>
+                <td style="padding: 4px 0;"><p style="margin: 0; color: #475569; font-size: 14px;">{{t.vatPrefix}}{{vatRate}}{{t.vatSuffix}}</p></td>
                 <td align="right" style="padding: 4px 0;"><p style="margin: 0; color: #0f172a; font-size: 14px; font-weight: 600;">{{vatAmount}}</p></td>
               </tr>
               {{/if}}
               {{/if}}
               {{#if orderFee}}
               <tr>
-                <td style="padding: 4px 0;"><p style="margin: 0; color: #475569; font-size: 14px;">Order Fee (per transaction)</p></td>
+                <td style="padding: 4px 0;"><p style="margin: 0; color: #475569; font-size: 14px;">{{t.orderFee}}</p></td>
                 <td align="right" style="padding: 4px 0;"><p style="margin: 0; color: #0f172a; font-size: 14px; font-weight: 600;">{{orderFee}}</p></td>
               </tr>
               {{#if orderFeeServiceTax}}
               {{#if serviceTaxRate}}
               <tr>
-                <td style="padding: 4px 0;"><p style="margin: 0; color: #475569; font-size: 14px;">Service Tax ({{serviceTaxRate}}%) on Order Fee</p></td>
+                <td style="padding: 4px 0;"><p style="margin: 0; color: #475569; font-size: 14px;">{{t.serviceTaxOnOrderFeePrefix}}{{serviceTaxRate}}{{t.serviceTaxOnOrderFeeSuffix}}</p></td>
                 <td align="right" style="padding: 4px 0;"><p style="margin: 0; color: #0f172a; font-size: 14px; font-weight: 600;">{{orderFeeServiceTax}}</p></td>
               </tr>
               {{/if}}
@@ -222,7 +222,7 @@
           <mj-text>
             <table width="100%" border="0" cellspacing="0" cellpadding="0" style="border-top: 2px solid #e2e8f0; padding-top: 12px;" class="order-table">
               <tr>
-                <td style="padding: 4px 0;"><p style="margin: 0; color: #0f172a; font-size: 18px; font-weight: 700;">Total Paid</p></td>
+                <td style="padding: 4px 0;"><p style="margin: 0; color: #0f172a; font-size: 18px; font-weight: 700;">{{t.totalPaid}}</p></td>
                 <td align="right" style="padding: 4px 0;"><p style="margin: 0; color: #0f172a; font-size: 20px; font-weight: 800;">{{totalAmount}}</p></td>
               </tr>
             </table>
@@ -235,7 +235,7 @@
         <mj-column>
           <!-- Important Information -->
           <mj-text color="#0f172a" font-size="16px" font-weight="700" text-transform="uppercase" letter-spacing="1px" padding-bottom="20px" padding-top="10px">
-            Important Information
+            {{t.importantInformation}}
           </mj-text>
           <mj-text padding-bottom="20px">
             <table width="100%" border="0" cellspacing="0" cellpadding="0" class="info-table">
@@ -244,11 +244,11 @@
                   <span style="font-size: 24px;">⚡</span>
                 </td>
                 <td style="padding: 8px 0; vertical-align: top;">
-                  <p style="margin: 0 0 4px 0; color: #64748b; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Please Read</p>
-                  <p style="margin: 0 0 8px 0; color: #0f172a; font-size: 14px; font-weight: 600; line-height: 1.6;">• Arrive at least 15 minutes before the event starts</p>
-                  <p style="margin: 0 0 8px 0; color: #0f172a; font-size: 14px; font-weight: 600; line-height: 1.6;">• Bring a valid photo ID (required for entry)</p>
-                  <p style="margin: 0 0 8px 0; color: #0f172a; font-size: 14px; font-weight: 600; line-height: 1.6;">• Have this ticket ready (digital or printed)</p>
-                  <p style="margin: 0; color: #0f172a; font-size: 14px; font-weight: 600; line-height: 1.6;">• Tickets are non-transferable and non-refundable</p>
+                  <p style="margin: 0 0 4px 0; color: #64748b; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">{{t.pleaseRead}}</p>
+                  <p style="margin: 0 0 8px 0; color: #0f172a; font-size: 14px; font-weight: 600; line-height: 1.6;">{{t.arriveEarly}}</p>
+                  <p style="margin: 0 0 8px 0; color: #0f172a; font-size: 14px; font-weight: 600; line-height: 1.6;">{{t.bringId}}</p>
+                  <p style="margin: 0 0 8px 0; color: #0f172a; font-size: 14px; font-weight: 600; line-height: 1.6;">{{t.haveTicketReady}}</p>
+                  <p style="margin: 0; color: #0f172a; font-size: 14px; font-weight: 600; line-height: 1.6;">{{t.nonTransferable}}</p>
                 </td>
               </tr>
             </table>
@@ -262,8 +262,8 @@
                   <span style="font-size: 24px;">🚗</span>
                 </td>
                 <td style="padding: 8px 0; vertical-align: top;">
-                  <p style="margin: 0 0 4px 0; color: #64748b; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Getting There</p>
-                  <p style="margin: 0; color: #0f172a; font-size: 14px; line-height: 1.6;"><a href="{{publicTransportLink}}" style="color: #6366F1; font-weight: 600; text-decoration: none;">Public Transport</a>: {{publicTransportInfo}}</p>
+                  <p style="margin: 0 0 4px 0; color: #64748b; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">{{t.gettingThere}}</p>
+                  <p style="margin: 0; color: #0f172a; font-size: 14px; line-height: 1.6;"><a href="{{publicTransportLink}}" style="color: #6366F1; font-weight: 600; text-decoration: none;">{{t.publicTransport}}</a>: {{publicTransportInfo}}</p>
                 </td>
               </tr>
             </table>
@@ -277,10 +277,10 @@
                   <span style="font-size: 24px;">📞</span>
                 </td>
                 <td style="padding: 8px 0; vertical-align: top;">
-                  <p style="margin: 0 0 4px 0; color: #64748b; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Event Organizer</p>
+                  <p style="margin: 0 0 4px 0; color: #64748b; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">{{t.eventOrganizer}}</p>
                   <p style="margin: 0 0 4px 0; color: #0f172a; font-size: 16px; font-weight: 600;">{{organizerName}}</p>
-                  <p style="margin: 4px 0 0 0; color: #475569; font-size: 14px;">Email: <a href="mailto:{{organizerEmail}}" style="color: #6366F1; text-decoration: none;">{{organizerEmail}}</a></p>
-                  <p style="margin: 4px 0 0 0; color: #475569; font-size: 14px;">Phone: {{organizerPhone}}</p>
+                  <p style="margin: 4px 0 0 0; color: #475569; font-size: 14px;">{{t.email}} <a href="mailto:{{organizerEmail}}" style="color: #6366F1; text-decoration: none;">{{organizerEmail}}</a></p>
+                  <p style="margin: 4px 0 0 0; color: #475569; font-size: 14px;">{{t.phone}} {{organizerPhone}}</p>
                 </td>
               </tr>
             </table>
@@ -294,7 +294,7 @@
                   <span style="font-size: 24px;">💬</span>
                 </td>
                 <td style="padding: 8px 0; vertical-align: top;">
-                  <p style="margin: 0 0 4px 0; color: #64748b; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Questions or Need Help?</p>
+                  <p style="margin: 0 0 4px 0; color: #64748b; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">{{t.questionsOrHelp}}</p>
                   <p style="margin: 0 0 8px 0; color: #0f172a; font-size: 16px; font-weight: 600;">{{companyName}}</p>
                   <p style="margin: 0;"><a href="mailto:{{platformMailTo}}" style="display: inline-block; background-color: #6366F1; color: #ffffff; font-size: 14px; font-weight: 700; padding: 12px 24px; border-radius: 50px; text-decoration: none;">{{platformMailTo}}</a></p>
                 </td>
@@ -310,7 +310,7 @@
     <mj-section padding="40px 20px 20px 20px">
       <mj-column>
         <mj-text align="center" color="#64748B" font-size="13px" line-height="1.6" padding-bottom="10px">
-          Business ID: <span style="font-weight: 600; color: #1E293B;">{{businessId}}</span>
+          {{t.businessId}} <span style="font-weight: 600; color: #1E293B;">{{businessId}}</span>
         </mj-text>
         <mj-social font-size="15px" icon-size="36px" mode="horizontal" padding="0 0 20px 0">
           <mj-social-element name="facebook" href="{{socialMedidFB}}" />

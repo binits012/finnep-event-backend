@@ -1,0 +1,17 @@
+{
+  "subject": "Vahvistuskoodisi - {{companyName}}",
+  "title": "Vahvistuskoodisi",
+  "greeting": "Hei,",
+  "body": "Olet pyytänyt pääsyä lippuihisi. Käytä alla olevaa vahvistuskoodia kirjautumisen viimeistelemiseen:",
+  "important": "Tärkeää:",
+  "expiry": "Tämä koodi vanhenee",
+  "expiryMinutes": "5 minuutin",
+  "expiryNote": "kuluttua. Anna se pikaisesti päästäksesi lippuihisi.",
+  "securityNote": "Jos et pyytänyt tätä vahvistuskoodia, jätä tämä sähköposti huomiotta. Tilisi pysyy turvassa.",
+  "footer": "Tämä on automaattinen viesti",
+  "footerPlatform": "Tapahtuma-alustalta",
+  "footerNoReply": "Älä vastaa tähän sähköpostiin.",
+  "copyright": "Kaikki oikeudet pidätetään.",
+  "help": "Tarvitsetko apua? Ota yhteyttä osoitteeseen"
+}
+

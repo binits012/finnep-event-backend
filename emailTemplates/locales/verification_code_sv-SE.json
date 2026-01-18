@@ -1,0 +1,17 @@
+{
+  "subject": "Din Verifieringskod - {{companyName}}",
+  "title": "Din Verifieringskod",
+  "greeting": "Hej,",
+  "body": "Du har begärt åtkomst till dina biljetter. Använd verifieringskoden nedan för att slutföra din inloggning:",
+  "important": "Viktigt:",
+  "expiry": "Denna kod upphör att gälla om",
+  "expiryMinutes": "5 minuter",
+  "expiryNote": "Vänligen ange den snabbt för att komma åt dina biljetter.",
+  "securityNote": "Om du inte begärde denna verifieringskod, ignorera detta e-postmeddelande. Ditt konto förblir säkert.",
+  "footer": "Detta är ett automatiskt meddelande från",
+  "footerPlatform": "Evenemangsplattform",
+  "footerNoReply": "Vänligen svara inte på detta e-postmeddelande.",
+  "copyright": "Alla rättigheter förbehållna.",
+  "help": "Behöver du hjälp? Kontakta oss på"
+}
+

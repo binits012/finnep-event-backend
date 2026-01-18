@@ -243,15 +243,17 @@ async function handleMerchantDeactivated(message) {
     }
 }
 
-async function sendMerchantArrivalEmail(orgName, merchantId, merchantEmail, companyEmail) {
+async function sendMerchantArrivalEmail(orgName, merchantId, merchantEmail, companyEmail, locale = 'en-US') {
     const fileLocation = __dirname.replace('rabbitMQ/handlers', '') +'/emailTemplates/merchant_arrival.html';
     const dashboardUrl = process.env.DASHBOARD_URL  + merchantId + '/login';
-    const emailPayload = await loadEmailTemplateForMerchant(fileLocation, orgName, dashboardUrl);
+    const emailPayload = await loadEmailTemplateForMerchant(fileLocation, orgName, dashboardUrl, locale);
+    const { getEmailSubject } = await import('../../util/emailTranslations.js');
+    const emailSubject = await getEmailSubject('merchant_arrival', locale);
     const message = {
         from:process.env.EMAIL_USERNAME,
         to:merchantEmail,
         cc:companyEmail,
-        subject:'Welcome to the Finnep',
+        subject:emailSubject,
         html:emailPayload.toString(),
 
     }

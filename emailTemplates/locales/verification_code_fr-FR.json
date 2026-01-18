@@ -1,0 +1,17 @@
+{
+  "subject": "Votre Code de Vérification - {{companyName}}",
+  "title": "Votre Code de Vérification",
+  "greeting": "Bonjour,",
+  "body": "Vous avez demandé à accéder à vos billets. Veuillez utiliser le code de vérification ci-dessous pour finaliser votre connexion :",
+  "important": "Important :",
+  "expiry": "Ce code expirera dans",
+  "expiryMinutes": "5 minutes",
+  "expiryNote": "Veuillez le saisir rapidement pour accéder à vos billets.",
+  "securityNote": "Si vous n'avez pas demandé ce code de vérification, veuillez ignorer cet e-mail. Votre compte reste sécurisé.",
+  "footer": "Ceci est un message automatique de",
+  "footerPlatform": "Plateforme d'Événements",
+  "footerNoReply": "Veuillez ne pas répondre à cet e-mail.",
+  "copyright": "Tous droits réservés.",
+  "help": "Besoin d'aide ? Contactez-nous à"
+}
+

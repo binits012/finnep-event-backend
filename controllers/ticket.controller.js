@@ -79,7 +79,10 @@ export const createSingleTicket = async(req,res,next) =>{
                         throw err
                     })
                     ticketId = ticket.id
-                    const emailPayload = await ticketMaster.createEmailPayload(event, ticket, ticketFor, otp)
+                    // Extract locale from request (default to en-US if not available)
+                    const locale = req?.query?.locale || req?.headers?.['accept-language'] ?
+                        (await import('../util/common.js')).extractLocaleFromRequest(req) : 'en-US';
+                    const emailPayload = await ticketMaster.createEmailPayload(event, ticket, ticketFor, otp, locale)
 
                     await new Promise(resolve => setTimeout(resolve, 100)) //100 mili second intentional delay
                     await OrderTicket.updateOrderTicketById(ticketOrder.id, {

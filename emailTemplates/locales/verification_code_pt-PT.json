@@ -1,0 +1,17 @@
+{
+  "subject": "Seu Código de Verificação - {{companyName}}",
+  "title": "Seu Código de Verificação",
+  "greeting": "Olá,",
+  "body": "Você solicitou acesso aos seus bilhetes. Use o código de verificação abaixo para completar seu login:",
+  "important": "Importante:",
+  "expiry": "Este código expirará em",
+  "expiryMinutes": "5 minutos",
+  "expiryNote": "Por favor, insira-o rapidamente para acessar seus bilhetes.",
+  "securityNote": "Se você não solicitou este código de verificação, ignore este e-mail. Sua conta permanece segura.",
+  "footer": "Esta é uma mensagem automática de",
+  "footerPlatform": "Plataforma de Eventos",
+  "footerNoReply": "Por favor, não responda a este e-mail.",
+  "copyright": "Todos os direitos reservados.",
+  "help": "Precisa de ajuda? Contacte-nos em"
+}
+

@@ -212,11 +212,19 @@ export const updateMerchantById = async (req, res, next) => {
                                 : '/emailTemplates/merchant_suspended.html')
                             console.log('File location:', status, fileLocation)
                             const dashboardUrl = process.env.DASHBOARD_URL+updatedMerchant?.merchantId+'/login'
-                            const loadedData = await loadEmailTemplateForMerchant(fileLocation, updatedMerchant?.orgName, dashboardUrl)
+
+                            // Extract locale from request (default to en-US)
+                            const locale = req.query?.locale || req.headers?.['accept-language'] ?
+                                (await import('../util/common.js')).extractLocaleFromRequest(req) : 'en-US';
+
+                            const loadedData = await loadEmailTemplateForMerchant(fileLocation, updatedMerchant?.orgName, dashboardUrl, locale)
+                            const { getEmailSubject } = await import('../util/emailTranslations.js');
+                            const templateName = status === 'active' ? 'merchant_activated' : 'merchant_suspended';
+                            const emailSubject = await getEmailSubject(templateName, locale);
                             const message = {
                                 from: process.env.EMAIL_USERNAME,
                                 to: updatedMerchant?.companyEmail,
-                                subject: status === 'active' ? 'Merchant Activated' : 'Merchant Suspended',
+                                subject: emailSubject,
                                 html: loadedData.toString(),
 
                             }

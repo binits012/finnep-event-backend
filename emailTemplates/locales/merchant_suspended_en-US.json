@@ -1,0 +1,9 @@
+{
+  "subject": "Merchant Status Updated - Account Suspended",
+  "title": "Account Suspended",
+  "greeting": "Hi",
+  "body1": "We regret to inform you that your merchant account has been suspended. This action was taken due to a violation of our terms of service or platform policies.",
+  "body2": "If you believe this is an error or would like to discuss the suspension, please contact our support team immediately. We're here to help resolve any issues.",
+  "contactButton": "Contact Support"
+}
+

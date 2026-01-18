@@ -1,7 +1,7 @@
 <mjml>
   <mj-head>
     <mj-font name="Fira Sans" href="https://fonts.googleapis.com/css?family=Fira+Sans:ital,wght@0,100;1,100;0,200;1,200;0,300;1,300;0,400;1,400;0,500;1,500;0,600;1,600;0,700;1,700;0,800;1,800;0,900;1,900" />
-    <mj-title>Welcome to Yellow Bridge - Your Event Empire Awaits!</mj-title>
+    <mj-title>{{t.subject}}</mj-title>
     <mj-attributes>
       <mj-all font-family="Fira Sans, Arial, sans-serif" />
       <mj-text color="#2D3A41" />
@@ -72,13 +72,13 @@
       <mj-section background-color="#1E1B4B" border-radius="20px" padding="40px">
         <mj-column>
           <mj-text align="center" color="#FFFFFF" font-size="28px" font-weight="700" padding-bottom="20px">
-            🌟 Welcome to Your Event Empire! 🌟
+            🌟 {{t.title}} 🌟
           </mj-text>
           <mj-text align="center" color="#F3F4F6" font-size="28px" font-weight="600" padding-bottom="30px">
-            Hey {{orgName}}! 👋
+            {{t.greeting}} {{orgName}}! 👋
           </mj-text>
           <mj-text color="#D1D5DB" font-size="16px" line-height="1.6" padding-bottom="20px">
-            Welcome to the most <strong style="color: #F59E0B; font-weight: 700;">revolutionary event platform</strong> on the planet! You're not just joining a platform – you're becoming part of a <strong style="color: #8B5CF6; font-weight: 700;">global community</strong> of event creators who are changing the world, one experience at a time.
+            {{t.body1}} <strong style="color: #F59E0B; font-weight: 700;">{{t.body1Highlight1}}</strong> on the planet! You're not just joining a platform – you're becoming part of a <strong style="color: #8B5CF6; font-weight: 700;">{{t.body1Highlight2}}</strong> of event creators who are changing the world, one experience at a time.
           </mj-text>
         </mj-column>
       </mj-section>
@@ -86,13 +86,13 @@
       <mj-section background-color="#10B981" border-radius="20px" padding="30px">
         <mj-column>
           <mj-text align="center" color="#FFFFFF" font-size="22px" font-weight="700" padding-bottom="15px">
-            🚀 Ready to Conquer the Event World?
+            🚀 {{t.body2}}
           </mj-text>
           <mj-text align="center" color="#FFFFFF" font-size="16px" line-height="1.5" padding-bottom="20px" opacity="0.9">
-            Your dashboard is waiting with powerful tools to create your first legendary event!
+            {{t.body3}}
           </mj-text>
           <mj-button background-color="#FFFFFF" color="#059669" font-size="16px" font-weight="700" border-radius="50px" href="{{dashboardUrl}}">
-            🎯 Launch Your First Event →
+            🎯 {{t.launchButton}}
           </mj-button>
         </mj-column>
       </mj-section>
@@ -100,14 +100,14 @@
       <mj-section padding="30px 40px">
         <mj-column>
           <mj-text color="#D1D5DB" font-size="16px" line-height="1.6" padding-bottom="20px">
-            We're not just a platform – we're your <strong style="color: #8B5CF6; font-weight: 700;">success partners</strong>. Our team of event experts, marketing gurus, and tech wizards are here to help you create experiences that people will talk about for years to come.
+            {{t.body4}} <strong style="color: #8B5CF6; font-weight: 700;">{{t.body4Highlight}}</strong>. Our team of event experts, marketing gurus, and tech wizards are here to help you create experiences that people will talk about for years to come.
           </mj-text>
           <mj-divider border-color="rgba(255, 255, 255, 0.1)" border-width="1px" padding="20px 0" />
           <mj-text align="center" color="#9CA3AF" font-size="14px" padding-bottom="8px">
-            With infinite possibilities,
+            {{t.signature}}
           </mj-text>
           <mj-text align="center" color="#F59E0B" font-size="16px" font-weight="600" padding-bottom="8px">
-            The Finnep Team
+            {{t.teamName}}
           </mj-text>
           <mj-text align="center" padding="0">
             <a href="mailto:info@finnep.fi" style="color: #60A5FA; text-decoration: none; font-size: 16px; font-weight: 500;">info@finnep.fi</a>

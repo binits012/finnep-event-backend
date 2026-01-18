@@ -108,15 +108,33 @@ const getCurrencySymbol = (currency = 'EUR') => {
 
 /**
  * Build venue map link
+ * Handles coordinates (lat,lng), full URLs, or address strings
  */
-const buildVenueMapLink = (venue) => {
+const buildVenueMapLink = (venue, geoCode = null) => {
+    // If geoCode is provided, check if it's coordinates or a URL
+    if (geoCode) {
+        // Check if it's already a valid URL
+        if (geoCode.startsWith('http://') || geoCode.startsWith('https://')) {
+            return geoCode;
+        }
+        // Check if it's coordinates (latitude,longitude)
+        if (geoCode.includes(',')) {
+            const [lat, lng] = geoCode.split(',').map(coord => coord.trim());
+            // Validate coordinates are numbers
+            if (!isNaN(parseFloat(lat)) && !isNaN(parseFloat(lng))) {
+                return `https://www.google.com/maps?q=${lat},${lng}`;
+            }
+        }
+    }
+
+    // Fallback to address-based search
     if (!venue) return '#';
     const address = venue.address || venue.name || '';
     if (!address) return '#';
-    return `https://maps.google.com/?q=${encodeURIComponent(address)}`;
+    return `https://www.google.com/maps?q=${encodeURIComponent(address)}`;
 };
 
-export const createEmailPayload = async (event, ticket, ticketFor, otp) => {
+export const createEmailPayload = async (event, ticket, ticketFor, otp, locale = 'en-US') => {
     try {
         const ticketId = ticket.id || ticket._id;
         const icsData = await generateICS(event, ticketId);
@@ -415,7 +433,8 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp) => {
         // Extract venue information
         const venueName = venue.name || venueInfo.name || event.eventLocationAddress || 'TBA';
         const venueAddress = venue.address || event.eventLocationAddress || '';
-        const venueMapLink = event.eventLocationGeoCode || venue.geoCode || buildVenueMapLink(venue);
+        const geoCode = event.eventLocationGeoCode || venue.geoCode || null;
+        const venueMapLink = buildVenueMapLink(venue, geoCode);
 
         // Extract organizer information (from merchant or venueInfo)
         const organizerName = merchant.orgName || merchant.name || venueInfo.name || 'Event Organizer';
@@ -565,7 +584,7 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp) => {
         } else {
             // Use MJML template
             const fileLocation = __dirname.replace('util', '') + '/emailTemplates/ticket_template.html';
-            loadedData = await loadEmailTemplate(fileLocation, templateVariables);
+            loadedData = await loadEmailTemplate(fileLocation, templateVariables, null, null, null, locale);
         }
 
         const qrBase64 = qrData.split(',')[1]; // Remove the data URI prefix

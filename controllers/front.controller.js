@@ -289,7 +289,9 @@ export const completeOrderTicket = async (req, res, next) => {
             const emailCrypto = await hash.readHash(ticketInfo.email);
             const ticketFor = emailCrypto.data;
             const event = await Event.getEventById(ticketInfo.eventId);
-            const emailPayload = await ticketMaster.createEmailPayload(event, ticket, ticketFor, orderTicket?.otp);
+            // Extract locale from request
+            const locale = commonUtil.extractLocaleFromRequest(req);
+            const emailPayload = await ticketMaster.createEmailPayload(event, ticket, ticketFor, orderTicket?.otp, locale);
             await new Promise(resolve => setTimeout(resolve, 100)); // intentional delay
             await sendMail.forward(emailPayload).then(async data => {
                 // Update the ticket to mark as sent
@@ -1130,7 +1132,10 @@ export const createPaymentIntent = async (req, res, next) => {
 
         // Exclude large arrays from Stripe metadata (seatTickets and placeIds can exceed 500 char limit)
         // These are stored in the database and passed in request body, so they don't need to be in Stripe metadata
-        const { seatTickets, placeIds, ...stripeMetadata } = metadata;
+        // Extract locale from metadata for email templates
+        const { normalizeLocale } = await import('../util/common.js');
+        const locale = metadata.locale ? normalizeLocale(metadata.locale) : 'en-US';
+        const { seatTickets, placeIds, locale: _, ...stripeMetadata } = metadata;
 
         // Only apply connected account logic if merchant is NOT the platform account
         if(merchant.stripeAccount !== process.env.STRIPE_PLATFORM_ACCOUNT_ID) {
@@ -1157,7 +1162,8 @@ export const createPaymentIntent = async (req, res, next) => {
                     serverCalculatedTotal: expectedPrice.totalAmount.toString(),
                     clientId: clientId, // Track client for monitoring
                     baseAmount: baseAmount.toString(),
-                    stripeProcessingFee: stripeProcessingFeeEstimate .toString()
+                    stripeProcessingFee: stripeProcessingFeeEstimate .toString(),
+                    locale: locale // Store locale for email templates
                 },
 
                 automatic_payment_methods: {
@@ -1184,7 +1190,8 @@ export const createPaymentIntent = async (req, res, next) => {
                     source: 'finnep-eventapp',
                     version: '1.0',
                     serverCalculatedTotal: expectedPrice.totalAmount.toString(),
-                    clientId: clientId
+                    clientId: clientId,
+                    locale: locale // Store locale for email templates
                 },
                 automatic_payment_methods: {
                     enabled: true,
@@ -1287,7 +1294,9 @@ export const handlePaymentSuccess = async (req, res, next) => {
             placeIds: requestMetadata.placeIds !== undefined ? requestMetadata.placeIds : [],
             seatTickets: requestMetadata.seatTickets !== undefined ? requestMetadata.seatTickets : [],
             // Nonce: prefer request body, fallback to Stripe metadata
-            nonce: requestMetadata.nonce || stripeMetadata.nonce
+            nonce: requestMetadata.nonce || stripeMetadata.nonce,
+            // Locale: prefer request body, fallback to Stripe metadata, default to en-US
+            locale: requestMetadata.locale || stripeMetadata.locale || 'en-US'
         };
 
         // Validate nonce after merging (can come from request or Stripe metadata)
@@ -1518,7 +1527,10 @@ export const handlePaymentSuccess = async (req, res, next) => {
 
         // Generate email payload and send ticket (same as completeOrderTicket)
         // Event is already loaded above
-        const emailPayload = await ticketMaster.createEmailPayload(event, ticket, sanitizedMetadata.email, otp);
+        // Extract locale from mergedMetadata (prefer request body, fallback to Stripe metadata)
+        const { normalizeLocale } = await import('../util/common.js');
+        const locale = mergedMetadata.locale ? normalizeLocale(mergedMetadata.locale) : 'en-US';
+        const emailPayload = await ticketMaster.createEmailPayload(event, ticket, sanitizedMetadata.email, otp, locale);
         await new Promise(resolve => setTimeout(resolve, 100)); // intentional delay
         await sendMail.forward(emailPayload).then(async data => {
             // Update the ticket to mark as sent
@@ -2141,7 +2153,9 @@ export const handleFreeEventRegistration = async (req, res, next) => {
         });
 
         // Generate email payload and send ticket (same as handlePaymentSuccess)
-        const emailPayload = await ticketMaster.createEmailPayload(event, ticket, sanitizedData.email, otp);
+        // Extract locale from request
+        const locale = commonUtil.extractLocaleFromRequest(req);
+        const emailPayload = await ticketMaster.createEmailPayload(event, ticket, sanitizedData.email, otp, locale);
         await new Promise(resolve => setTimeout(resolve, 100)); // intentional delay
         await sendMail.forward(emailPayload).then(async data => {
             // Update the ticket to mark as sent
@@ -2797,12 +2811,17 @@ export const sendSeatOTP = async (req, res, next) => {
 		const userDataKey = `seat_user:${eventId}:${email}`;
 		await redisClient.set(userDataKey, JSON.stringify({ email, fullName, placeIds }), 'EX', 600); // 10 minutes
 
+		// Extract locale from request
+		const locale = commonUtil.extractLocaleFromRequest(req);
+
 		// Send email with code
-		const emailHtml = await common.loadVerificationCodeTemplate(code);
+		const emailHtml = await commonUtil.loadVerificationCodeTemplate(code, locale);
+		const { getEmailSubject } = await import('../util/emailTranslations.js');
+		const emailSubject = await getEmailSubject('verification_code', locale, { companyName: process.env.COMPANY_TITLE || 'Finnep' });
 		const emailPayload = {
 			from: process.env.EMAIL_USERNAME,
 			to: email,
-			subject: 'Your Seat Selection Verification Code',
+			subject: emailSubject,
 			html: emailHtml
 		};
 

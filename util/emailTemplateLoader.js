@@ -72,6 +72,13 @@ export const registerHandlebarsHelpers = () => {
   Handlebars.registerHelper('unescaped', function(context) {
     return new Handlebars.SafeString(context);
   });
+
+  // Translation helper: {{t.key}} accesses translations object
+  // The translations object is passed as 't' in the template variables
+  // We register a helper that allows dot notation access
+  // Note: Handlebars automatically handles dot notation for object properties
+  // So {{t.title}} will work if 't' is in the template context
+  // We don't need a custom helper for this - Handlebars handles it natively
 };
 
 // Register helpers on module load

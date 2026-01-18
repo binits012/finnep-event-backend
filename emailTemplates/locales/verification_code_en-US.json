@@ -1,0 +1,17 @@
+{
+  "subject": "Your Verification Code - {{companyName}}",
+  "title": "Your Verification Code",
+  "greeting": "Hello,",
+  "body": "You've requested to access your tickets. Please use the verification code below to complete your login:",
+  "important": "Important:",
+  "expiry": "This code will expire in",
+  "expiryMinutes": "5 minutes",
+  "expiryNote": "Please enter it promptly to access your tickets.",
+  "securityNote": "If you didn't request this verification code, please ignore this email. Your account remains secure.",
+  "footer": "This is an automated message from",
+  "footerPlatform": "Event Platform",
+  "footerNoReply": "Please do not reply to this email.",
+  "copyright": "All rights reserved.",
+  "help": "Need help? Contact us at"
+}
+

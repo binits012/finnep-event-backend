@@ -6,8 +6,10 @@ import  {ObjectId} from 'mongodb'
 import moment from 'moment-timezone'
 import dotenv from 'dotenv'
 import crypto from 'crypto'
+import path from 'path';
 import { getSignedUrl } from "@aws-sdk/cloudfront-signer";
 import { compileMjmlTemplate } from './emailTemplateLoader.js';
+import { loadTranslations, normalizeLocale } from './emailTranslations.js';
 const privateKey = process.env.CLOUDFRONT_PRIVATE_KEY
 const keyPairId = process.env.CLOUDFRONT_KEY_PAIR
 dotenv.config()
@@ -177,17 +179,17 @@ export  const generateICS = async(event, ticketId)=>{
 
 }
 
-export  const loadEmailTemplate = async (fileLocation, variablesOrEventTitle, eventPromotionalPhoto, qrCodeRef, otp) => {
+export  const loadEmailTemplate = async (fileLocation, variablesOrEventTitle, eventPromotionalPhoto, qrCodeRef, otp, locale = 'en-US') => {
     // Replace .html with .mjml in file path
     const mjmlPath = fileLocation.replace('.html', '.mjml');
 
     // Check if first parameter after fileLocation is an object (new signature) or string (legacy signature)
     let variables;
     if (typeof variablesOrEventTitle === 'object' && variablesOrEventTitle !== null && !Array.isArray(variablesOrEventTitle)) {
-      // New signature: (fileLocation, variablesObject)
+      // New signature: (fileLocation, variablesObject, locale)
       variables = variablesOrEventTitle;
     } else {
-      // Legacy signature: (fileLocation, eventTitle, eventPromotionalPhoto, qrCodeRef, otp)
+      // Legacy signature: (fileLocation, eventTitle, eventPromotionalPhoto, qrCodeRef, otp, locale)
       variables = {
         eventTitle: variablesOrEventTitle || '',
         eventPromotionalPhoto: eventPromotionalPhoto || '',
@@ -196,15 +198,38 @@ export  const loadEmailTemplate = async (fileLocation, variablesOrEventTitle, ev
       };
     }
 
+    // Extract template name from file path (e.g., 'ticket_template' from './emailTemplates/ticket_template.mjml')
+    const templateName = path.basename(mjmlPath, '.mjml');
+
+    // Normalize locale
+    const normalizedLocale = normalizeLocale(locale);
+
+    // Load translations for this template and locale
+    const translations = await loadTranslations(templateName, normalizedLocale);
+
+    // Merge translations into variables object
+    variables.t = translations;
+
     return await compileMjmlTemplate(mjmlPath, variables);
   }
 
-export const loadEmailTemplateForMerchant = async (fileLocation, orgName, dashboardUrl) => {
+export const loadEmailTemplateForMerchant = async (fileLocation, orgName, dashboardUrl, locale = 'en-US') => {
     // Replace .html with .mjml in file path
     const mjmlPath = fileLocation.replace('.html', '.mjml');
+
+    // Extract template name from file path (e.g., 'merchant_arrival' from './emailTemplates/merchant_arrival.mjml')
+    const templateName = path.basename(mjmlPath, '.mjml');
+
+    // Normalize locale
+    const normalizedLocale = normalizeLocale(locale);
+
+    // Load translations for this template and locale
+    const translations = await loadTranslations(templateName, normalizedLocale);
+
     const variables = {
       orgName,
-      dashboardUrl
+      dashboardUrl,
+      t: translations // Pass translations as 't' object for Handlebars {{t.key}} access
     };
     return await compileMjmlTemplate(mjmlPath, variables);
 }
@@ -247,17 +272,24 @@ export const loadCareerTemplate = async (name, email, phone, position, experienc
     return await compileMjmlTemplate(fileLocation, variables);
 }
 
-export const loadVerificationCodeTemplate = async (code) => {
+export const loadVerificationCodeTemplate = async (code, locale = 'en-US') => {
     const fileLocation = './emailTemplates/verification_code.mjml';
     const currentYear = new Date().getFullYear();
     const companyName = process.env.COMPANY_TITLE || 'Finnep';
     const contactEmail = process.env.EMAIL_USERNAME || 'info@finnep.fi';
 
+    // Normalize locale
+    const normalizedLocale = normalizeLocale(locale);
+
+    // Load translations for verification_code template
+    const translations = await loadTranslations('verification_code', normalizedLocale);
+
     const variables = {
       verificationCode: code,
       currentYear,
       companyName,
-      contactEmail
+      contactEmail,
+      t: translations // Pass translations as 't' object for Handlebars {{t.key}} access
     };
     return await compileMjmlTemplate(fileLocation, variables);
 }
@@ -297,4 +329,37 @@ export const createCode = async (codeLength=10) =>{
         otp += CHARACTERS.charAt(crypto.randomInt(0, CHARACTERS.length));
     }
     return otp
+}
+
+/**
+ * Re-export normalizeLocale for use in controllers
+ */
+export { normalizeLocale };
+
+/**
+ * Extracts locale from request (BCP 47 format)
+ * Checks query parameter first, then Accept-Language header
+ * @param {Object} req - Express request object
+ * @returns {string} Normalized locale (e.g., 'en-US', 'fi-FI')
+ */
+export const extractLocaleFromRequest = (req) => {
+  // Check explicit locale query parameter first
+  if (req.query && req.query.locale) {
+    return normalizeLocale(req.query.locale);
+  }
+
+  // Check Accept-Language header
+  const acceptLanguage = req.headers && req.headers['accept-language'];
+  if (acceptLanguage) {
+    // Parse Accept-Language header: "en-US,en;q=0.9,fi;q=0.8" → extract "en-US"
+    const languages = acceptLanguage.split(',');
+    if (languages.length > 0) {
+      // Get the first language (highest priority)
+      const primaryLang = languages[0].split(';')[0].trim();
+      return normalizeLocale(primaryLang);
+    }
+  }
+
+  // Default to en-US if no locale found
+  return 'en-US';
 }

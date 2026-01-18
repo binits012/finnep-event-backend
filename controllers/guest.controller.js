@@ -94,12 +94,17 @@ export const sendVerificationCode = async (req, res, next) => {
         // Increment rate limit counter
         await VerificationCode.incrementRateLimitCounter(emailCryptoId);
 
+        // Extract locale from request
+        const locale = common.extractLocaleFromRequest(req);
+
         // Load email template and send email with code
-        const emailHtml = await common.loadVerificationCodeTemplate(code);
+        const emailHtml = await common.loadVerificationCodeTemplate(code, locale);
+        const { getEmailSubject } = await import('../util/emailTranslations.js');
+        const emailSubject = await getEmailSubject('verification_code', locale, { companyName: process.env.COMPANY_TITLE || 'Finnep' });
         const emailPayload = {
             from: process.env.EMAIL_USERNAME,
             to: email,
-            subject: 'Your Finnep Verification Code',
+            subject: emailSubject,
             html: emailHtml
         };
 

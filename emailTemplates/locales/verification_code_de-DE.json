@@ -1,0 +1,17 @@
+{
+  "subject": "Ihr Bestätigungscode - {{companyName}}",
+  "title": "Ihr Bestätigungscode",
+  "greeting": "Hallo,",
+  "body": "Sie haben den Zugriff auf Ihre Tickets angefordert. Bitte verwenden Sie den folgenden Bestätigungscode, um Ihre Anmeldung abzuschließen:",
+  "important": "Wichtig:",
+  "expiry": "Dieser Code läuft ab in",
+  "expiryMinutes": "5 Minuten",
+  "expiryNote": "Bitte geben Sie ihn umgehend ein, um auf Ihre Tickets zuzugreifen.",
+  "securityNote": "Wenn Sie diesen Bestätigungscode nicht angefordert haben, ignorieren Sie bitte diese E-Mail. Ihr Konto bleibt sicher.",
+  "footer": "Dies ist eine automatische Nachricht von",
+  "footerPlatform": "Event-Plattform",
+  "footerNoReply": "Bitte antworten Sie nicht auf diese E-Mail.",
+  "copyright": "Alle Rechte vorbehalten.",
+  "help": "Brauchen Sie Hilfe? Kontaktieren Sie uns unter"
+}
+

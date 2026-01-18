@@ -1,7 +1,7 @@
 <mjml>
   <mj-head>
     <mj-font name="Fira Sans" href="https://fonts.googleapis.com/css?family=Fira+Sans:ital,wght@0,100;1,100;0,200;1,200;0,300;1,300;0,400;1,400;0,500;1,500;0,600;1,600;0,700;1,700;0,800;1,800;0,900;1,900" />
-    <mj-title>Merchant Status Updated - Account Suspended</mj-title>
+    <mj-title>{{t.subject}}</mj-title>
     <mj-attributes>
       <mj-all font-family="Fira Sans, Arial, sans-serif" />
       <mj-text color="#2D3A41" />
@@ -72,19 +72,19 @@
       <mj-section padding="0 40px 40px 40px">
         <mj-column>
           <mj-text align="center" color="#DC2626" font-size="28px" font-weight="700" padding-bottom="20px">
-            ⚠️ Account Suspended
+            ⚠️ {{t.title}}
           </mj-text>
           <mj-text color="#F3F4F6" font-size="22px" font-weight="600" padding-bottom="30px">
-            Hi {{orgName}},
+            {{t.greeting}} {{orgName}},
           </mj-text>
           <mj-text color="#D1D5DB" font-size="16px" line-height="1.6" padding-bottom="20px">
-            We regret to inform you that your merchant account has been suspended. This action was taken due to a violation of our terms of service or platform policies.
+            {{t.body1}}
           </mj-text>
           <mj-text color="#D1D5DB" font-size="16px" line-height="1.6" padding-bottom="30px">
-            If you believe this is an error or would like to discuss the suspension, please contact our support team immediately. We're here to help resolve any issues.
+            {{t.body2}}
           </mj-text>
           <mj-button background-color="#3B82F6" color="#FFFFFF" font-size="16px" font-weight="600" border-radius="25px" href="mailto:info@finnep.fi">
-            Contact Support
+            {{t.contactButton}}
           </mj-button>
         </mj-column>
       </mj-section>

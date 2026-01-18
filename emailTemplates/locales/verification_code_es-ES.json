@@ -1,0 +1,17 @@
+{
+  "subject": "Tu Código de Verificación - {{companyName}}",
+  "title": "Tu Código de Verificación",
+  "greeting": "Hola,",
+  "body": "Has solicitado acceder a tus entradas. Utiliza el código de verificación a continuación para completar tu inicio de sesión:",
+  "important": "Importante:",
+  "expiry": "Este código expirará en",
+  "expiryMinutes": "5 minutos",
+  "expiryNote": "Por favor, introdúcelo rápidamente para acceder a tus entradas.",
+  "securityNote": "Si no solicitaste este código de verificación, ignora este correo electrónico. Tu cuenta permanece segura.",
+  "footer": "Este es un mensaje automático de",
+  "footerPlatform": "Plataforma de Eventos",
+  "footerNoReply": "Por favor, no respondas a este correo electrónico.",
+  "copyright": "Todos los derechos reservados.",
+  "help": "¿Necesitas ayuda? Contáctanos en"
+}
+

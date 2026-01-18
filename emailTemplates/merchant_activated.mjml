@@ -1,7 +1,7 @@
 <mjml>
   <mj-head>
     <mj-font name="Fira Sans" href="https://fonts.googleapis.com/css?family=Fira+Sans:ital,wght@0,100;1,100;0,200;1,200;0,300;1,300;0,400;1,400;0,500;1,500;0,600;1,600;0,700;1,700;0,800;1,800;0,900;1,900" />
-    <mj-title>Merchant Status Updated - Account Activated</mj-title>
+    <mj-title>{{t.subject}}</mj-title>
     <mj-attributes>
       <mj-all font-family="Fira Sans, Arial, sans-serif" />
       <mj-text color="#2D3A41" />
@@ -72,19 +72,19 @@
       <mj-section padding="0 40px 40px 40px">
         <mj-column>
           <mj-text align="center" color="#FFFFFF" font-size="28px" font-weight="700" padding-bottom="20px">
-            🎉 Account Activated Successfully!
+            🎉 {{t.title}}
           </mj-text>
           <mj-text color="#F3F4F6" font-size="22px" font-weight="600" padding-bottom="30px">
-            Hi {{orgName}},
+            {{t.greeting}} {{orgName}},
           </mj-text>
           <mj-text color="#D1D5DB" font-size="16px" line-height="1.6" padding-bottom="20px">
-            Great news! Your merchant account has been successfully activated. You're now ready to start creating amazing events and reaching your audience.
+            {{t.body1}}
           </mj-text>
           <mj-text color="#D1D5DB" font-size="16px" line-height="1.6" padding-bottom="30px">
-            You can now access your dashboard and begin setting up your first event. Our platform offers powerful tools to help you create, manage, and promote your events effectively.
+            {{t.body2}}
           </mj-text>
           <mj-button background-color="#F59E0B" color="#FFFFFF" font-size="16px" font-weight="600" border-radius="25px" href="{{dashboardUrl}}">
-            Access Dashboard →
+            {{t.dashboardButton}}
           </mj-button>
         </mj-column>
       </mj-section>
