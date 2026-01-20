@@ -96,15 +96,15 @@ export const settings = async () => {
         const isEmpty = !settings || (Array.isArray(settings) && settings.length === 0) || settings instanceof Error
 
         if(isEmpty){
-            logger.logInfo('[Settings] No settings found, creating default settings...')
+            logger.info('[Settings] No settings found, creating default settings...')
             try{
                 const newSetting = await Setting.createSetting("Some Text", {email: "info@finnep.fi", phone: "+358442733404"}, {fb: "https://www.facebook.com/finnep", x: "https://x.com/finnep", instagram: "https://www.instagram.com/finnep"}, otherInfo)
-                logger.logInfo('[Settings] Default settings created successfully', { settingId: newSetting?._id })
+                logger.info('[Settings] Default settings created successfully', { settingId: newSetting?._id })
             }catch(createErr){
                 logger.error('[Settings] Error creating default settings %s', createErr.stack)
             }
         } else {
-            logger.logInfo('[Settings] Settings already exist, skipping initialization', { count: Array.isArray(settings) ? settings.length : 'unknown' })
+            logger.info('[Settings] Settings already exist, skipping initialization', { count: Array.isArray(settings) ? settings.length : 'unknown' })
         }
     } catch(err) {
         logger.error('[Settings] Error during settings initialization %s', err.stack)
