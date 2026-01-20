@@ -22,7 +22,9 @@ const options = {
   keepAliveInitialDelay: 300000,  // Send keepAlive every 5 minutes (300000 ms)
   // Auto-reconnect options
   retryWrites: true,
-  retryReads: true
+  retryReads: true,
+  maxPoolSize: 50,               // ✅ ADD - increase connection pool
+  minPoolSize: 10,  
 };
 
 // Connect to MongoDB

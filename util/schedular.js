@@ -21,8 +21,9 @@ dotenv.config();
 const __dirname = dirname(import.meta.url).slice(7);
 console.log(__dirname);
 
+
 // Connection options for MongoDB
-const dbURI = `mongodb://${encodeURIComponent(process.env.MONGODB_USER)}:${encodeURIComponent(process.env.MONGODB_PWD)}@${encodeURIComponent(process.env.MONGODB_HOST)}:${encodeURIComponent(process.env.MONGODB_PORT)}/${encodeURIComponent(process.env.MONGODB_NAME)}?authSource=admin&useNewUrlParser=true`;
+const dbURI = `mongodb://${encodeURIComponent(process.env.MONGODB_USER)}:${encodeURIComponent(process.env.MONGODB_PWD)}@${encodeURIComponent(process.env.MONGODB_HOST)}:${encodeURIComponent(process.env.MONGODB_PORT)}/${encodeURIComponent(process.env.MONGODB_NAME)}?authSource=${encodeURIComponent(process.env.MONGODB_AUTH_SOURCE)}&useNewUrlParser=true`;
 
 // Create a robust Agenda instance with connection options
 let agenda = null;

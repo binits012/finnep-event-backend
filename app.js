@@ -38,16 +38,36 @@ var app = express();
 
 // Configure CORS to work with frontend CSP
 const corsOptions = {
-  origin: [
-    'http://localhost:3002',
-    'http://localhost:3000',
-    'http://localhost:3003',
-    'https://eventapp.finnep.fi',
-    'https://finnep.fi',
-    'https://cms.eventapp.finnep.fi',
-    'http://192.168.1.117:3003',
-    process.env.FRONTEND_URL || 'http://localhost:3000'
-  ],
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+
+    // Get allowed origins from environment variable, fallback to default
+    const allowedOrigins = process.env.CORS_ORIGINS
+      ? process.env.CORS_ORIGINS.split(',').map(url => url.trim()).filter(url => url.length > 0)
+      : [
+          'http://localhost:3002',
+          'http://localhost:3000',
+          'http://localhost:3003',
+          'https://eventapp.finnep.fi',
+          'https://finnep.fi',
+          'https://cms.eventapp.finnep.fi',
+          'http://192.168.1.117:3003',
+          'https://okazzo.eu',
+          'https://www.okazzo.eu',
+          'https://cms.okazzo.eu',
+          'https://okazzo.fi',
+          'https://www.okazzo.fi',
+          'https://cms.okazzo.fi',
+          process.env.FRONTEND_URL || 'http://localhost:3000'
+        ];
+
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: [
