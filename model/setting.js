@@ -30,7 +30,14 @@ export class Setting {
 }
 export const createSetting = async (aboutSection, contactInfo, socialMedia, otherInfo = null) =>{
     const setting = new Setting(aboutSection, contactInfo, socialMedia, otherInfo)
-    return await setting.saveToDB()
+    const savedSetting = await setting.saveToDB()
+
+    // Clear the cache after creating new settings
+    if (savedSetting) {
+        await commonUtil.removeCacheByKey(redisClient, SETTINGS_CACHE_KEY)
+    }
+
+    return savedSetting
 }
 
 export const getSetting = async()=>{
