@@ -277,6 +277,8 @@ if (process.env.NODE_ENV !== 'test') {
     await adminRole.photoTypes()
     //create notificationTypes
     await adminRole.notificationTypes()
+    //create settings
+    await adminRole.settings()
     //create socialMedia
     //await adminRole.socialMedia()
 }

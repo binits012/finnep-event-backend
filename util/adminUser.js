@@ -89,7 +89,7 @@ export const socialMedia = async () =>{
 }
 
 export const settings = async () => {
-    const settings = await Setting.getSettings()
+    const settings = await Setting.getSetting()
     if(settings.length === 0){
         try{
             await Setting.createSetting("Some Text", {email: "info@finnep.fi", phone: "+358442733404"}, {fb: "https://www.facebook.com/finnep", x: "https://x.com/finnep", instagram: "https://www.instagram.com/finnep"}, otherInfo)
