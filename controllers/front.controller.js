@@ -584,15 +584,24 @@ const validateMerchantAndEvent = async (metadata) => {
     console.log('event.venue', event.venue);
     if(event.venue && event.venue.venueId) {
         // For pricing_configuration mode, create a dummy ticket object with pricing from metadata
+        // NOTE: Frontend sends 'basePrice' not 'price', so we need to check both
         if (isPricingConfiguration) {
             const dummyTicket = {
-                price: metadata.price || 0,
-                serviceFee: metadata.serviceFee || 0,
-                vat: metadata.vat || 0,
-                entertainmentTax: metadata.entertainmentTax || 0,
-                serviceTax: metadata.serviceTax || 0,
-                orderFee: metadata.orderFee || 0
+                price: parseFloat(metadata.basePrice) || parseFloat(metadata.price) || 0,
+                serviceFee: parseFloat(metadata.serviceFee) || 0,
+                vat: parseFloat(metadata.vatRate) || parseFloat(metadata.vat) || 0,
+                entertainmentTax: parseFloat(metadata.entertainmentTax) || 0,
+                serviceTax: parseFloat(metadata.serviceTax) || 0,
+                orderFee: parseFloat(metadata.orderFee) || 0
             };
+            console.log('[validateMerchantAndEvent] Created dummy ticket for pricing_configuration:', {
+                price: dummyTicket.price,
+                serviceFee: dummyTicket.serviceFee,
+                entertainmentTax: dummyTicket.entertainmentTax,
+                serviceTax: dummyTicket.serviceTax,
+                orderFee: dummyTicket.orderFee,
+                metadataKeys: Object.keys(metadata).filter(k => ['price', 'basePrice', 'serviceFee', 'vatRate', 'vat', 'entertainmentTax', 'serviceTax', 'orderFee'].includes(k))
+            });
             return { merchant, event, ticket: dummyTicket };
         } else {
             // For ticket_info mode, find the actual ticket configuration
@@ -669,7 +678,71 @@ const calculateExpectedPrice = (ticket, event, quantity, metadata = {}) => {
     });
 
     if (hasSeatSelection) {
-        // Check if using pricing_configuration (individual seat pricing)
+        // PRIORITY 1: Use pre-calculated totals if available (most reliable for pricing_configuration)
+        // Frontend sends totalBasePrice, totalServiceFee, entertainmentTaxAmount, serviceTaxAmount, orderFee, orderFeeServiceTax
+        const hasTotalFields = metadata.totalBasePrice !== undefined && metadata.totalServiceFee !== undefined;
+
+        // Also check if totals have actual values (not just undefined check)
+        const parsedTotalBasePrice = parseFloat(metadata.totalBasePrice);
+        const parsedTotalServiceFee = parseFloat(metadata.totalServiceFee);
+        const hasMeaningfulTotals = !isNaN(parsedTotalBasePrice) && !isNaN(parsedTotalServiceFee);
+
+        console.log('[calculateExpectedPrice] Checking pre-calculated totals path:', {
+            hasSeatSelection,
+            isPricingConfiguration,
+            hasTotalFields,
+            hasMeaningfulTotals,
+            'metadata.totalBasePrice': metadata.totalBasePrice,
+            'parsedTotalBasePrice': parsedTotalBasePrice,
+            'metadata.totalServiceFee': metadata.totalServiceFee,
+            'parsedTotalServiceFee': parsedTotalServiceFee,
+            'metadata.entertainmentTaxAmount': metadata.entertainmentTaxAmount,
+            'metadata.vatAmount': metadata.vatAmount,
+            'metadata.serviceTaxAmount': metadata.serviceTaxAmount,
+            willUseTotals: isPricingConfiguration && hasTotalFields && hasMeaningfulTotals
+        });
+
+        // Use pre-calculated totals ONLY for pricing_configuration mode
+        // For ticket_info mode, the "totalBasePrice" and "totalServiceFee" are actually per-unit values,
+        // so we need to fall through to the normal calculation that multiplies by quantity
+        if (isPricingConfiguration && hasTotalFields && hasMeaningfulTotals) {
+            // Use the pre-calculated totals from frontend - they're already computed correctly
+            const totalBasePrice = parseFloat(metadata.totalBasePrice) || 0;
+            const totalServiceFee = parseFloat(metadata.totalServiceFee) || 0;
+            const totalEntertainmentTaxAmount = parseFloat(metadata.entertainmentTaxAmount) || parseFloat(metadata.vatAmount) || 0;
+            const totalServiceTaxAmount = parseFloat(metadata.serviceTaxAmount) || 0;
+            const orderFee = parseFloat(metadata.orderFee) || 0;
+            const orderFeeServiceTax = parseFloat(metadata.orderFeeServiceTax) || 0;
+
+            // Sum all components
+            const totalAmount = Math.round((
+                totalBasePrice +
+                totalServiceFee +
+                totalEntertainmentTaxAmount +
+                totalServiceTaxAmount +
+                orderFee +
+                orderFeeServiceTax
+            ) * 1000) / 1000;
+
+            console.log('[calculateExpectedPrice] Using pre-calculated totals for pricing_configuration:', {
+                totalBasePrice,
+                totalServiceFee,
+                totalEntertainmentTaxAmount,
+                totalServiceTaxAmount,
+                orderFee,
+                orderFeeServiceTax,
+                totalAmount
+            });
+
+            return {
+                perUnitSubtotal: 0,
+                perUnitVat: 0,
+                perUnitTotal: 0,
+                totalAmount: totalAmount
+            };
+        }
+
+        // PRIORITY 2: Check if using pricing_configuration (individual seat pricing) with seatTickets.pricing
         if (isPricingConfiguration && metadata.seatTickets && Array.isArray(metadata.seatTickets) && metadata.seatTickets.length > 0) {
             // Calculate totals first, then calculate percentages on totals (percentage should be on 100, not thousands)
             let totalBasePrice = 0;
@@ -1238,6 +1311,1179 @@ export const createPaymentIntent = async (req, res, next) => {
     }
 }
 
+export const createPaytrailPayment = async (req, res, next) => {
+    try {
+        // Security Layer 1: Request size validation
+        validateRequestSize(req.body);
+
+        // Security Layer 2: Input validation (reuse existing validatePaymentRequest)
+        const { amount, currency, metadata, paymentProvider } = req.body;
+
+        console.log('[createPaytrailPayment] Received metadata:', {
+            hasBasePrice: !!metadata?.basePrice,
+            hasServiceFee: !!metadata?.serviceFee,
+            basePrice: metadata?.basePrice,
+            serviceFee: metadata?.serviceFee,
+            vatAmount: metadata?.vatAmount,
+            metadataKeys: metadata ? Object.keys(metadata) : []
+        });
+
+        if (paymentProvider !== 'paytrail') {
+            throw new Error('Invalid payment provider');
+        }
+
+        const validatedData = validatePaymentRequest(req.body);
+        console.log('[createPaytrailPayment] After validation, metadata has:', {
+            hasBasePrice: !!metadata?.basePrice,
+            basePrice: metadata?.basePrice,
+            serviceFee: metadata?.serviceFee,
+            vatAmount: metadata?.vatAmount
+        });
+
+        // Parse placeIds and seatTickets if present (for seat-based purchases)
+        let parsedMetadata = { ...validatedData.metadata };
+        if (validatedData.metadata.placeIds) {
+            if (typeof validatedData.metadata.placeIds === 'string') {
+                try {
+                    parsedMetadata.placeIds = JSON.parse(validatedData.metadata.placeIds);
+                } catch (e) {
+                    // If parsing fails, keep as is (might be a single string)
+                    parsedMetadata.placeIds = validatedData.metadata.placeIds;
+                }
+            }
+            // Ensure it's an array if it's a string that looks like JSON array
+            if (typeof parsedMetadata.placeIds === 'string' && parsedMetadata.placeIds.trim().startsWith('[')) {
+                try {
+                    parsedMetadata.placeIds = JSON.parse(parsedMetadata.placeIds);
+                } catch (e) {
+                    // Keep as is
+                }
+            }
+        }
+
+        if (validatedData.metadata.seatTickets) {
+            if (typeof validatedData.metadata.seatTickets === 'string') {
+                try {
+                    parsedMetadata.seatTickets = JSON.parse(validatedData.metadata.seatTickets);
+                } catch (e) {
+                    // If parsing fails, keep as is
+                    parsedMetadata.seatTickets = validatedData.metadata.seatTickets;
+                }
+            }
+            // Ensure it's an array if it's a string that looks like JSON array
+            if (typeof parsedMetadata.seatTickets === 'string' && parsedMetadata.seatTickets.trim().startsWith('[')) {
+                try {
+                    parsedMetadata.seatTickets = JSON.parse(parsedMetadata.seatTickets);
+                } catch (e) {
+                    // Keep as is
+                }
+            }
+        }
+
+        console.log('[createPaytrailPayment] Parsed metadata:', {
+            hasPlaceIds: !!parsedMetadata.placeIds,
+            placeIdsType: typeof parsedMetadata.placeIds,
+            isPlaceIdsArray: Array.isArray(parsedMetadata.placeIds),
+            hasSeatTickets: !!parsedMetadata.seatTickets,
+            seatTicketsType: typeof parsedMetadata.seatTickets,
+            isSeatTicketsArray: Array.isArray(parsedMetadata.seatTickets)
+        });
+
+        const { merchant, event, ticket } = await validateMerchantAndEvent(parsedMetadata);
+
+        // Check if merchant has Paytrail enabled
+        if (!merchant.paytrailEnabled) {
+            throw new Error('Paytrail is not enabled for this merchant');
+        }
+
+        // Calculate and validate price - use parsedMetadata instead of metadata
+        const expectedPrice = calculateExpectedPrice(ticket, event, parseInt(parsedMetadata.quantity), parsedMetadata);
+        validatePriceCalculation(amount / 100, expectedPrice);
+
+        // Import Paytrail service
+        const paytrailService = (await import('../services/paytrailService.js')).default;
+
+        // Check if shop-in-shop is enabled
+        const isShopInShopEnabled = await paytrailService.isShopInShopEnabled();
+
+        if (isShopInShopEnabled) {
+            // Shop-in-shop mode: require sub-merchant ID
+            if (!merchant.paytrailSubMerchantId) {
+                throw new Error('Merchant does not have Paytrail sub-merchant account');
+            }
+        }
+
+        // Prepare payment items for Paytrail
+        // For pricing_configuration, use eventId as productCode since there's no single ticket
+        const productCode = ticket._id ? ticket._id.toString() : (parsedMetadata.ticketId || parsedMetadata.eventId || '');
+        const quantity = parseInt(parsedMetadata.quantity) || 1;
+
+        // Calculate unitPrice ensuring sum matches total amount exactly
+        // Paytrail requires: sum(unitPrice * units) === amount (must be exact match)
+        // Strategy: Use floor division, then add remainder to first unit
+        const baseUnitPrice = Math.floor(amount / quantity);
+        const remainder = amount - (baseUnitPrice * quantity);
+
+        // Create items array - if remainder exists, create multiple items to distribute it
+        const items = [];
+        if (remainder === 0) {
+            // Perfect division - single item with all units
+            items.push({
+                unitPrice: baseUnitPrice,
+                units: quantity,
+                vatPercentage: parseFloat(ticket.vat || ticket.entertainmentTax || 0),
+                productCode: productCode,
+                description: `${parsedMetadata.eventName} - ${parsedMetadata.ticketName || 'Seat Selection'}`,
+                deliveryDate: event.eventDate ? event.eventDate.toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+                category: 'event_ticket'
+            });
+        } else {
+            // Has remainder - split into two items to ensure exact match
+            // First item: baseUnitPrice + remainder, units = 1
+            items.push({
+                unitPrice: baseUnitPrice + remainder,
+                units: 1,
+                vatPercentage: parseFloat(ticket.vat || ticket.entertainmentTax || 0),
+                productCode: productCode,
+                description: `${parsedMetadata.eventName} - ${parsedMetadata.ticketName || 'Seat Selection'}`,
+                deliveryDate: event.eventDate ? event.eventDate.toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+                category: 'event_ticket'
+            });
+            // Remaining items: baseUnitPrice, units = quantity - 1
+            if (quantity > 1) {
+                items.push({
+                    unitPrice: baseUnitPrice,
+                    units: quantity - 1,
+                    vatPercentage: parseFloat(ticket.vat || ticket.entertainmentTax || 0),
+                    productCode: productCode,
+                    description: `${parsedMetadata.eventName} - ${parsedMetadata.ticketName || 'Seat Selection'}`,
+                    deliveryDate: event.eventDate ? event.eventDate.toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+                    category: 'event_ticket'
+                });
+            }
+        }
+
+        // Verify the sum matches exactly
+        const calculatedTotal = items.reduce((sum, item) => sum + (item.unitPrice * item.units), 0);
+        if (calculatedTotal !== amount) {
+            throw new Error(`Item sum mismatch: calculated ${calculatedTotal}, expected ${amount}`);
+        }
+
+        console.log('[createPaytrailPayment] Item calculation:', {
+            amount,
+            quantity,
+            baseUnitPrice,
+            remainder,
+            itemsCount: items.length,
+            items: items.map(item => ({ unitPrice: item.unitPrice, units: item.units, subtotal: item.unitPrice * item.units })),
+            calculatedTotal,
+            matches: calculatedTotal === amount
+        });
+
+        const customer = {
+            email: parsedMetadata.email,
+            firstName: parsedMetadata.fullName ? parsedMetadata.fullName.split(' ')[0] : '',
+            lastName: parsedMetadata.fullName ? parsedMetadata.fullName.split(' ').slice(1).join(' ') : '',
+            phone: parsedMetadata.phone || ''
+        };
+
+        let paytrailPayment;
+        if (isShopInShopEnabled) {
+            // Use shop-in-shop payment method
+            paytrailPayment = await paytrailService.createShopInShopPayment({
+                amount: amount,
+                currency: currency.toUpperCase(),
+                merchantId: metadata.merchantId,
+                eventId: metadata.eventId,
+                ticketId: metadata.ticketId,
+                email: metadata.email,
+                items: items,
+                customer: customer,
+                subMerchantId: merchant.paytrailSubMerchantId,
+                commissionRate: merchant.paytrailShopInShopData?.commissionRate
+                    || parseFloat(process.env.PAYTRAIL_PLATFORM_COMMISSION || '3')
+            });
+        } else {
+            // Single account mode: use platform account, no sub-merchant needed
+            paytrailPayment = await paytrailService.createSingleAccountPayment({
+                amount: amount,
+                currency: currency.toUpperCase(),
+                merchantId: metadata.merchantId,
+                eventId: metadata.eventId,
+                ticketId: metadata.ticketId,
+                email: metadata.email,
+                items: items,
+                customer: customer,
+                commissionRate: merchant.paytrailShopInShopData?.commissionRate
+                    || parseFloat(process.env.PAYTRAIL_PLATFORM_COMMISSION || '3')
+            });
+        }
+
+        // Store ALL payment data in Redis for verification (10 minute TTL)
+        const paymentKey = `paytrail_payment:${paytrailPayment.stamp}`;
+        const redisPaymentData = {
+            // All metadata from request (use parsedMetadata for arrays)
+            ...parsedMetadata,
+            // Payment details
+            transactionId: paytrailPayment.transactionId,
+            stamp: paytrailPayment.stamp,
+            amount: amount,
+            currency: currency.toUpperCase(),
+            commission: paytrailPayment.commission,
+            // Merchant details
+            merchantId: parsedMetadata.merchantId,
+            externalMerchantId: parsedMetadata.externalMerchantId || merchant.merchantId,
+            subMerchantId: isShopInShopEnabled ? merchant.paytrailSubMerchantId : null,
+            // Event details
+            eventId: parsedMetadata.eventId,
+            eventName: parsedMetadata.eventName,
+            ticketId: parsedMetadata.ticketId,
+            ticketName: parsedMetadata.ticketName,
+            ticketTypeId: parsedMetadata.ticketId, // Alias for compatibility
+            // Customer details
+            email: parsedMetadata.email,
+            customerName: parsedMetadata.fullName || parsedMetadata.email.split('@')[0],
+            fullName: parsedMetadata.fullName,
+            phone: parsedMetadata.phone || '',
+            // Quantity and seats (use parsed arrays)
+            quantity: parseInt(parsedMetadata.quantity),
+            placeIds: Array.isArray(parsedMetadata.placeIds) ? parsedMetadata.placeIds : (parsedMetadata.placeIds || []),
+            seatTickets: Array.isArray(parsedMetadata.seatTickets) ? parsedMetadata.seatTickets : (parsedMetadata.seatTickets || []),
+            seats: Array.isArray(parsedMetadata.placeIds) ? parsedMetadata.placeIds : (parsedMetadata.placeIds || []),
+            // Payment mode
+            isShopInShop: isShopInShopEnabled,
+            commissionRate: merchant.paytrailShopInShopData?.commissionRate || parseFloat(process.env.PAYTRAIL_PLATFORM_COMMISSION || '3'),
+            // Timestamp
+            timestamp: new Date().toISOString(),
+            locale: parsedMetadata.locale || 'en-US'
+        };
+        console.log('[createPaytrailPayment] Storing in Redis:', {
+            stamp: paytrailPayment.stamp,
+            hasBasePrice: !!redisPaymentData.basePrice,
+            hasServiceFee: !!redisPaymentData.serviceFee,
+            basePrice: redisPaymentData.basePrice,
+            serviceFee: redisPaymentData.serviceFee,
+            vatAmount: redisPaymentData.vatAmount,
+            amount: redisPaymentData.amount
+        });
+        await redisClient.set(paymentKey, JSON.stringify(redisPaymentData), 'EX', 600); // 10 minutes TTL
+
+        if (isShopInShopEnabled) {
+            info(`Paytrail shop-in-shop payment created: ${paytrailPayment.transactionId} for sub-merchant ${merchant.paytrailSubMerchantId}`);
+        } else {
+            info(`Paytrail single account payment created: ${paytrailPayment.transactionId} for merchant ${metadata.merchantId}`);
+        }
+
+        // Return payment URL for redirect
+        res.status(consts.HTTP_STATUS_OK).json({
+            paymentUrl: paytrailPayment.href,
+            transactionId: paytrailPayment.transactionId,
+            stamp: paytrailPayment.stamp,
+            provider: 'paytrail',
+            commission: paytrailPayment.commission
+        });
+
+    } catch (error) {
+        console.error('Error creating Paytrail payment:', error);
+        res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            error: error.message
+        });
+    }
+}
+
+// Handle Paytrail payment failure/cancellation
+// Releases seat reservations and cleans up payment data
+// Includes idempotency checks and security validation
+export const handlePaytrailPaymentFailure = async (req, res, next) => {
+    try {
+        // Security Layer 1: Request size validation
+        validateRequestSize(req.body);
+
+        const {
+            stamp,
+            transactionId,
+            status, // 'fail' or 'cancel'
+            eventId,
+            placeIds,
+            sessionId,
+            email,
+            nonce // Nonce for duplicate submission protection
+        } = req.body;
+
+        // Security Layer 2: Validate required fields
+        if (!stamp || !transactionId) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                error: 'Missing required fields: stamp and transactionId are required'
+            });
+        }
+
+        // Security Layer 3: Validate status
+        if (status && status !== 'fail' && status !== 'cancel') {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                error: 'Invalid status. Must be "fail" or "cancel"'
+            });
+        }
+
+        // Security Layer 4: Validate stamp and transactionId format
+        if (typeof stamp !== 'string' || stamp.length < 10 || stamp.length > 200) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                error: 'Invalid stamp format'
+            });
+        }
+
+        if (typeof transactionId !== 'string' || transactionId.length < 10 || transactionId.length > 200) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                error: 'Invalid transactionId format'
+            });
+        }
+
+        const redisClient = (await import('../src/redis/client.js')).default;
+        const clientId = await getClientIdentifier(req);
+
+        // Security Layer 5: Verify stamp exists in Redis and matches transactionId
+        // This ensures the failure request is legitimate
+        const paymentKey = `paytrail_payment:${stamp}`;
+        const redisPaymentData = await redisClient.get(paymentKey);
+
+        if (redisPaymentData) {
+            try {
+                const paymentData = JSON.parse(redisPaymentData);
+                // Verify transactionId matches
+                if (paymentData.transactionId && paymentData.transactionId !== transactionId) {
+                    console.warn('[handlePaytrailPaymentFailure] TransactionId mismatch:', {
+                        stamp,
+                        providedTransactionId: transactionId,
+                        storedTransactionId: paymentData.transactionId,
+                        clientId
+                    });
+                    return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                        error: 'TransactionId mismatch'
+                    });
+                }
+                // Verify eventId matches if provided
+                if (eventId && paymentData.eventId && paymentData.eventId !== eventId) {
+                    console.warn('[handlePaytrailPaymentFailure] EventId mismatch:', {
+                        stamp,
+                        providedEventId: eventId,
+                        storedEventId: paymentData.eventId,
+                        clientId
+                    });
+                    return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                        error: 'EventId mismatch'
+                    });
+                }
+                // Use stored email if not provided (for security)
+                const verifiedEmail = email || paymentData.email;
+                const verifiedEventId = eventId || paymentData.eventId;
+                const verifiedPlaceIds = placeIds || paymentData.placeIds || [];
+
+                console.log('[handlePaytrailPaymentFailure] Payment failure verified:', {
+                    stamp,
+                    transactionId,
+                    status,
+                    verifiedEventId,
+                    verifiedPlaceIdsCount: verifiedPlaceIds.length,
+                    hasEmail: !!verifiedEmail,
+                    clientId
+                });
+
+                // IDEMPOTENCY: Check if failure has already been processed
+                const failureKey = `paytrail_failure_processed:${stamp}`;
+                const alreadyProcessed = await redisClient.get(failureKey);
+
+                if (alreadyProcessed) {
+                    // Already processed - return success (idempotent)
+                    const processedData = JSON.parse(alreadyProcessed);
+                    console.log('[handlePaytrailPaymentFailure] Already processed (idempotent):', {
+                        stamp,
+                        transactionId,
+                        processedAt: processedData.timestamp,
+                        clientId
+                    });
+                    return res.status(consts.HTTP_STATUS_OK).json({
+                        success: true,
+                        message: 'Payment failure already handled',
+                        data: {
+                            released: processedData.released || 0,
+                            status: status || 'fail',
+                            processedAt: processedData.timestamp
+                        }
+                    });
+                }
+
+                // NONCE VALIDATION - prevent duplicate submissions
+                let nonceValid = true;
+                if (nonce && typeof nonce === 'string' && nonce.length >= 32) {
+                    const nonceKey = `paytrail_failure_nonce:${nonce}`;
+                    const nonceValue = JSON.stringify({
+                        stamp,
+                        transactionId,
+                        eventId: verifiedEventId,
+                        email: verifiedEmail,
+                        timestamp: new Date().toISOString(),
+                        clientId: clientId
+                    });
+
+                    // Atomically check and set: returns null if key already exists
+                    const setResult = await redisClient.set(nonceKey, nonceValue, {
+                        NX: true, // Only set if key does not exist
+                        EX: 600  // 10 minutes TTL
+                    });
+
+                    if (setResult === null) {
+                        // Nonce already exists - duplicate submission
+                        const existingNonce = await redisClient.get(nonceKey);
+                        let existingData = null;
+                        try {
+                            existingData = existingNonce ? JSON.parse(existingNonce) : null;
+                        } catch (e) {
+                            // Ignore parse errors
+                        }
+
+                        console.warn('[handlePaytrailPaymentFailure] Duplicate submission detected:', {
+                            nonce,
+                            stamp,
+                            transactionId,
+                            clientId: clientId,
+                            timestamp: new Date().toISOString(),
+                            existingData: existingData
+                        });
+
+                        // Return success (idempotent) but don't process again
+                        return res.status(consts.HTTP_STATUS_OK).json({
+                            success: true,
+                            message: 'Payment failure already handled',
+                            data: {
+                                released: 0,
+                                status: status || 'fail'
+                            }
+                        });
+                    }
+                }
+
+                // Release seat reservations if placeIds are provided
+                let releasedCount = 0;
+                if (verifiedEventId && verifiedPlaceIds && Array.isArray(verifiedPlaceIds) && verifiedPlaceIds.length > 0) {
+                    try {
+                        const seatReservationService = (await import('../src/services/seatReservationService.js')).default;
+
+                        // Security: Verify reservations belong to this email before releasing
+                        if (verifiedEmail) {
+                            for (const placeId of verifiedPlaceIds) {
+                                const reservationSessionId = await seatReservationService.getReservation(
+                                    verifiedEventId,
+                                    placeId,
+                                    verifiedEmail
+                                );
+                                if (!reservationSessionId) {
+                                    console.warn('[handlePaytrailPaymentFailure] No reservation found for placeId:', {
+                                        eventId: verifiedEventId,
+                                        placeId,
+                                        email: verifiedEmail
+                                    });
+                                }
+                            }
+                        }
+
+                        // Release reservations (with email for security)
+                        releasedCount = await seatReservationService.releaseReservations(
+                            verifiedEventId,
+                            verifiedPlaceIds,
+                            verifiedEmail || undefined
+                        );
+
+                        console.log(`[handlePaytrailPaymentFailure] Released ${releasedCount} seat reservations for event ${verifiedEventId}`);
+                    } catch (reservationError) {
+                        console.error('[handlePaytrailPaymentFailure] Error releasing reservations:', reservationError);
+                        // Don't fail the entire operation if reservation release fails
+                    }
+                }
+
+                // Mark as processed (idempotency)
+                const processedData = {
+                    stamp,
+                    transactionId,
+                    eventId: verifiedEventId,
+                    released: releasedCount,
+                    timestamp: new Date().toISOString(),
+                    clientId: clientId
+                };
+                await redisClient.set(failureKey, JSON.stringify(processedData), {
+                    EX: 3600 // 1 hour TTL
+                });
+
+                // Clean up Redis payment data
+                await redisClient.del(paymentKey);
+                console.log(`[handlePaytrailPaymentFailure] Cleaned up Redis payment data for stamp: ${stamp}`);
+
+                return res.status(consts.HTTP_STATUS_OK).json({
+                    success: true,
+                    message: 'Payment failure handled successfully',
+                    data: {
+                        released: releasedCount,
+                        status: status || 'fail'
+                    }
+                });
+            } catch (parseError) {
+                console.error('[handlePaytrailPaymentFailure] Error parsing Redis payment data:', parseError);
+                // Continue with basic cleanup even if parse fails
+            }
+        } else {
+            // Payment data not found in Redis (may have expired or already been cleaned up)
+            // Check if failure was already processed
+            const failureKey = `paytrail_failure_processed:${stamp}`;
+            const alreadyProcessed = await redisClient.get(failureKey);
+
+            if (alreadyProcessed) {
+                const processedData = JSON.parse(alreadyProcessed);
+                console.log('[handlePaytrailPaymentFailure] Already processed (idempotent, no payment data):', {
+                    stamp,
+                    transactionId,
+                    processedAt: processedData.timestamp
+                });
+                return res.status(consts.HTTP_STATUS_OK).json({
+                    success: true,
+                    message: 'Payment failure already handled',
+                    data: {
+                        released: processedData.released || 0,
+                        status: status || 'fail',
+                        processedAt: processedData.timestamp
+                    }
+                });
+            }
+
+            // No payment data and not processed - likely expired or invalid
+            console.warn('[handlePaytrailPaymentFailure] Payment data not found in Redis:', {
+                stamp,
+                transactionId,
+                clientId
+            });
+
+            // Still try to release reservations if provided (defensive)
+            if (eventId && placeIds && Array.isArray(placeIds) && placeIds.length > 0 && email) {
+                try {
+                    const seatReservationService = (await import('../src/services/seatReservationService.js')).default;
+                    const releasedCount = await seatReservationService.releaseReservations(
+                        eventId,
+                        placeIds,
+                        email
+                    );
+                    console.log(`[handlePaytrailPaymentFailure] Released ${releasedCount} reservations (no payment data found)`);
+
+                    // Mark as processed
+                    const failureKey = `paytrail_failure_processed:${stamp}`;
+                    await redisClient.set(failureKey, JSON.stringify({
+                        stamp,
+                        transactionId,
+                        eventId,
+                        released: releasedCount,
+                        timestamp: new Date().toISOString(),
+                        clientId: clientId
+                    }), { EX: 3600 });
+
+                    return res.status(consts.HTTP_STATUS_OK).json({
+                        success: true,
+                        message: 'Payment failure handled (no payment data found)',
+                        data: {
+                            released: releasedCount,
+                            status: status || 'fail'
+                        }
+                    });
+                } catch (reservationError) {
+                    console.error('[handlePaytrailPaymentFailure] Error releasing reservations (no payment data):', reservationError);
+                }
+            }
+
+            return res.status(consts.HTTP_STATUS_OK).json({
+                success: true,
+                message: 'Payment failure handled (no payment data found)',
+                data: {
+                    released: 0,
+                    status: status || 'fail'
+                }
+            });
+        }
+    } catch (err) {
+        error('Error handling Paytrail payment failure:', err);
+        return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
+            error: err.message || 'Failed to handle payment failure'
+        });
+    }
+};
+
+// Verify Paytrail payment by stamp and return ticket if payment was successful
+// If webhook hasn't processed yet, verify payment status directly with Paytrail API
+export const verifyPaytrailPayment = async (req, res, next) => {
+    try {
+        console.log('=== verifyPaytrailPayment CALLED ===');
+        console.log('Body:', JSON.stringify(req.body));
+
+        // Get Paytrail params from body (sent by client after redirect)
+        const {
+            stamp,
+            transactionId,
+            status,
+            // Checkout data from client (needed to create ticket)
+            eventId,
+            email,
+            customerName,
+            quantity,
+            ticketTypeId,
+            seats,
+            amount,
+            currency,
+            // Pricing breakdown from client
+            basePrice,
+            serviceFee,
+            vatRate,
+            vatAmount,
+            serviceTax,
+            serviceTaxAmount,
+            entertainmentTax,
+            entertainmentTaxAmount,
+            orderFee,
+            orderFeeServiceTax,
+            totalBasePrice,
+            totalServiceFee,
+            country,
+            fullName,
+            seatTickets, // Array of {placeId, ticketId, ticketName} for multiple ticket types
+            placeIds, // Explicit placeIds array (may be sent separately from seats)
+            nonce // Nonce for duplicate submission protection
+        } = req.body;
+
+        if (!stamp || !transactionId) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                error: 'Missing stamp or transactionId'
+            });
+        }
+
+        console.log(`[verifyPaytrailPayment] stamp=${stamp}, transactionId=${transactionId}, status=${status}`);
+        console.log('[verifyPaytrailPayment] Request body data:', {
+            hasPlaceIds: !!placeIds,
+            placeIds: placeIds,
+            hasSeats: !!seats,
+            seats: seats,
+            hasSeatTickets: !!seatTickets,
+            seatTicketsLength: seatTickets ? (Array.isArray(seatTickets) ? seatTickets.length : 'not array') : 0,
+            eventId: eventId
+        });
+
+        // 0. NONCE VALIDATION - prevent duplicate form submissions
+        if (nonce && typeof nonce === 'string' && nonce.length >= 32) {
+            const nonceKey = `paytrail_verify_nonce:${nonce}`;
+            const clientId = await getClientIdentifier(req);
+            const nonceValue = JSON.stringify({
+                stamp,
+                transactionId,
+                eventId,
+                email,
+                timestamp: new Date().toISOString(),
+                clientId: clientId
+            });
+
+            // Atomically check and set: returns null if key already exists, 'OK' if set successfully
+            const setResult = await redisClient.set(nonceKey, nonceValue, {
+                NX: true, // Only set if key does not exist
+                EX: 600  // 10 minutes TTL (same as payment data)
+            });
+
+            if (setResult === null) {
+                // Nonce already exists - this is a duplicate submission
+                const existingNonce = await redisClient.get(nonceKey);
+                let existingData = null;
+                try {
+                    existingData = existingNonce ? JSON.parse(existingNonce) : null;
+                } catch (e) {
+                    // Ignore parse errors
+                }
+
+                console.warn('[verifyPaytrailPayment] Duplicate verification submission detected:', {
+                    nonce,
+                    stamp,
+                    transactionId,
+                    eventId,
+                    email,
+                    clientId: clientId,
+                    timestamp: new Date().toISOString(),
+                    existingData: existingData
+                });
+
+                // Check if ticket was already created (idempotency)
+                let existingTicket = await Ticket.genericSearch({ paytrailStamp: stamp });
+                if (!existingTicket && transactionId) {
+                    existingTicket = await Ticket.genericSearch({ paytrailTransactionId: transactionId });
+                }
+
+                if (existingTicket) {
+                    // Ticket already exists - return it (idempotent response)
+                    console.log(`[verifyPaytrailPayment] Ticket already exists for duplicate nonce: ${existingTicket._id}`);
+                    existingTicket = await Ticket.getTicketById(existingTicket._id);
+                    return res.status(consts.HTTP_STATUS_OK).json({ success: true, ticket: existingTicket });
+                }
+
+                // Nonce used but no ticket - reject duplicate submission
+                return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                    error: 'Duplicate submission',
+                    message: 'This payment verification has already been submitted. Please refresh the page if you need to check your ticket status.'
+                });
+            }
+
+            // Nonce successfully stored - this is a new, valid submission
+            console.log(`[verifyPaytrailPayment] Nonce validated and stored: ${nonce}`);
+        } else if (nonce) {
+            // Nonce provided but invalid format - log warning but don't block (backward compatibility)
+            console.warn('[verifyPaytrailPayment] Invalid nonce format (too short or wrong type):', {
+                nonce,
+                length: nonce?.length,
+                type: typeof nonce
+            });
+        }
+
+        // 1. IDEMPOTENCY CHECK WITH REDIS LOCK - prevent race conditions from multiple simultaneous requests
+        const lockKey = `paytrail_verify_lock:${stamp}`;
+        const lockValue = transactionId;
+        const lockTTL = 30; // 30 seconds lock
+
+        // Try to acquire lock (SET with NX - only set if not exists)
+        const lockAcquired = await redisClient.set(lockKey, lockValue, 'EX', lockTTL, 'NX');
+
+        if (!lockAcquired) {
+            // Another request is processing this payment - wait a bit and check if ticket was created
+            console.log(`[verifyPaytrailPayment] Lock already exists, waiting for other request to complete...`);
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+
+            // Check if ticket was created by the other request
+            let ticket = await Ticket.genericSearch({ paytrailStamp: stamp });
+            if (!ticket) {
+                ticket = await Ticket.genericSearch({ paytrailTransactionId: transactionId });
+            }
+
+            if (ticket) {
+                console.log(`[verifyPaytrailPayment] Ticket created by another request: ${ticket._id}`);
+                ticket = await Ticket.getTicketById(ticket._id);
+                return res.status(consts.HTTP_STATUS_OK).json({ success: true, ticket });
+            }
+
+            // Still no ticket - return error (shouldn't happen, but handle gracefully)
+            return res.status(consts.HTTP_STATUS_CONFLICT).json({
+                error: 'Payment verification in progress',
+                message: 'Another request is currently processing this payment. Please wait a moment and refresh.'
+            });
+        }
+
+        // Lock acquired - proceed with verification
+        try {
+            // Check if ticket already exists (double-check after acquiring lock)
+            let ticket = await Ticket.genericSearch({ paytrailStamp: stamp });
+            if (!ticket) {
+                ticket = await Ticket.genericSearch({ paytrailTransactionId: transactionId });
+            }
+
+            if (ticket) {
+                console.log(`[verifyPaytrailPayment] Ticket already exists: ${ticket._id}`);
+                ticket = await Ticket.getTicketById(ticket._id);
+                return res.status(consts.HTTP_STATUS_OK).json({ success: true, ticket });
+            }
+
+            // 2. VERIFY PAYMENT STATUS - Only fetch from Paytrail API if status not provided in redirect params
+        // Unlike Stripe's payment intent, Paytrail doesn't have a "pending" state - payment happens on their side
+        // We already validated the amount at creation time and stored it in Redis, so we don't need to fetch for amount
+        let paymentStatus = status;
+        let paytrailApiAmount = null; // Only used for verification if API is called
+
+        if (!paymentStatus || paymentStatus !== 'ok') {
+            // Status not provided or not 'ok' - fetch from Paytrail API to verify
+            console.log(`[verifyPaytrailPayment] Status not 'ok' or missing, fetching from Paytrail API...`);
+            const paytrailService = (await import('../services/paytrailService.js')).default;
+            try {
+                const paytrailPayment = await paytrailService.getPayment(transactionId);
+                paymentStatus = paytrailPayment.status;
+                paytrailApiAmount = paytrailPayment.amount; // May be undefined if API doesn't return it
+                console.log(`[verifyPaytrailPayment] Paytrail API response:`, {
+                    status: paymentStatus,
+                    amount: paytrailApiAmount,
+                    currency: paytrailPayment.currency
+                });
+            } catch (apiError) {
+                console.error(`[verifyPaytrailPayment] Failed to fetch payment from Paytrail API:`, apiError);
+                return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
+                    error: 'Failed to verify payment with Paytrail',
+                    message: 'Could not retrieve payment details from Paytrail. Please try again or contact support.'
+                });
+            }
+        } else {
+            console.log(`[verifyPaytrailPayment] Payment status from redirect: ${paymentStatus}`);
+        }
+
+        if (paymentStatus !== 'ok') {
+            console.error(`[verifyPaytrailPayment] Payment status is not 'ok': ${paymentStatus}`);
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                error: 'Payment not successful',
+                status: paymentStatus,
+                message: `Payment status is '${paymentStatus}'. Only successful payments can create tickets.`
+            });
+        }
+
+        // Payment is confirmed by Paytrail - proceed with ticket creation
+        console.log(`[verifyPaytrailPayment] Payment confirmed by Paytrail (status=ok), proceeding with ticket creation`);
+
+        // 3. GET REDIS DATA - This contains the validated amount from createPaytrailPayment (trusted source)
+        const paymentKey = `paytrail_payment:${stamp}`;
+        const redisDataStr = await redisClient.get(paymentKey);
+
+        let redisData = null;
+        let useRedisData = false;
+
+        if (redisDataStr) {
+            redisData = JSON.parse(redisDataStr);
+            console.log(`[verifyPaytrailPayment] Redis data found, verifying against client data...`);
+            console.log('[verifyPaytrailPayment] Redis pricing data:', {
+                basePrice: redisData.basePrice,
+                serviceFee: redisData.serviceFee,
+                vatAmount: redisData.vatAmount,
+                amount: redisData.amount
+            });
+
+            // Verify Paytrail API amount matches Redis amount (if Paytrail API returned amount)
+            if (paytrailApiAmount && redisData.amount) {
+                const redisAmount = parseInt(redisData.amount);
+                const apiAmount = parseInt(paytrailApiAmount);
+                if (redisAmount !== apiAmount) {
+                    console.warn(`[verifyPaytrailPayment] Amount mismatch: Redis=${redisAmount}, Paytrail API=${apiAmount}`);
+                    // Use Redis amount as it was validated at creation time
+                }
+            }
+
+            // Verify critical fields from client match Redis (prevent tampering)
+            const mismatches = [];
+            if (eventId && redisData.eventId !== eventId) {
+                mismatches.push(`eventId: redis=${redisData.eventId}, client=${eventId}`);
+            }
+            if (email && redisData.email.toLowerCase() !== email.toLowerCase()) {
+                mismatches.push(`email: redis=${redisData.email}, client=${email}`);
+            }
+            if (amount && parseInt(redisData.amount) !== parseInt(amount)) {
+                mismatches.push(`amount: redis=${redisData.amount}, client=${amount}`);
+            }
+            if (quantity && parseInt(redisData.quantity) !== parseInt(quantity)) {
+                mismatches.push(`quantity: redis=${redisData.quantity}, client=${quantity}`);
+            }
+            if (ticketTypeId && redisData.ticketId !== ticketTypeId && redisData.ticketTypeId !== ticketTypeId) {
+                mismatches.push(`ticketTypeId: redis=${redisData.ticketId || redisData.ticketTypeId}, client=${ticketTypeId}`);
+            }
+
+            if (mismatches.length > 0) {
+                console.log(`[verifyPaytrailPayment] DATA MISMATCH DETECTED: ${mismatches.join(', ')}`);
+                return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                    error: 'Payment data mismatch',
+                    message: 'The checkout data does not match the original payment. Possible tampering detected.'
+                });
+            }
+
+            console.log(`[verifyPaytrailPayment] Client data verified - using Redis data (trusted source)`);
+            useRedisData = true;
+        } else {
+            // Redis missing - could be expired or webhook already processed
+            console.log(`[verifyPaytrailPayment] Redis data NOT FOUND for stamp: ${stamp}`);
+
+            // Double-check ticket doesn't exist (webhook might have processed it)
+            ticket = await Ticket.genericSearch({ paytrailStamp: stamp });
+            if (!ticket && transactionId) {
+                ticket = await Ticket.genericSearch({ paytrailTransactionId: transactionId });
+            }
+
+            if (ticket) {
+                console.log(`[verifyPaytrailPayment] Ticket found (webhook processed) - Redis already deleted`);
+                ticket = await Ticket.getTicketById(ticket._id);
+                return res.status(consts.HTTP_STATUS_OK).json({ success: true, ticket });
+            }
+
+            // No Redis and no ticket - need client data as fallback
+            // Since Paytrail confirmed payment (status='ok'), we should be more lenient
+            // Only require the absolute minimum: eventId and email
+            if (!eventId || !email) {
+                console.error(`[verifyPaytrailPayment] Missing critical fields: eventId=${!!eventId}, email=${!!email}`);
+                return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                    error: 'Payment data expired and missing required fields',
+                    message: 'The payment data has expired (10 minute TTL) and required checkout data (eventId, email) is missing. Please initiate a new payment.'
+                });
+            }
+
+            // For missing fields, we'll use defaults or fetch from event
+            // quantity defaults to 1 if not provided
+            // ticketTypeId can be null for pricing_configuration mode
+            console.log(`[verifyPaytrailPayment] Using client data as fallback (Redis expired but payment verified by Paytrail)`);
+            console.log(`[verifyPaytrailPayment] Client data: eventId=${eventId}, email=${email}, quantity=${quantity || 'missing'}, ticketTypeId=${ticketTypeId || 'missing'}`);
+            // Will use client data below with defaults for missing fields
+        }
+
+        // 4. GET EVENT AND MERCHANT
+        const finalEventId = useRedisData ? redisData.eventId : eventId;
+        const event = await Event.getEventById(finalEventId);
+        if (!event) {
+            return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({ error: 'Event not found' });
+        }
+
+        const merchant = await Merchant.getMerchantById(event.merchant);
+        if (!merchant) {
+            return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({ error: 'Merchant not found' });
+        }
+
+        // 4.5. VALIDATE PRICE - Calculate expected price and verify against received amount
+        const finalTicketTypeId = useRedisData ? (redisData.ticketId || redisData.ticketTypeId) : (ticketTypeId || null);
+
+        // For pricing_configuration mode, ticketTypeId can be null
+        // For ticket_info mode, we need a ticket type
+        const isPricingConfiguration = event?.venue?.pricingModel === 'pricing_configuration';
+        let ticketType = null;
+
+        if (finalTicketTypeId) {
+            ticketType = event.ticketInfo?.find(t => t._id?.toString() === finalTicketTypeId);
+            if (!ticketType && !isPricingConfiguration) {
+                console.warn(`[verifyPaytrailPayment] Ticket type ${finalTicketTypeId} not found, but payment confirmed - using first ticket or creating dummy ticket`);
+                // For pricing_configuration, we'll create a dummy ticket below
+                ticketType = event.ticketInfo?.[0]; // Fallback to first ticket
+            }
+        }
+
+        // For pricing_configuration mode, create a dummy ticket from metadata
+        if (isPricingConfiguration && !ticketType) {
+            // NOTE: basePrice and serviceFee from client/Redis are ALREADY per-unit values
+            // DO NOT divide by quantity - they're per-unit, not totals
+            ticketType = {
+                _id: null,
+                name: 'Seat Selection',
+                price: useRedisData ? parseFloat(redisData.basePrice) : (parseFloat(basePrice) || 0),
+                serviceFee: useRedisData ? parseFloat(redisData.serviceFee) : (parseFloat(serviceFee) || 0),
+                vat: useRedisData ? parseFloat(redisData.vatRate) : parseFloat(vatRate) || 0,
+                entertainmentTax: useRedisData ? parseFloat(redisData.entertainmentTax) : parseFloat(entertainmentTax) || 0,
+                serviceTax: useRedisData ? parseFloat(redisData.serviceTax) : parseFloat(serviceTax) || 0,
+                orderFee: useRedisData ? parseFloat(redisData.orderFee) : parseFloat(orderFee) || 0
+            };
+            console.log(`[verifyPaytrailPayment] Created dummy ticket for pricing_configuration mode:`, {
+                price: ticketType.price,
+                serviceFee: ticketType.serviceFee,
+                entertainmentTax: ticketType.entertainmentTax,
+                serviceTax: ticketType.serviceTax,
+                orderFee: ticketType.orderFee,
+                source: useRedisData ? 'Redis' : 'client'
+            });
+        }
+
+        if (!ticketType && !isPricingConfiguration) {
+            return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+                error: 'Ticket type not found',
+                message: 'Could not determine ticket type. Please contact support.'
+            });
+        }
+
+        // Build metadata for price calculation (use Redis data if available, otherwise client data)
+        // Use defaults for missing fields when Redis expired
+        const finalQuantityForCalc = useRedisData ? parseInt(redisData.quantity) : (parseInt(quantity) || 1);
+
+        // Parse seatTickets if it's a string
+        let parsedSeatTickets = [];
+        if (useRedisData) {
+            parsedSeatTickets = redisData.seatTickets || [];
+        } else if (seatTickets) {
+            parsedSeatTickets = typeof seatTickets === 'string' ? JSON.parse(seatTickets) : seatTickets;
+        }
+
+        const priceCalcMetadata = useRedisData ? {
+            ...redisData,
+            quantity: redisData.quantity?.toString() || quantity?.toString() || '1',
+            placeIds: redisData.placeIds || redisData.seats || [],
+            seatTickets: parsedSeatTickets,
+            // Ensure total fields are explicitly included for pricing_configuration
+            totalBasePrice: redisData.totalBasePrice,
+            totalServiceFee: redisData.totalServiceFee,
+            entertainmentTaxAmount: redisData.entertainmentTaxAmount || redisData.vatAmount,
+            serviceTaxAmount: redisData.serviceTaxAmount,
+            orderFee: redisData.orderFee,
+            orderFeeServiceTax: redisData.orderFeeServiceTax
+        } : {
+            eventId,
+            email,
+            quantity: quantity?.toString() || '1',
+            ticketId: ticketTypeId || null,
+            placeIds: seats || [],
+            seatTickets: parsedSeatTickets,
+            basePrice,
+            serviceFee,
+            vatRate,
+            vatAmount,
+            serviceTax,
+            serviceTaxAmount,
+            entertainmentTax,
+            entertainmentTaxAmount,
+            orderFee,
+            orderFeeServiceTax,
+            // Explicitly include total fields for pricing_configuration calculation
+            totalBasePrice,
+            totalServiceFee,
+            country,
+            fullName
+        };
+
+        console.log('[verifyPaytrailPayment] priceCalcMetadata:', {
+            hasTotalBasePrice: priceCalcMetadata.totalBasePrice !== undefined,
+            hasTotalServiceFee: priceCalcMetadata.totalServiceFee !== undefined,
+            totalBasePrice: priceCalcMetadata.totalBasePrice,
+            totalServiceFee: priceCalcMetadata.totalServiceFee,
+            entertainmentTaxAmount: priceCalcMetadata.entertainmentTaxAmount,
+            serviceTaxAmount: priceCalcMetadata.serviceTaxAmount,
+            orderFee: priceCalcMetadata.orderFee,
+            orderFeeServiceTax: priceCalcMetadata.orderFeeServiceTax,
+            quantity: priceCalcMetadata.quantity
+        });
+
+        // Calculate expected price using the same logic as createPaytrailPayment
+        const expectedPrice = calculateExpectedPrice(ticketType, event, finalQuantityForCalc, priceCalcMetadata);
+
+        // Determine which amount to use for validation (priority: Redis > Paytrail API > client)
+        // Redis amount was validated at creation time, so it's the most trusted
+        let amountToValidate;
+        if (useRedisData && redisData.amount) {
+            amountToValidate = parseInt(redisData.amount) / 100; // Redis amount in dollars
+            console.log(`[verifyPaytrailPayment] Using Redis amount for validation: ${amountToValidate}`);
+        } else if (paytrailApiAmount) {
+            amountToValidate = parseInt(paytrailApiAmount) / 100; // Paytrail API amount in dollars
+            console.log(`[verifyPaytrailPayment] Using Paytrail API amount for validation: ${amountToValidate}`);
+        } else {
+            amountToValidate = parseInt(amount || 0) / 100; // Client amount in dollars (fallback)
+            console.log(`[verifyPaytrailPayment] Using client amount for validation: ${amountToValidate}`);
+        }
+
+        // Price validation at verification time is for LOGGING/MONITORING only, NOT blocking
+        // The actual price validation happened at createPaytrailPayment BEFORE payment was created
+        // By this point, Paytrail has already charged the customer - we MUST create the ticket
+        //
+        // Unlike Stripe (which validates before capture), Paytrail payment is complete when user returns
+        // Blocking here would mean: customer paid but gets no ticket = worst outcome
+        try {
+            validatePriceCalculation(amountToValidate, expectedPrice, 0.02);
+            console.log(`[verifyPaytrailPayment] Price validation passed: Expected=${expectedPrice.totalAmount}, Received=${amountToValidate}`);
+        } catch (priceError) {
+            // LOG the mismatch but DO NOT block ticket creation
+            // The payment was already validated at createPaytrailPayment before Paytrail processed it
+            console.warn(`[verifyPaytrailPayment] ⚠️ PRICE MISMATCH (logging only, not blocking):`, {
+                expected: expectedPrice.totalAmount,
+                received: amountToValidate,
+                difference: Math.abs(expectedPrice.totalAmount - amountToValidate),
+                error: priceError.message,
+                stamp: stamp,
+                transactionId: transactionId,
+                eventId: finalEventId,
+                email: useRedisData ? redisData.email : email,
+                // This may indicate: expired Redis + wrong client data, or a bug in price calculation
+                // Either way, customer paid successfully so we create the ticket
+                note: 'Payment already completed by Paytrail. Creating ticket anyway to honor the payment.'
+            });
+            // Continue with ticket creation - payment is already done!
+        }
+
+        // 5. BUILD PAYMENT DATA - prefer Redis (trusted), fallback to client data
+        console.log(`[verifyPaytrailPayment] Creating ticket for event=${finalEventId}`);
+
+        // Get ticket type info for ticket name (already found above)
+        const defaultTicketName = ticketType?.name || 'Standard Ticket';
+
+        const paymentData = {
+            eventId: finalEventId,
+            merchantId: merchant._id.toString(),
+            externalMerchantId: useRedisData ? (redisData.externalMerchantId || merchant.merchantId) : merchant.merchantId,
+            eventName: useRedisData ? (redisData.eventName || event.eventTitle || event.eventName) : (event.eventTitle || event.eventName),
+            ticketName: useRedisData ? (redisData.ticketName || defaultTicketName) : defaultTicketName,
+            ticketId: finalTicketTypeId,
+            email: useRedisData ? redisData.email : email,
+            customerName: useRedisData ? (redisData.customerName || redisData.fullName || redisData.email.split('@')[0]) : (customerName || email.split('@')[0]),
+            quantity: useRedisData ? parseInt(redisData.quantity) : parseInt(quantity),
+            ticketTypeId: finalTicketTypeId,
+            seats: useRedisData ? (redisData.seats || redisData.placeIds || []) : (seats || []),
+            // Use validated amount (Redis > Paytrail API > client)
+            amount: useRedisData ? parseInt(redisData.amount) : (paytrailApiAmount ? parseInt(paytrailApiAmount) : parseInt(amount || 0)),
+            currency: (useRedisData ? (redisData.currency || 'EUR') : (currency || 'EUR')),
+            isShopInShop: useRedisData ? (redisData.isShopInShop || false) : false,
+            subMerchantId: useRedisData ? (redisData.subMerchantId || merchant.paytrailSubMerchantId) : (merchant.paytrailSubMerchantId || null),
+            commissionRate: useRedisData ? (redisData.commissionRate || merchant.commissionRate) : (merchant.commissionRate || parseFloat(process.env.PAYTRAIL_PLATFORM_COMMISSION || '5')),
+            locale: useRedisData ? (redisData.locale || 'en-US') : 'en-US',
+            // Pricing breakdown fields (from Redis first, then client request, then undefined)
+            basePrice: useRedisData ? (redisData.basePrice || parseFloat(basePrice)) : (basePrice ? parseFloat(basePrice) : undefined),
+            serviceFee: useRedisData ? (redisData.serviceFee || parseFloat(serviceFee)) : (serviceFee ? parseFloat(serviceFee) : undefined),
+            vatRate: useRedisData ? (redisData.vatRate || parseFloat(vatRate)) : (vatRate ? parseFloat(vatRate) : undefined),
+            vatAmount: useRedisData ? (redisData.vatAmount || parseFloat(vatAmount)) : (vatAmount ? parseFloat(vatAmount) : undefined),
+            serviceTax: useRedisData ? (redisData.serviceTax || parseFloat(serviceTax)) : (serviceTax ? parseFloat(serviceTax) : undefined),
+            serviceTaxAmount: useRedisData ? (redisData.serviceTaxAmount || parseFloat(serviceTaxAmount)) : (serviceTaxAmount ? parseFloat(serviceTaxAmount) : undefined),
+            entertainmentTax: useRedisData ? (redisData.entertainmentTax || parseFloat(entertainmentTax)) : (entertainmentTax ? parseFloat(entertainmentTax) : undefined),
+            entertainmentTaxAmount: useRedisData ? (redisData.entertainmentTaxAmount || parseFloat(entertainmentTaxAmount)) : (entertainmentTaxAmount ? parseFloat(entertainmentTaxAmount) : undefined),
+            orderFee: useRedisData ? (redisData.orderFee || parseFloat(orderFee)) : (orderFee ? parseFloat(orderFee) : undefined),
+            orderFeeServiceTax: useRedisData ? (redisData.orderFeeServiceTax || parseFloat(orderFeeServiceTax)) : (orderFeeServiceTax ? parseFloat(orderFeeServiceTax) : undefined),
+            totalBasePrice: useRedisData ? (redisData.totalBasePrice || parseFloat(totalBasePrice)) : (totalBasePrice ? parseFloat(totalBasePrice) : undefined),
+            totalServiceFee: useRedisData ? (redisData.totalServiceFee || parseFloat(totalServiceFee)) : (totalServiceFee ? parseFloat(totalServiceFee) : undefined),
+            country: useRedisData ? (redisData.country || country) : (country || undefined),
+            fullName: useRedisData ? (redisData.fullName || fullName) : (fullName || undefined),
+            placeIds: useRedisData ? (redisData.placeIds || []) : (placeIds || seats || []),
+            // Include seatTickets for proper display (has ticketName with human-readable format)
+            seatTickets: useRedisData ? (redisData.seatTickets || []) : (parsedSeatTickets || [])
+        };
+
+        console.log('[verifyPaytrailPayment] Payment data being passed to createTicketFromPaytrailPayment:', {
+            useRedisData,
+            placeIdsFromRedis: useRedisData ? redisData.placeIds : null,
+            placeIdsFromRequest: placeIds,
+            seatsFromRequest: seats,
+            finalPlaceIds: paymentData.placeIds,
+            finalSeats: paymentData.seats,
+            eventId: paymentData.eventId,
+            hasSeatTickets: !!(paymentData.seatTickets && paymentData.seatTickets.length > 0)
+        });
+
+        const paytrailWebhook = await import('./paytrail.webhook.js');
+        ticket = await paytrailWebhook.createTicketFromPaytrailPayment(paymentData, transactionId, stamp);
+
+        if (!ticket) {
+            return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
+                error: 'Failed to create ticket'
+            });
+        }
+
+        console.log(`[verifyPaytrailPayment] Ticket created: ${ticket._id}`);
+
+        // Update merchant stats
+        await paytrailWebhook.updateMerchantPaytrailStats(merchant._id, paymentData.amount / 100);
+
+        // Delete Redis entry if it exists (ticket created, no longer needed)
+        if (useRedisData) {
+            await redisClient.del(paymentKey);
+            console.log(`[verifyPaytrailPayment] Redis data deleted after ticket creation`);
+        } else {
+            console.log(`[verifyPaytrailPayment] Redis was already expired/missing, used client data fallback`);
+        }
+
+            // Return populated ticket
+            ticket = await Ticket.getTicketById(ticket._id);
+            return res.status(consts.HTTP_STATUS_OK).json({ success: true, ticket });
+
+        } finally {
+            // Always release the lock, even if there was an error
+            await redisClient.del(lockKey).catch(err => {
+                console.warn(`[verifyPaytrailPayment] Failed to release lock: ${err.message}`);
+            });
+        }
+
+    } catch (err) {
+        console.error('Error verifying Paytrail payment:', err);
+        // Release lock on error (if it was acquired)
+        if (lockKey) {
+            await redisClient.del(lockKey).catch(() => {});
+        }
+        return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
+            error: err.message
+        });
+    }
+}
+
 // Handle successful payment and create ticket records
 export const handlePaymentSuccess = async (req, res, next) => {
     try {
@@ -1642,7 +2888,7 @@ export const handlePaymentSuccess = async (req, res, next) => {
  * Publishes ticket creation event to notify other systems
  * Uses the same pattern as merchant updates for consistency
  */
-const publishTicketCreationEvent = async (ticket, event, metadata, paymentIntentId) => {
+export const publishTicketCreationEvent = async (ticket, event, metadata, paymentIntentId) => {
     try {
         // Generate unique identifiers for the event
         const correlationId = uuidv4();
@@ -2423,136 +3669,11 @@ export const getEventSeatsPublic = async (req, res, next) => {
 			});
 		}
 
-		// 4. Decode placeIds to extract available and tags, and merge with places
-		// This works for both pricing_configuration and ticket_info models
-		let places = venueManifest.places || [];
+		// 4. placeIds array contains all encoded data (section, row, seat, x, y, tierCode, available, tags)
+		// Frontend will decode placeIds directly - no need to send places array
 		const encodedPlaceIds = encodedManifest.placeIds || [];
 
-		// Create a map of location key (section-row-seat) to decoded placeId data
-		const locationToDecodedMap = new Map();
-
-		// Decode all placeIds to extract available and tags
-		encodedPlaceIds.forEach(encodedPlaceId => {
-			try {
-				const decoded = decodePlaceId(encodedPlaceId);
-				if (decoded && decoded.section && decoded.row !== null && decoded.seat !== null) {
-					// Create multiple possible keys to handle string/number mismatches
-					const keys = [
-						`${decoded.section}-${decoded.row}-${decoded.seat}`,
-						`${decoded.section}-${String(decoded.row)}-${String(decoded.seat)}`,
-						`${decoded.section}-${decoded.row}-${String(decoded.seat)}`,
-						`${decoded.section}-${String(decoded.row)}-${decoded.seat}`
-					];
-					keys.forEach(key => {
-						if (!locationToDecodedMap.has(key)) {
-							locationToDecodedMap.set(key, {
-								encodedPlaceId,
-								available: decoded.available !== undefined ? decoded.available : true,
-								tags: decoded.tags || [],
-								tierCode: decoded.tierCode
-							});
-						}
-					});
-				}
-			} catch (error) {
-				console.warn('Failed to decode placeId:', encodedPlaceId, error);
-			}
-		});
-
-		// If pricingModel is 'pricing_configuration', also decode pricing from placeIds
-		if (event.venue?.pricingModel === 'pricing_configuration' && encodedManifest.pricingConfig) {
-			// Create a map of tier id to pricing configuration
-			const tierMap = new Map();
-			encodedManifest.pricingConfig.tiers.forEach(tier => {
-				tierMap.set(tier.id, tier);
-			});
-
-			// Merge pricing and availability into places by matching section-row-seat
-			let placesWithPricing = 0;
-			places = places.map(place => {
-				// Create multiple possible keys to handle string/number mismatches
-				const keys = [
-					`${place.section}-${place.row}-${place.seat}`,
-					`${String(place.section)}-${String(place.row)}-${String(place.seat)}`,
-					`${place.section}-${place.row}-${String(place.seat)}`,
-					`${place.section}-${String(place.row)}-${place.seat}`
-				];
-
-				let decodedData = null;
-				for (const key of keys) {
-					decodedData = locationToDecodedMap.get(key);
-					if (decodedData) break;
-				}
-
-				const enrichedPlace = { ...place };
-
-				// Add available and tags from decoded placeId
-				if (decodedData) {
-					enrichedPlace.available = decodedData.available;
-					enrichedPlace.tags = decodedData.tags;
-					enrichedPlace.wheelchairAccessible = decodedData.tags.includes('wheelchair');
-
-					// Extract tier code and add pricing
-					if (decodedData.tierCode) {
-						const tierPricing = tierMap.get(decodedData.tierCode);
-						if (tierPricing) {
-							placesWithPricing++;
-							enrichedPlace.pricing = {
-								basePrice: tierPricing.basePrice,
-								tax: tierPricing.tax,
-								serviceFee: tierPricing.serviceFee,
-								serviceTax: tierPricing.serviceTax,
-								orderFee: encodedManifest.pricingConfig.orderFee || 0,
-								currency: encodedManifest.pricingConfig.currency || 'EUR'
-							};
-						}
-					}
-				} else {
-					// Default values if not found in decoded data
-					enrichedPlace.available = place.available !== undefined ? place.available : true;
-					enrichedPlace.tags = place.tags || [];
-					enrichedPlace.wheelchairAccessible = (place.tags || []).includes('wheelchair');
-				}
-
-				return enrichedPlace;
-			});
-		} else {
-			// For ticket_info model, just add available and tags
-			places = places.map(place => {
-				// Create multiple possible keys to handle string/number mismatches
-				const keys = [
-					`${place.section}-${place.row}-${place.seat}`,
-					`${String(place.section)}-${String(place.row)}-${String(place.seat)}`,
-					`${place.section}-${place.row}-${String(place.seat)}`,
-					`${place.section}-${String(place.row)}-${place.seat}`
-				];
-
-				let decodedData = null;
-				for (const key of keys) {
-					decodedData = locationToDecodedMap.get(key);
-					if (decodedData) break;
-				}
-
-				if (decodedData) {
-					return {
-						...place,
-						available: decodedData.available,
-						tags: decodedData.tags,
-						wheelchairAccessible: decodedData.tags.includes('wheelchair')
-					};
-				} else {
-					// Default values if not found in decoded data
-					return {
-						...place,
-						available: place.available !== undefined ? place.available : true,
-						tags: place.tags || [],
-						wheelchairAccessible: (place.tags || []).includes('wheelchair')
-					};
-				}
-			});
-		}
-
-		// 4. Use already-populated venue from encodedManifest (no need to query again!)
+		// 5. Use already-populated venue from encodedManifest (no need to query again!)
 		// With .lean(), the populated venue is already a plain object
 		const venue = encodedManifest.venue;
 		if (!venue || !venue.sections || !venue.backgroundSvg) {
@@ -2600,10 +3721,10 @@ export const getEventSeatsPublic = async (req, res, next) => {
 			// Pricing configuration (when pricing is encoded in placeIds)
 			pricingConfig: encodedManifest.pricingConfig || null,
 
-			// Venue Manifest data (sections, backgroundSvg, places with coordinates)
+			// Venue Manifest data (sections, backgroundSvg)
+			// Note: places array removed - frontend decodes everything from placeIds
 			backgroundSvg: venue.backgroundSvg || null,
 			sections: formattedSections, // Use venue.sections with polygon and spacingConfig
-			places: places, // Enriched places with available, tags, and wheelchairAccessible
 
 			// Metadata
 			venue: {

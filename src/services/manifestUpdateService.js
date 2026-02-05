@@ -30,24 +30,35 @@ export class ManifestUpdateService {
 				manifest.availability = { sold: [] };
 			}
 
-			// Add placeIds to sold array (avoid duplicates)
-			const currentSold = new Set(manifest.availability.sold || []);
-			for (const placeId of placeIds) {
-				// Validate placeId exists in manifest
-				if (!manifest.placeIds || !manifest.placeIds.includes(placeId)) {
-					error(`PlaceId ${placeId} not found in event manifest ${manifestId}`);
-					continue;
-				}
-				currentSold.add(placeId);
+		// Add placeIds to sold array (avoid duplicates)
+		const currentSold = new Set(manifest.availability.sold || []);
+		let actuallyMarked = 0;
+		let skipped = 0;
+
+		for (const placeId of placeIds) {
+			// Validate placeId exists in manifest
+			if (!manifest.placeIds || !manifest.placeIds.includes(placeId)) {
+				error(`PlaceId ${placeId} not found in event manifest ${manifestId}. Manifest has ${manifest.placeIds?.length || 0} placeIds.`);
+				skipped++;
+				continue;
 			}
+			const wasAlreadySold = currentSold.has(placeId);
+			currentSold.add(placeId);
+			if (!wasAlreadySold) {
+				actuallyMarked++;
+			}
+		}
 
-			// Update manifest
-			manifest.availability.sold = Array.from(currentSold);
-			manifest.updatedAt = new Date();
+		// Update manifest
+		manifest.availability.sold = Array.from(currentSold);
+		manifest.updatedAt = new Date();
 
-			const updatedManifest = await manifest.save();
+		const updatedManifest = await manifest.save();
 
-			info(`Marked ${placeIds.length} seats as sold in event manifest ${manifestId}. Total sold: ${updatedManifest.availability.sold.length}`);
+		if (skipped > 0) {
+			error(`Failed to mark ${skipped} seat(s) as sold in event manifest ${manifestId} - placeIds not found in manifest. Only marked ${actuallyMarked} seat(s).`);
+		}
+		info(`Marked ${actuallyMarked} seat(s) as sold in event manifest ${manifestId}. Total sold: ${updatedManifest.availability.sold.length} (${skipped} skipped, ${placeIds.length} attempted)`);
 
 			return updatedManifest;
 		} catch (err) {

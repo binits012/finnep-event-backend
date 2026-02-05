@@ -5,6 +5,7 @@ import cors from 'cors'
 import compression from 'compression'
 import './model/dbConnect.js'
 import './util/uploadQueueProcess.js'
+import './workers/emailWorker.js'
 import * as adminRole from './util/adminUser.js'
 import api from './routes/api.js'
 import front from './routes/front.js'
@@ -88,11 +89,8 @@ app.options('*', cors(corsOptions));
 
 // Add security headers that work with frontend CSP
 app.use((req, res, next) => {
-  // Allow frontend to connect to this API
-  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cache-Control, Pragma');
+  // CORS headers are handled by cors() middleware above
+  // Don't manually set them here to avoid conflicts
 
   // Security headers
   res.header('X-Content-Type-Options', 'nosniff');

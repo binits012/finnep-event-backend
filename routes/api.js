@@ -9,6 +9,11 @@ const router = express.Router()
 import * as api  from '../controllers/api.controller.js'
 import * as report from '../controllers/report.controller.js'
 import { authenticate, requireAdmin } from '../middleware/auth.middleware.js'
+import {
+    createPaytrailSubMerchant,
+    togglePaytrailForMerchant,
+    toggleShopInShopMode
+} from '../controllers/paytrail.admin.controller.js'
 
 router.route('/auth/user/login').post(api.login)
 router.route('/auth/user/changePassword').post(api.changePassword)
@@ -115,6 +120,16 @@ router.route('/merchant/:id')
     .patch(api.updateMerchantById)
 router.route('/merchant/:id/otherInfo')
     .patch(api.addOrUpdateOtherInfo)
+
+// Paytrail admin routes (admin only)
+router.route('/admin/paytrail/create-submerchant')
+    .post(authenticate, requireAdmin, createPaytrailSubMerchant)
+router.route('/admin/paytrail/toggle')
+    .post(authenticate, requireAdmin, togglePaytrailForMerchant)
+router.route('/admin/paytrail/commission/:merchantId')
+    .put(authenticate, requireAdmin, togglePaytrailForMerchant)
+router.route('/admin/paytrail/shop-in-shop/toggle')
+    .post(authenticate, requireAdmin, toggleShopInShopMode)
 
 // Venue management for merchants (authenticated, no admin required)
 router.route('/merchant/:merchantId/venue')

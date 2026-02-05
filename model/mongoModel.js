@@ -515,8 +515,22 @@ const ticketSchema = new mongoose.Schema({
 	validUntil:{type:Date},
 	merchant:{type: mongoose.Schema.Types.ObjectId, ref: 'Merchant', required:true},
 	externalMerchantId:{type:String, required:true},
-	otp:{type:String, required:true, unique:true}
+	otp:{type:String, required:true, unique:true},
+
+	// Payment provider tracking
+	paymentProvider: {
+		type: String,
+		enum: ['stripe', 'paytrail', 'free'],
+		default: 'stripe'
+	},
+	paytrailTransactionId: { type: String }, // Paytrail transaction ID
+	paytrailStamp: { type: String }, // Paytrail stamp (reference)
+	paytrailSubMerchantId: { type: String } // Sub-merchant for this transaction
 })
+
+// Add indexes for Paytrail transaction lookups
+ticketSchema.index({ paytrailTransactionId: 1 });
+ticketSchema.index({ paytrailSubMerchantId: 1 });
 
 
 
@@ -580,6 +594,40 @@ const merchantSchema = new mongoose.Schema({
 	website: { type: String },
 	logo: { type: String },
 	stripeAccount: { type: String, required: true },
+
+	// Paytrail Shop-in-Shop configuration
+	paytrailEnabled: {
+		type: Boolean,
+		default: false,
+		// Admin controls this via CMS
+	},
+	paytrailSubMerchantId: {
+		type: String,
+		// Sub-merchant ID from Paytrail shop-in-shop
+		// Format: "13466" (numeric string)
+		unique: true,
+		sparse: true // Allow null for merchants without Paytrail
+	},
+	paytrailShopInShopData: {
+		// Additional shop-in-shop metadata
+		subMerchantName: { type: String },
+        commissionRate: {
+            type: Number,
+            default: function() {
+                // Use function to access process.env at runtime
+                return parseFloat(process.env.PAYTRAIL_PLATFORM_COMMISSION || '4');
+            },
+            min: 0,
+            max: 100
+        }, // Platform commission % - configurable per merchant
+		createdAt: { type: Date },
+		status: {
+			type: String,
+			enum: ['pending', 'active', 'suspended'],
+			default: 'pending'
+		}
+	},
+
 	bankingInfo: { type:Map,
 		of:mongoose.Schema.Types.Mixed },
 	otherInfo:{
@@ -591,6 +639,7 @@ const merchantSchema = new mongoose.Schema({
 
 // Additional indexes for common search patterns
 merchantSchema.index({ merchantId: 1 }); // Index on country code for filtering
+merchantSchema.index({ paytrailSubMerchantId: 1 }); // Index for Paytrail lookups
 
 const outboxMessageSchema = new mongoose.Schema({
 	createdAt: { type: Date, default: Date.now },

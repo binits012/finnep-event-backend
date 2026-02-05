@@ -8,6 +8,7 @@ import * as express from 'express'
 const router = express.Router()
 import * as front  from '../controllers/front.controller.js'
 import * as guest from '../controllers/guest.controller.js'
+import { handlePaytrailWebhook } from '../controllers/paytrail.webhook.js'
 router.route('/')
     .get(front.getDataForFront)
 router.route('/events')
@@ -18,6 +19,12 @@ router.route('/create-checkout-session')
     .post(front.createCheckoutSession)
 router.route('/create-payment-intent')
     .post(front.createPaymentIntent)
+router.route('/create-paytrail-payment')
+    .post(front.createPaytrailPayment)
+router.route('/verify-paytrail-payment')
+    .post(front.verifyPaytrailPayment)
+router.route('/handle-paytrail-payment-failure')
+    .post(front.handlePaytrailPaymentFailure)
 router.route('/payment-success')
     .post(front.handlePaymentSuccess)
 
@@ -62,5 +69,11 @@ router.route('/guest/tickets')
 
 router.route('/guest/ticket/:id')
     .get(guest.getTicketById)
+
+// Paytrail webhook routes
+router.route('/webhooks/paytrail/success')
+    .post(handlePaytrailWebhook)
+router.route('/webhooks/paytrail/cancel')
+    .post(handlePaytrailWebhook)
 
 export default router
