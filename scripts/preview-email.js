@@ -14,7 +14,7 @@ const __dirname = dirname(__filename);
 const sampleDataMap = {
   ticket_template: {
     // Header & Branding
-    companyLogo: 'https://finnep.s3.eu-central-1.amazonaws.com/Other/finnep_logo.png',
+    companyLogo: 'https://d3ibhfrhdk2dm6.cloudfront.net/120px100.png',
     eventPromotionalPhoto: 'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=800',
     eventTitle: 'Summer Music Festival 2024',
     companyName: 'Finnep',
@@ -56,7 +56,7 @@ const sampleDataMap = {
 
     // Platform & Footer
     platformMailTo: 'info@finnep.fi',
-    businessId: '2589566-4',
+    businessId: '3579764-6',
     socialMedidFB: 'https://www.facebook.com/profile.php?id=61565375592900',
     socialMedidLN: 'https://www.linkedin.com/company/105069196/admin/dashboard/'
   },
@@ -87,17 +87,17 @@ const sampleDataMap = {
   },
 
   merchant_activated: {
-    orgName: 'Yellow Bridge Events',
+    orgName: 'Okazzo Oy Events',
     dashboardUrl: 'https://eventapp.finnep.fi/merchant/dashboard'
   },
 
   merchant_arrival: {
-    orgName: 'Yellow Bridge Events',
+    orgName: 'Okazzo Oy Events',
     dashboardUrl: 'https://eventapp.finnep.fi/merchant/dashboard'
   },
 
   merchant_suspended: {
-    orgName: 'Yellow Bridge Events'
+    orgName: 'Okazzo Oy Events'
   },
 
   failure_report: {

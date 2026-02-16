@@ -86,7 +86,7 @@
       <mj-section border-top="1px solid #e5e7eb" padding="40px">
         <mj-column>
           <mj-text align="center" padding="0 0 20px 0">
-            Best regards,<br /><strong>The Finnep Team</strong>
+            Best regards,<br /><strong>The Okazzo Oy Team</strong>
           </mj-text>
           <mj-text align="center" color="#6b7280" font-size="14px" padding-bottom="10px">
             📧 Email: <a href="mailto:info@finnep.fi" style="color: #4f46e5; text-decoration: none;">info@finnep.fi</a>

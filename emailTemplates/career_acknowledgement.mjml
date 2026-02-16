@@ -39,7 +39,7 @@
             Dear {{name}},
           </mj-text>
           <mj-text padding-bottom="20px">
-            Thank you for your interest in joining the Finnep team! We have successfully received your job application and are excited to learn more about your background and experience.
+            Thank you for your interest in joining The Okazzo Oy Team! We have successfully received your job application and are excited to learn more about your background and experience.
           </mj-text>
 
           <mj-section background-color="#f0f9ff" border-left="4px solid #0ea5e9" border-radius="5px" padding="20px">

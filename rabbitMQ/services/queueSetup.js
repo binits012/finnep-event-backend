@@ -4,6 +4,7 @@ import { handleEventMessage } from '../handlers/eventHandler.js';
 import { handleExternalTicketSalesMessage } from '../handlers/externalTicketSalesHandler.js';
 import { handleSeatAvailabilityCheck } from '../handlers/seatAvailabilityHandler.js';
 import { handleSeatedEventTicketCreated } from '../handlers/seatedEventTicketHandler.js';
+import { handleSurveyMessage } from '../handlers/surveyHandler.js';
 import { info, error, warn } from '../../model/logger.js';
 
 // Track if queues have been set up to prevent duplicate setup
@@ -98,6 +99,17 @@ const setupQueues = async () => {
         await messageConsumer.consumeQueue('external.seated.event.ticket', async (message) => {
             await handleSeatedEventTicketCreated(message);
         }, externalSeatedEventTicketQueueOptions);
+
+        // Survey events (queue created and bound by event-merchant-service plugin)
+        const surveyEventsQueueOptions = {
+            prefetch: QUEUE_PREFETCH,
+            deadLetterExchange: 'event-merchant-dlx',
+            deadLetterRoutingKey: 'dlq.survey-events-queue.retry-1'
+        };
+        info('Setting up survey-events-queue with options:', surveyEventsQueueOptions);
+        await messageConsumer.consumeQueue('survey-events-queue', async (message) => {
+            await handleSurveyMessage(message);
+        }, surveyEventsQueueOptions);
 
         isSetupComplete = true;
         info('All queues set up and consuming messages');

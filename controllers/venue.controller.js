@@ -124,6 +124,132 @@ export const getVenueById = async (req, res, next) => {
 }
 
 /**
+ * Export venue configuration by ID
+ * Returns a versioned JSON payload without Mongo-specific fields
+ */
+export const exportVenueById = async (req, res, next) => {
+	try {
+		const { id } = req.params
+
+		if (!common.validateParam(id)) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+				message: 'Invalid ID',
+				error: appText.INVALID_ID
+			})
+		}
+
+		const venue = await Venue.findById(id).lean()
+		if (!venue) {
+			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+				message: 'Venue not found',
+				error: appText.RESOURCE_NOT_FOUND
+			})
+		}
+
+		// Strip Mongo-specific fields from export data
+		// Keep originalId separately so imports can optionally target this venue
+		// eslint-disable-next-line @typescript-eslint/no-unused-vars
+		const { _id, __v, createdAt, updatedAt, ...data } = venue
+
+		const exportPayload = {
+			version: 1,
+			type: 'venue',
+			originalId: _id?.toString(),
+			data
+		}
+
+		return res.status(consts.HTTP_STATUS_OK).json({ data: exportPayload })
+	} catch (err) {
+		error('error', err)
+		next(err)
+	}
+}
+
+/**
+ * Import venue configuration
+ * Supports:
+ *  - mode=create (default): create new venue from exported data
+ *  - mode=update: update an existing venue using targetId or body.id
+ */
+export const importVenue = async (req, res, next) => {
+	try {
+		const {
+			version,
+			type,
+			data,
+			mode = 'create',
+			targetId,
+			id
+		} = req.body || {}
+
+		if (!data || typeof data !== 'object') {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+				message: 'Invalid payload: data is required',
+				error: 'INVALID_PAYLOAD'
+			})
+		}
+
+		if (type && type !== 'venue') {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+				message: 'Invalid payload type for venue import',
+				error: 'INVALID_TYPE'
+			})
+		}
+
+		if (version && version !== 1) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+				message: 'Unsupported venue export version',
+				error: 'UNSUPPORTED_VERSION'
+			})
+		}
+
+		if (mode === 'create') {
+			// Create a brand new venue from exported data
+			const venue = new Venue({
+				...data,
+				createdAt: new Date(),
+				updatedAt: new Date()
+			})
+
+			const saved = await venue.save()
+			return res.status(consts.HTTP_STATUS_OK).json({ data: saved })
+		}
+
+		// mode === 'update'
+		const target = targetId || id
+		if (!target || !common.validateParam(target)) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+				message: 'Valid targetId or id is required for update mode',
+				error: appText.INVALID_ID
+			})
+		}
+
+		const updateData = {
+			...data,
+			updatedAt: new Date()
+		}
+
+		const updated = await Venue.findByIdAndUpdate(
+			target,
+			{ $set: updateData },
+			{ new: true, runValidators: true }
+		).populate('merchant')
+
+		if (!updated) {
+			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+				message: 'Venue not found',
+				error: appText.RESOURCE_NOT_FOUND
+			})
+		}
+
+		return res.status(consts.HTTP_STATUS_OK).json({ data: updated })
+	} catch (err) {
+		error('error', err)
+		next(err)
+	}
+}
+
+/**
  * Update venue
  */
 export const updateVenueById = async (req, res, next) => {

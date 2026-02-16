@@ -8,6 +8,7 @@ import * as sendMail from '../util/sendMail.js'
 import * as common from '../util/common.js'
 import { error } from '../model/logger.js'
 import * as hash from '../util/createHash.js'
+import { PlatformMarketingConsent } from '../model/mongoModel.js'
 
 const RATE_LIMIT_CODES_PER_HOUR = 10;
 
@@ -226,11 +227,15 @@ export const getTickets = async (req, res, next) => {
                 const userTickets = await Ticket.getTicketsByEmailCryptoId(emailCryptoId);
 
                 if (userTickets.length === 0) {
+                    const platformConsent = await PlatformMarketingConsent.getOrCreatePlatformConsent(emailCryptoId);
                     return res.status(consts.HTTP_STATUS_OK).json({
                         success: true,
-                        data: []
+                        data: [],
+                        platformMarketingOptIn: platformConsent?.platformMarketingOptIn !== false
                     });
                 }
+
+                const platformConsent = await PlatformMarketingConsent.getOrCreatePlatformConsent(emailCryptoId);
 
                 // Populate event information
                 const ticketsWithEvents = await Promise.all(
@@ -279,7 +284,8 @@ export const getTickets = async (req, res, next) => {
                             createdAt: t.createdAt,
                             active: t.active
                         };
-                    })
+                    }),
+                    platformMarketingOptIn: platformConsent?.platformMarketingOptIn !== false
                 });
             } catch (err) {
                 error('error getting tickets %s', err.stack);
@@ -395,6 +401,8 @@ export const getTicketById = async (req, res, next) => {
                     // Exclude sensitive fields: paymentIntentId, email, merchantId, eventId, ticketId, eventName
                 } : null;
 
+                const platformConsent = await PlatformMarketingConsent.getOrCreatePlatformConsent(emailCryptoId);
+
                 return res.status(consts.HTTP_STATUS_OK).json({
                     success: true,
                     data: {
@@ -413,7 +421,8 @@ export const getTicketById = async (req, res, next) => {
                         ics: icsContent,
                         createdAt: ticket.createdAt,
                         active: ticket.active
-                    }
+                    },
+                    platformMarketingOptIn: platformConsent?.platformMarketingOptIn !== false
                 });
             } catch (err) {
                 error('error getting ticket by id %s', err.stack);
@@ -428,6 +437,58 @@ export const getTicketById = async (req, res, next) => {
         return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
             success: false,
             message: 'Error retrieving ticket'
+        });
+    }
+}
+
+export const updatePlatformMarketingConsent = async (req, res, next) => {
+    try {
+        const token = req.headers.authorization;
+        const { platformMarketingOptIn } = req.body;
+
+        if (typeof platformMarketingOptIn !== 'boolean') {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                success: false,
+                message: 'platformMarketingOptIn (boolean) is required'
+            });
+        }
+
+        await jwtToken.verifyGuestJWT(token, async (err, data) => {
+            if (err || data === null) {
+                return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({
+                    success: false,
+                    message: 'Invalid or expired token'
+                });
+            }
+
+            try {
+                const emailCryptoId = data.emailCryptoId;
+                if (!emailCryptoId) {
+                    return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                        success: false,
+                        message: 'Invalid token payload'
+                    });
+                }
+
+                const consent = await PlatformMarketingConsent.updatePlatformConsent(emailCryptoId, platformMarketingOptIn);
+
+                return res.status(consts.HTTP_STATUS_OK).json({
+                    success: true,
+                    platformMarketingOptIn: consent?.platformMarketingOptIn !== false
+                });
+            } catch (err) {
+                error('error updating platform marketing consent %s', err.stack);
+                return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
+                    success: false,
+                    message: 'Error updating consent'
+                });
+            }
+        });
+    } catch (err) {
+        error('error in updatePlatformMarketingConsent %s', err.stack);
+        return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
+            success: false,
+            message: 'Error updating consent'
         });
     }
 }

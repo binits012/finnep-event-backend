@@ -104,13 +104,16 @@ async function handleEventCreated(message) {
     const externalEventId = message?.id;
     // venue from message should contain: venueId, externalVenueId, hasSeatSelection, etc.
     const venue = message?.venue || {};
+    const waitlistConfig = message?.waitlist_config ?? undefined;
+    const event_end_date = message?.event_end_date ? new Date(message.event_end_date) : undefined;
 
     await Event.createEvent(
         eventTitle, eventDescription, eventDate, occupancy,
         ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress,
         eventLocationGeoCode, transportLink, socialMedia, lang, position,
         active, eventName, videoUrl, otherInfo, eventTimezone,
-        city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue
+        city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue,
+        waitlistConfig, event_end_date
     );
 
     await inboxModel.markProcessed(message?.metaData?.causationId);
@@ -159,17 +162,26 @@ async function handleEventUpdated(message) {
     const existingEvent = await Event.getEventByMerchantAndExternalId(externalMerchantId,
         externalEventId);
 
-    // Merge venue data from message with existing venue
-    // message.venue should contain: venueId, externalVenueId, hasSeatSelection, etc.
-    const venue = message?.venue
-        ? {
-            ...(existingEvent?.venue || {}), // Preserve existing venue data
-            ...message.venue, // Override with message data (includes hasSeatSelection, venueId, etc.)
-        }
-        : existingEvent?.venue; // Fallback to existing venue if message doesn't have venue
+    // When venue is explicitly cleared (venueId null/empty or venue null), clear venue in MongoDB
+    const venueCleared = message?.venueId == null || message?.venueId === '' || message?.venue === null;
+    let venue;
+    if (venueCleared) {
+        venue = null;
+    } else if (message?.venue && typeof message.venue === 'object') {
+        // Merge venue data from message with existing venue
+        venue = {
+            ...(existingEvent?.venue || {}),
+            ...message.venue,
+        };
+    } else {
+        venue = existingEvent?.venue;
+    }
 
     // If event doesn't exist, create it instead of throwing error (upsert behavior)
     // This handles cases where update message arrives before create message
+    const waitlistConfig = message?.waitlist_config ?? undefined;
+    const event_end_date = message?.event_end_date ? new Date(message.event_end_date) : undefined;
+
     if (!existingEvent) {
         console.log(`Event with ID ${externalEventId} not found, creating new event instead`);
         await Event.createEvent(
@@ -177,16 +189,18 @@ async function handleEventUpdated(message) {
             ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress,
             eventLocationGeoCode, transportLink, socialMedia, lang, position,
             active, eventName, videoUrl, otherInfo, eventTimezone,
-            city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue
+            city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue,
+            waitlistConfig, event_end_date
         );
     } else {
-        await Event.updateEventById(existingEvent._id,{
+        await Event.updateEventById(existingEvent._id, {
             eventTitle, eventDescription, eventDate, occupancy,
             ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress,
             eventLocationGeoCode, transportLink, socialMedia, lang, position,
             active, eventName, videoUrl, otherInfo, eventTimezone,
-            city, country, venueInfo, venue}
-        );
+            city, country, venueInfo, venue,
+            waitlistConfig, event_end_date
+        });
     }
 
     // Handle pricing manifest sync if needed

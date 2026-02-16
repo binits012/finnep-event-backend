@@ -8,7 +8,7 @@ export class Event {
         eventLocationGeoCode, transportLink,
         socialMedia, lang, position, active, eventName, videoUrl, otherInfo,
         eventTimezone, city, country, venueInfo, externalMerchantId, merchant,
-        externalEventId,venue,
+        externalEventId, venue, waitlistConfig, event_end_date
     ) {
         this.eventTitle = eventTitle
         this.eventDescription = eventDescription
@@ -35,6 +35,8 @@ export class Event {
         this.merchant = merchant
         this.externalEventId = externalEventId
         this.venue = venue
+        this.waitlistConfig = waitlistConfig
+        this.event_end_date = event_end_date
     }
     async saveToDB() {
         try {
@@ -76,6 +78,8 @@ export class Event {
                 merchant: this.merchant,
                 externalEventId: this.externalEventId,
                 venue: this.venue,
+                waitlistConfig: this.waitlistConfig,
+                event_end_date: this.event_end_date,
             })
             return await event.save()
         } catch (err) {
@@ -89,13 +93,13 @@ export class Event {
 export const createEvent = async (eventTitle, eventDescription, eventDate,
     occupancy, ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
     socialMedia, lang, position, active, eventName, videoUrl, otherInfo,
-    eventTimezone, city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue
+    eventTimezone, city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue, waitlistConfig, event_end_date
     ) =>{
 
     const event = new Event(eventTitle, eventDescription, eventDate,
         occupancy, ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
         socialMedia, lang, position, active, eventName, videoUrl, otherInfo,
-        eventTimezone, city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue)
+        eventTimezone, city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue, waitlistConfig, event_end_date)
     return await event.saveToDB()
 }
 
@@ -245,7 +249,7 @@ export const listEvent = async(filter) =>{
     }).populate('merchant').sort({'position':-1}).lean()
 }
 
-export const listEventFiltered = async({ city, country, page = 1, limit = 12 } = {}) => {
+export const listEventFiltered = async({ city, country, page = 1, limit = 1000 } = {}) => {
     const q = {}
     if (city) {
         q.city = city
@@ -261,7 +265,7 @@ export const listEventFiltered = async({ city, country, page = 1, limit = 12 } =
     q.eventDate = { $gte: now }
 
     const numericPage = Math.max(parseInt(String(page), 10) || 1, 1)
-    const numericLimit = Math.min(Math.max(parseInt(String(limit), 10) || 12, 1), 100)
+    const numericLimit = Math.min(Math.max(parseInt(String(limit), 10) || 1000, 1), limit)
 
     const total = await model.Event.countDocuments(q)
     const items = await model.Event.find(q)

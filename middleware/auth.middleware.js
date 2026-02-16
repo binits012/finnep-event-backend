@@ -34,7 +34,7 @@ export const requireAdmin = (req, res, next) => {
 		})
 	}
 
-	if (req.user.role !== 'admin' && req.user.role !== 'superadmin') {
+	if (req.user.role !== 'admin' && req.user.role !== 'superAdmin') {
 		return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
 			message: 'Forbidden: Admin access required',
 			error: 'INSUFFICIENT_PERMISSIONS'

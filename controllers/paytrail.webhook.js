@@ -9,7 +9,7 @@ import { info, error } from '../model/logger.js';
 import * as consts from '../const.js';
 import { queueTicketEmail } from '../workers/emailWorker.js';
 import { publishTicketCreationEvent } from './front.controller.js';
-import { EventManifest } from '../model/mongoModel.js';
+import { EventManifest, PlatformMarketingConsent } from '../model/mongoModel.js';
 import { manifestUpdateService } from '../src/services/manifestUpdateService.js';
 import { seatReservationService } from '../src/services/seatReservationService.js';
 
@@ -171,6 +171,9 @@ export async function createTicketFromPaytrailPayment(paymentData, transactionId
 
     const emailCrypto = await hash.getCryptoBySearchIndex(paymentData.email, 'email');
     let emailHash = emailCrypto.length > 0 ? emailCrypto[0]._id : (await hash.createHashData(paymentData.email, 'email'))._id;
+
+    // Platform marketing: default opt-in for every new email
+    await PlatformMarketingConsent.getOrCreatePlatformConsent(emailHash);
 
     const ticket = await Ticket.createTicket(
         null,

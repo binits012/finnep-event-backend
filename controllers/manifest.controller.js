@@ -296,6 +296,150 @@ export const deletePlace = async (req, res, next) => {
 }
 
 /**
+ * Export manifest configuration by ID
+ * Returns a versioned JSON payload without Mongo-specific fields
+ */
+export const exportManifestById = async (req, res, next) => {
+	try {
+		const { id } = req.params
+
+		if (!common.validateParam(id)) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+				message: 'Invalid ID',
+				error: appText.INVALID_ID
+			})
+		}
+
+		const manifest = await Manifest.findById(id).lean()
+		if (!manifest) {
+			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+				message: 'Manifest not found',
+				error: appText.RESOURCE_NOT_FOUND
+			})
+		}
+
+		// Strip Mongo-specific fields from export
+		// eslint-disable-next-line @typescript-eslint/no-unused-vars
+		const { _id, __v, createdAt, updatedAt, ...data } = manifest
+
+		const exportPayload = {
+			version: 1,
+			type: 'manifest',
+			originalId: _id?.toString(),
+			data
+		}
+
+		return res.status(consts.HTTP_STATUS_OK).json({ data: exportPayload })
+	} catch (err) {
+		error('error', err)
+		next(err)
+	}
+}
+
+/**
+ * Import manifest configuration
+ * Supports:
+ *  - mode=create (default): create new manifest from exported data
+ *  - mode=update: update existing manifest using targetId or body.id
+ */
+export const importManifest = async (req, res, next) => {
+	try {
+		const {
+			version,
+			type,
+			data,
+			mode = 'create',
+			targetId,
+			id
+		} = req.body || {}
+
+		if (!data || typeof data !== 'object') {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+				message: 'Invalid payload: data is required',
+				error: 'INVALID_PAYLOAD'
+			})
+		}
+
+		if (type && type !== 'manifest') {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+				message: 'Invalid payload type for manifest import',
+				error: 'INVALID_TYPE'
+			})
+		}
+
+		if (version && version !== 1) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+				message: 'Unsupported manifest export version',
+				error: 'UNSUPPORTED_VERSION'
+			})
+		}
+
+		// Validate venue reference if present
+		if (data.venue) {
+			const venueExists = await Venue.findById(data.venue)
+			if (!venueExists) {
+				return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+					message: 'Referenced venue not found for manifest import',
+					error: appText.RESOURCE_NOT_FOUND
+				})
+			}
+		}
+
+		// Recalculate hash/time when we touch places
+		const places = Array.isArray(data.places) ? data.places : []
+		const updateHash = places.length > 0 ? generateUpdateHash(places) : data.updateHash
+		const updateTime = places.length > 0 ? Date.now() : (data.updateTime || Date.now())
+
+		if (mode === 'create') {
+			const manifest = new Manifest({
+				...data,
+				updateHash,
+				updateTime,
+				createdAt: new Date(),
+				updatedAt: new Date()
+			})
+
+			const saved = await manifest.save()
+			return res.status(consts.HTTP_STATUS_OK).json({ data: saved })
+		}
+
+		// mode === 'update'
+		const target = targetId || id
+		if (!target || !common.validateParam(target)) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+				message: 'Valid targetId or id is required for update mode',
+				error: appText.INVALID_ID
+			})
+		}
+
+		const updateData = {
+			...data,
+			updateHash,
+			updateTime,
+			updatedAt: new Date()
+		}
+
+		const updated = await Manifest.findByIdAndUpdate(
+			target,
+			{ $set: updateData },
+			{ new: true, runValidators: true }
+		).populate('venue')
+
+		if (!updated) {
+			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+				message: 'Manifest not found',
+				error: appText.RESOURCE_NOT_FOUND
+			})
+		}
+
+		return res.status(consts.HTTP_STATUS_OK).json({ data: updated })
+	} catch (err) {
+		error('error', err)
+		next(err)
+	}
+}
+
+/**
  * Generate manifest (similar to Ticketmaster structure)
  * Creates a manifest with placeIds array, updateHash, updateTime
  */

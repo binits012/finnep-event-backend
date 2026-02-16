@@ -701,6 +701,14 @@ export const deletePlace = async (req, res, next) => {
 export const generateManifest = async (req, res, next) => {
 	await manifestController.generateManifest(req, res, next)
 }
+
+export const exportManifestById = async (req, res, next) => {
+	await manifestController.exportManifestById(req, res, next)
+}
+
+export const importManifest = async (req, res, next) => {
+	await manifestController.importManifest(req, res, next)
+}
 /** Manifest Ends */
 
 /** Venue Management */
@@ -732,6 +740,14 @@ export const getVenuesByMerchant = async (req, res, next) => {
 	await venueController.getVenuesByMerchant(req, res, next)
 }
 /** Venue Ends */
+
+export const exportVenueById = async (req, res, next) => {
+	await venueController.exportVenueById(req, res, next)
+}
+
+export const importVenue = async (req, res, next) => {
+	await venueController.importVenue(req, res, next)
+}
 
 /** Queue Service Configuration */
 export const getEmailConfig = async (req, res, next) => {

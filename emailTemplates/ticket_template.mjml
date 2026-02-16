@@ -80,7 +80,7 @@
     <mj-wrapper css-class="wrapper-container">
 
       <!-- Header: Logo + Event Image -->
-      <mj-section background-color="#6366F1" padding="10px 40px 0 40px">
+      <mj-section background-color="white" padding="10px 40px 0 40px">
         <mj-column>
           <mj-image src="{{companyLogo}}" alt="Logo" align="center" width="160px" />
         </mj-column>

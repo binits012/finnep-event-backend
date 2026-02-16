@@ -70,6 +70,14 @@ router.route('/guest/tickets')
 router.route('/guest/ticket/:id')
     .get(guest.getTicketById)
 
+router.route('/guest/platform-marketing-consent')
+    .patch(guest.updatePlatformMarketingConsent)
+
+/** Public proxies to event-merchant-service (waitlist, surveys) */
+router.post('/event/:eventId/waitlist', front.joinWaitlistProxy)
+router.get('/survey/:surveyId', front.getSurveyProxy)
+router.post('/survey/:surveyId/response', front.submitSurveyResponseProxy)
+
 // Paytrail webhook routes
 router.route('/webhooks/paytrail/success')
     .post(handlePaytrailWebhook)

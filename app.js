@@ -9,7 +9,7 @@ import './workers/emailWorker.js'
 import * as adminRole from './util/adminUser.js'
 import api from './routes/api.js'
 import front from './routes/front.js'
-import './util/schedular.js'
+//import './util/schedular.js'
 import Stripe from 'stripe'
 import {checkoutSuccess} from './util/paymentActions.js'
 import { setupQueues } from './rabbitMQ/services/queueSetup.js';
@@ -50,11 +50,10 @@ const corsOptions = {
           'http://localhost:3002',
           'http://localhost:3000',
           'http://localhost:3003',
-          'https://eventapp.finnep.fi',
-          'https://finnep.fi',
-          'https://cms.eventapp.finnep.fi',
-          'http://192.168.1.117:3003',
+          'https://test.okazzo.eu',
           'https://okazzo.eu',
+          'https://cmstest.okazzo.eu',
+          'http://192.168.1.107:3003', 
           'https://www.okazzo.eu',
           'https://cms.okazzo.eu',
           'https://okazzo.fi',

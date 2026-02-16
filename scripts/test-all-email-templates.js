@@ -40,7 +40,7 @@ const sampleDataMap = {
     organizerEmail: 'contact@eventorganizers.com',
     organizerPhone: '+1 (555) 123-4567',
     platformMailTo: 'info@finnep.fi',
-    businessId: '2589566-4',
+    businessId: '3579764-6',
     socialMedidFB: 'https://www.facebook.com/profile.php?id=61565375592900',
     socialMedidLN: 'https://www.linkedin.com/company/105069196/admin/dashboard/'
   },
@@ -67,15 +67,15 @@ const sampleDataMap = {
     date: 'January 15, 2024'
   },
   merchant_activated: {
-    orgName: 'Yellow Bridge Events',
+    orgName: 'Okazzo Oy Events',
     dashboardUrl: 'https://eventapp.finnep.fi/merchant/dashboard'
   },
   merchant_arrival: {
-    orgName: 'Yellow Bridge Events',
+    orgName: 'Okazzo Oy Events',
     dashboardUrl: 'https://eventapp.finnep.fi/merchant/dashboard'
   },
   merchant_suspended: {
-    orgName: 'Yellow Bridge Events'
+    orgName: 'Okazzo Oy Events'
   },
   failure_report: {
     adminName: 'Admin User',

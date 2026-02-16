@@ -25,7 +25,7 @@ import { SETTINGS_CACHE_KEY } from '../const.js'
 import { manifestUpdateService } from '../src/services/manifestUpdateService.js'
 import { seatReservationService } from '../src/services/seatReservationService.js'
 import * as seatController from './seat.controller.js'
-import { EventManifest, Manifest } from '../model/mongoModel.js';
+import { EventManifest, Manifest, PlatformMarketingConsent, Survey } from '../model/mongoModel.js';
 import { Venue } from '../model/mongoModel.js'
 
 export const getDataForFront = async (req, res, next) => {
@@ -126,12 +126,8 @@ export const getEventById = async (req, res, next) => {
             }));
             */
 
-            const data = {
-                event: restOfEvent,
-            }
-           // data.event.eventPhoto = validPhotos
-
-
+            // waitlistConfig and event_end_date are synced from event-merchant-service via RabbitMQ (event.created / event.updated)
+            const data = { event: restOfEvent };
             return res.status(consts.HTTP_STATUS_OK).json(data)
         } else {
             return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).send({ error: RESOURCE_NOT_FOUND });
@@ -1949,7 +1945,8 @@ export const verifyPaytrailPayment = async (req, res, next) => {
             fullName,
             seatTickets, // Array of {placeId, ticketId, ticketName} for multiple ticket types
             placeIds, // Explicit placeIds array (may be sent separately from seats)
-            nonce // Nonce for duplicate submission protection
+            nonce, // Nonce for duplicate submission protection,
+            locale // Locale for the payment
         } = req.body;
 
         if (!stamp || !transactionId) {
@@ -2407,7 +2404,7 @@ export const verifyPaytrailPayment = async (req, res, next) => {
             isShopInShop: useRedisData ? (redisData.isShopInShop || false) : false,
             subMerchantId: useRedisData ? (redisData.subMerchantId || merchant.paytrailSubMerchantId) : (merchant.paytrailSubMerchantId || null),
             commissionRate: useRedisData ? (redisData.commissionRate || merchant.commissionRate) : (merchant.commissionRate || parseFloat(process.env.PAYTRAIL_PLATFORM_COMMISSION || '5')),
-            locale: useRedisData ? (redisData.locale || 'en-US') : 'en-US',
+            locale: locale ||'en-US',
             // Pricing breakdown fields (from Redis first, then client request, then undefined)
             basePrice: useRedisData ? (redisData.basePrice || parseFloat(basePrice)) : (basePrice ? parseFloat(basePrice) : undefined),
             serviceFee: useRedisData ? (redisData.serviceFee || parseFloat(serviceFee)) : (serviceFee ? parseFloat(serviceFee) : undefined),
@@ -2756,6 +2753,8 @@ export const handlePaymentSuccess = async (req, res, next) => {
             emailHash = emailCrypto[0]._id;
         }
         const ticketFor = emailHash;
+        // Platform marketing: default opt-in for every new email
+        await PlatformMarketingConsent.getOrCreatePlatformConsent(ticketFor);
         // Create the ticket using the same pattern as completeOrderTicket
         let ticket = await Ticket.createTicket(
             null, // qrCode - will be generated later
@@ -2912,6 +2911,10 @@ export const publishTicketCreationEvent = async (ticket, event, metadata, paymen
             }
         }
 
+        // Platform marketing consent (per-email, default opt-in for new emails)
+        const ticketForId = ticket.ticketFor?._id || ticket.ticketFor;
+        const platformConsent = ticketForId ? await PlatformMarketingConsent.getOrCreatePlatformConsent(ticketForId) : null;
+
         // Create comprehensive event data
         const eventData = {
             eventType: 'TicketCreated',
@@ -2920,6 +2923,7 @@ export const publishTicketCreationEvent = async (ticket, event, metadata, paymen
                 // Clean ticket object (without QR code and ICS)
                 ticket: cleanTicket,
                 marketingOptIn: metadata?.marketingOptIn || false,
+                platformMarketingOptIn: platformConsent?.platformMarketingOptIn !== false,
                 externalEventId: event.externalEventId,
                 externalMerchantId: metadata.externalMerchantId,
                 merchantId: metadata.merchantId,
@@ -3382,6 +3386,8 @@ export const handleFreeEventRegistration = async (req, res, next) => {
             emailHash = emailCrypto[0]._id;
         }
         const ticketFor = emailHash;
+        // Platform marketing: default opt-in for every new email
+        await PlatformMarketingConsent.getOrCreatePlatformConsent(ticketFor);
 
         // Create the ticket using the same pattern as handlePaymentSuccess
         let ticket = await Ticket.createTicket(
@@ -4049,5 +4055,107 @@ export const verifySeatOTP = async (req, res, next) => {
 	} catch (err) {
 		error('Error verifying seat OTP:', err);
 		next(err);
+	}
+};
+
+// ==================== Event-merchant-service proxies (waitlist, survey) ====================
+
+/**
+ * POST /event/:eventId/waitlist - join waitlist (public). Resolves merchant from event and proxies to event-merchant-service.
+ */
+export const joinWaitlistProxy = async (req, res, next) => {
+	try {
+		const eventId = req.params.eventId;
+		const { email, type } = req.body || {};
+		if (!email || !type || !['pre_sale', 'sold_out'].includes(type)) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ error: 'email and type (pre_sale|sold_out) required' });
+		}
+		const event = await Event.getEventById(eventId);
+		if (!event || !event._doc) {
+			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({ error: RESOURCE_NOT_FOUND });
+		}
+		const { externalMerchantId, externalEventId } = event._doc;
+		if (!externalMerchantId || !externalEventId) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ error: 'Event not linked to merchant' });
+		}
+		const exchangeName = process.env.RABBITMQ_EXCHANGE || 'event-merchant-exchange';
+		await messageConsumer.publishToExchange(exchangeName, 'waitlist.join', {
+			merchant_id: externalMerchantId,
+			event_id: Number(externalEventId),
+			email,
+			type
+		}, { exchangeType: 'topic' });
+		return res.status(consts.HTTP_STATUS_OK).json({ message: 'Joined waitlist' });
+	} catch (err) {
+		error('joinWaitlistProxy:', err);
+		const status = err.status === 404 ? consts.HTTP_STATUS_RESOURCE_NOT_FOUND : consts.HTTP_STATUS_INTERNAL_SERVER_ERROR;
+		return res.status(status).json({ error: err.message || INTERNAL_SERVER_ERROR });
+	}
+};
+
+/**
+ * GET /survey/:surveyId - get survey (public). Requires merchantId in query. Reads from MongoDB (synced via RabbitMQ).
+ */
+export const getSurveyProxy = async (req, res, next) => {
+	try {
+		const surveyId = req.params.surveyId;
+		const merchantId = req.query.merchantId;
+		if (!merchantId) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ error: 'merchantId query required' });
+		}
+		const externalId = Number(surveyId);
+		if (Number.isNaN(externalId)) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ error: 'Invalid surveyId' });
+		}
+		const doc = await Survey.findOne({ merchantId, externalSurveyId: externalId }).lean();
+		if (!doc) {
+			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({ error: RESOURCE_NOT_FOUND });
+		}
+		const survey = {
+			id: String(doc.externalSurveyId),
+			name: doc.name || '',
+			questions: doc.questions || [],
+			active: doc.active !== false,
+			merchantId: doc.merchantId,
+			eventId: doc.externalEventId != null ? doc.externalEventId : undefined
+		};
+		return res.status(consts.HTTP_STATUS_OK).json(survey);
+	} catch (err) {
+		error('getSurveyProxy:', err);
+		const status = err.status === 404 ? consts.HTTP_STATUS_RESOURCE_NOT_FOUND : consts.HTTP_STATUS_INTERNAL_SERVER_ERROR;
+		return res.status(status).json({ error: err.message || INTERNAL_SERVER_ERROR });
+	}
+};
+
+/**
+ * POST /survey/:surveyId/response - submit survey response (public). Body: { merchantId?, respondent_identifier?, responses }.
+ * Publishes to RabbitMQ; event-merchant-service consumes and persists.
+ */
+export const submitSurveyResponseProxy = async (req, res, next) => {
+	try {
+		const surveyId = req.params.surveyId;
+		const { merchantId, respondent_identifier, responses } = req.body || {};
+		if (!merchantId) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ error: 'merchantId required in body' });
+		}
+		if (!responses || typeof responses !== 'object') {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ error: 'responses object required' });
+		}
+		const surveyIdNum = Number(surveyId);
+		if (Number.isNaN(surveyIdNum)) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ error: 'Invalid surveyId' });
+		}
+		const exchangeName = process.env.RABBITMQ_EXCHANGE || 'event-merchant-exchange';
+		await messageConsumer.publishToExchange(exchangeName, 'survey.response.submit', {
+			merchant_id: merchantId,
+			survey_id: surveyIdNum,
+			respondent_identifier: respondent_identifier || null,
+			responses: responses || {}
+		}, { exchangeType: 'topic' });
+		return res.status(consts.HTTP_STATUS_OK).json({ message: 'Response submitted' });
+	} catch (err) {
+		error('submitSurveyResponseProxy:', err);
+		const status = err.status === 404 ? consts.HTTP_STATUS_RESOURCE_NOT_FOUND : consts.HTTP_STATUS_INTERNAL_SERVER_ERROR;
+		return res.status(status).json({ error: err.message || INTERNAL_SERVER_ERROR });
 	}
 };

@@ -378,6 +378,9 @@ const eventSchema = new mongoose.Schema({
 		endDate: { type: Date }, // When featuring ends (for temporary)
 		featuredAt: { type: Date, default: Date.now }
 	},
+	// Synced from event-merchant-service via RabbitMQ (event.created / event.updated)
+	waitlistConfig: { type: mongoose.Schema.Types.Mixed },
+	event_end_date: { type: Date },
 	createdAt: { type: Date, default: Date.now },
 	updatedAt:{ type:Date, default:Date.now }
 })
@@ -532,7 +535,33 @@ const ticketSchema = new mongoose.Schema({
 ticketSchema.index({ paytrailTransactionId: 1 });
 ticketSchema.index({ paytrailSubMerchantId: 1 });
 
+// Platform-wise marketing consent: one record per email (emailCryptoId), default opt-in for new emails
+const platformMarketingConsentSchema = new mongoose.Schema({
+	emailCryptoId: { type: mongoose.Schema.Types.ObjectId, ref: 'Crypto', required: true, unique: true },
+	platformMarketingOptIn: { type: Boolean, default: true },
+	updatedAt: { type: Date, default: Date.now }
+});
+platformMarketingConsentSchema.index({ emailCryptoId: 1 }, { unique: true });
 
+platformMarketingConsentSchema.statics.getOrCreatePlatformConsent = async function (emailCryptoId) {
+	if (!emailCryptoId) return null;
+	let doc = await this.findOne({ emailCryptoId }).lean();
+	if (!doc) {
+		doc = await this.create({ emailCryptoId, platformMarketingOptIn: true });
+		doc = doc.toObject ? doc.toObject() : doc;
+	}
+	return doc;
+};
+
+platformMarketingConsentSchema.statics.updatePlatformConsent = async function (emailCryptoId, platformMarketingOptIn) {
+	if (!emailCryptoId) return null;
+	const doc = await this.findOneAndUpdate(
+		{ emailCryptoId },
+		{ platformMarketingOptIn: !!platformMarketingOptIn, updatedAt: new Date() },
+		{ new: true, upsert: true }
+	).lean();
+	return doc;
+};
 
 const settingSchema = new mongoose.Schema({
 	createdAt: { type: Date, default: Date.now },
@@ -692,6 +721,18 @@ inboxMessageSchema.index({ aggregateId: 1 });
 
 inboxMessageSchema.plugin(auditPlugin);
 
+// Survey (synced from event-merchant-service via RabbitMQ survey.created/updated/deleted)
+const surveySchema = new mongoose.Schema({
+	merchantId: { type: String, required: true, index: true },
+	externalSurveyId: { type: Number, required: true, index: true },
+	externalEventId: { type: Number, index: true }, // event-merchant-service event id; which event this survey is for
+	name: { type: String, default: '' },
+	questions: { type: mongoose.Schema.Types.Mixed, default: [] },
+	active: { type: Boolean, default: true },
+	updatedAt: { type: Date, default: Date.now }
+}, { _id: true });
+surveySchema.index({ merchantId: 1, externalSurveyId: 1 }, { unique: true });
+surveySchema.index({ merchantId: 1, externalEventId: 1 }); // find surveys by event
 
 const ticketAnalyticsSchema = new mongoose.Schema({
 	merchant: { type: mongoose.Schema.Types.ObjectId, ref: 'Merchant', required: true },
@@ -1236,6 +1277,7 @@ export const EventType = mongoose.model('EventType', eventTypeSchema)
 export const SocialMedia = mongoose.model('SocialMedia', socialMediaSchema )
 export const Contact = mongoose.model('Contact', contactSchema)
 export const Crypto = mongoose.model('Crypto', cryptoSchema)
+export const PlatformMarketingConsent = mongoose.model('PlatformMarketingConsent', platformMarketingConsentSchema)
 export const Venue = mongoose.model('Venue', venueSchema)
 export const Manifest = mongoose.model('Manifest', manifestSchema)
 export const EventManifest = mongoose.model('EventManifest', eventManifestSchema)
@@ -1244,3 +1286,4 @@ export const User = mongoose.model('User', userSchema)
 export const Merchant = mongoose.model('Merchant', merchantSchema);
 export const TicketAnalytics = mongoose.model('TicketAnalytics', ticketAnalyticsSchema);
 export const ExternalTicketSales = mongoose.model('ExternalTicketSales', externalTicketSalesSchema);
+export const Survey = mongoose.model('Survey', surveySchema);
