@@ -101,7 +101,8 @@ async function handleEventCreated(message) {
     const city = message?.city;
     const country = message?.country;
     const venueInfo = message?.venue_info;
-    const externalEventId = message?.id;
+    // Keep as string to avoid JS number precision loss when storing (event-merchant event id can be bigint)
+    const externalEventId = message?.id != null ? String(message.id) : undefined;
     // venue from message should contain: venueId, externalVenueId, hasSeatSelection, etc.
     const venue = message?.venue || {};
     const waitlistConfig = message?.waitlist_config ?? undefined;
@@ -158,7 +159,8 @@ async function handleEventUpdated(message) {
     const city = message?.city;
     const country = message?.country;
     const venueInfo = message?.venue_info;
-    const externalEventId = message?.id;
+    // Keep as string to avoid JS number precision loss (event-merchant event id can be bigint)
+    const externalEventId = message?.id != null ? String(message.id) : undefined;
     const existingEvent = await Event.getEventByMerchantAndExternalId(externalMerchantId,
         externalEventId);
 
@@ -193,14 +195,19 @@ async function handleEventUpdated(message) {
             waitlistConfig, event_end_date
         );
     } else {
-        await Event.updateEventById(existingEvent._id, {
+        const updatePayload = {
             eventTitle, eventDescription, eventDate, occupancy,
             ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress,
             eventLocationGeoCode, transportLink, socialMedia, lang, position,
             active, eventName, videoUrl, otherInfo, eventTimezone,
             city, country, venueInfo, venue,
             waitlistConfig, event_end_date
-        });
+        };
+        // Sync pre-sale waitlist cap so client has it before any join; count comes only from waitlist.status_updated (on each join)
+        if (waitlistConfig && typeof waitlistConfig === 'object' && waitlistConfig.pre_sale_cap != null) {
+            updatePayload.pre_sale_waitlist_cap = Number(waitlistConfig.pre_sale_cap);
+        }
+        await Event.updateEventById(existingEvent._id, updatePayload);
     }
 
     // Handle pricing manifest sync if needed

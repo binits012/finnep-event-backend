@@ -1,0 +1,12 @@
+{
+  "subject": "Your presale link: {{eventTitle}}",
+  "badge": "Your presale link",
+  "greeting": "You're on the presale list for this event.",
+  "body": "Use the button below to buy tickets. This link is for you only, valid for a limited time, and can be used once.",
+  "validity": "Link valid for",
+  "hours": "hours.",
+  "cta": "Get tickets",
+  "linkLabel": "Or copy this link:",
+  "questionsOrHelp": "Questions or help?",
+  "copyright": "All rights reserved."
+}

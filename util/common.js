@@ -7,7 +7,10 @@ import moment from 'moment-timezone'
 import dotenv from 'dotenv'
 import crypto from 'crypto'
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { getSignedUrl } from "@aws-sdk/cloudfront-signer";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import { compileMjmlTemplate } from './emailTemplateLoader.js';
 import { loadTranslations, normalizeLocale } from './emailTranslations.js';
 const privateKey = process.env.CLOUDFRONT_PRIVATE_KEY
@@ -273,7 +276,7 @@ export const loadCareerTemplate = async (name, email, phone, position, experienc
 }
 
 export const loadVerificationCodeTemplate = async (code, locale = 'en-US') => {
-    const fileLocation = './emailTemplates/verification_code.mjml';
+    const fileLocation = path.join(__dirname, '..', 'emailTemplates', 'verification_code.mjml');
     const currentYear = new Date().getFullYear();
     const companyName = process.env.COMPANY_TITLE || 'Finnep';
     const contactEmail = process.env.EMAIL_USERNAME || 'info@finnep.fi';
@@ -290,6 +293,97 @@ export const loadVerificationCodeTemplate = async (code, locale = 'en-US') => {
       companyName,
       contactEmail,
       t: translations // Pass translations as 't' object for Handlebars {{t.key}} access
+    };
+    return await compileMjmlTemplate(fileLocation, variables);
+}
+
+const DEFAULT_EVENT_IMAGE = 'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=800';
+
+export const loadWaitlistJoinedTemplate = async (eventTitle, locale = 'en-US', options = {}) => {
+    const fileLocation = path.join(__dirname, '..', 'emailTemplates', 'waitlist_joined.mjml');
+    const currentYear = new Date().getFullYear();
+    const companyName = process.env.COMPANY_TITLE || 'Finnep';
+    const contactEmail = process.env.EMAIL_USERNAME || 'info@finnep.fi';
+    const companyLogo = options.companyLogo || process.env.COMPANY_LOGO || 'https://finnep.s3.eu-central-1.amazonaws.com/Other/finnep_logo.png';
+    const eventPromotionalPhoto = options.eventPromotionalPhoto || DEFAULT_EVENT_IMAGE;
+    const platformMailTo = process.env.PLATFORM_EMAIL || process.env.EMAIL_USERNAME || 'info@finnep.fi';
+
+    const normalizedLocale = normalizeLocale(locale);
+    const translations = await loadTranslations('waitlist_joined', normalizedLocale);
+
+    const variables = {
+        eventTitle: eventTitle || 'Event',
+        currentYear,
+        companyName,
+        contactEmail,
+        companyLogo,
+        eventPromotionalPhoto,
+        platformMailTo,
+        t: translations
+    };
+    return await compileMjmlTemplate(fileLocation, variables);
+}
+
+/**
+ * Load presale link email template (MJML). Used when sending one-time presale links to waitlist.
+ * @param {string} eventTitle
+ * @param {string} presaleLink - Full URL with ?presale=TOKEN
+ * @param {number} validHours - e.g. 24
+ * @param {string} locale
+ * @param {{ companyLogo?: string, eventPromotionalPhoto?: string }} options
+ */
+export const loadPresaleLinkTemplate = async (eventTitle, presaleLink, validHours, locale = 'en-US', options = {}) => {
+    const fileLocation = path.join(__dirname, '..', 'emailTemplates', 'presale_link.mjml');
+    const currentYear = new Date().getFullYear();
+    const companyName = process.env.COMPANY_TITLE || 'Finnep';
+    const companyLogo = options.companyLogo || process.env.COMPANY_LOGO || 'https://finnep.s3.eu-central-1.amazonaws.com/Other/finnep_logo.png';
+    const eventPromotionalPhoto = options.eventPromotionalPhoto || DEFAULT_EVENT_IMAGE;
+    const platformMailTo = process.env.PLATFORM_EMAIL || process.env.EMAIL_USERNAME || 'info@finnep.fi';
+
+    const normalizedLocale = normalizeLocale(locale);
+    const translations = await loadTranslations('presale_link', normalizedLocale);
+
+    const variables = {
+        eventTitle: eventTitle || 'Event',
+        presaleLink,
+        validHours: String(validHours),
+        currentYear,
+        companyName,
+        companyLogo,
+        eventPromotionalPhoto,
+        platformMailTo,
+        t: translations
+    };
+    return await compileMjmlTemplate(fileLocation, variables);
+}
+
+/**
+ * Load "tickets available again" email template (MJML). Used when sold-out event has tickets again.
+ * @param {string} eventTitle
+ * @param {string} eventUrl - Full URL to event page
+ * @param {string} locale
+ * @param {{ companyLogo?: string, eventPromotionalPhoto?: string }} options
+ */
+export const loadSoldOutAvailableTemplate = async (eventTitle, eventUrl, locale = 'en-US', options = {}) => {
+    const fileLocation = path.join(__dirname, '..', 'emailTemplates', 'sold_out_available.mjml');
+    const currentYear = new Date().getFullYear();
+    const companyName = process.env.COMPANY_TITLE || 'Finnep';
+    const companyLogo = options.companyLogo || process.env.COMPANY_LOGO || 'https://finnep.s3.eu-central-1.amazonaws.com/Other/finnep_logo.png';
+    const eventPromotionalPhoto = options.eventPromotionalPhoto || DEFAULT_EVENT_IMAGE;
+    const platformMailTo = process.env.PLATFORM_EMAIL || process.env.EMAIL_USERNAME || 'info@finnep.fi';
+
+    const normalizedLocale = normalizeLocale(locale);
+    const translations = await loadTranslations('sold_out_available', normalizedLocale);
+
+    const variables = {
+        eventTitle: eventTitle || 'Event',
+        eventUrl,
+        currentYear,
+        companyName,
+        companyLogo,
+        eventPromotionalPhoto,
+        platformMailTo,
+        t: translations
     };
     return await compileMjmlTemplate(fileLocation, variables);
 }
@@ -338,28 +432,27 @@ export { normalizeLocale };
 
 /**
  * Extracts locale from request (BCP 47 format)
- * Checks query parameter first, then Accept-Language header
+ * Checks body (for POST), then query, then Accept-Language header
  * @param {Object} req - Express request object
  * @returns {string} Normalized locale (e.g., 'en-US', 'fi-FI')
  */
 export const extractLocaleFromRequest = (req) => {
-  // Check explicit locale query parameter first
+  // Explicit locale in body (e.g. waitlist send-code, so email template matches app language)
+  if (req.body && req.body.locale) {
+    return normalizeLocale(req.body.locale);
+  }
+  // Query parameter
   if (req.query && req.query.locale) {
     return normalizeLocale(req.query.locale);
   }
-
-  // Check Accept-Language header
+  // Accept-Language header
   const acceptLanguage = req.headers && req.headers['accept-language'];
   if (acceptLanguage) {
-    // Parse Accept-Language header: "en-US,en;q=0.9,fi;q=0.8" → extract "en-US"
     const languages = acceptLanguage.split(',');
     if (languages.length > 0) {
-      // Get the first language (highest priority)
       const primaryLang = languages[0].split(';')[0].trim();
       return normalizeLocale(primaryLang);
     }
   }
-
-  // Default to en-US if no locale found
   return 'en-US';
 }

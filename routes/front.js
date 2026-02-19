@@ -74,6 +74,7 @@ router.route('/guest/platform-marketing-consent')
     .patch(guest.updatePlatformMarketingConsent)
 
 /** Public proxies to event-merchant-service (waitlist, surveys) */
+router.post('/event/:eventId/waitlist/send-code', front.sendWaitlistCode)
 router.post('/event/:eventId/waitlist', front.joinWaitlistProxy)
 router.get('/survey/:surveyId', front.getSurveyProxy)
 router.post('/survey/:surveyId/response', front.submitSurveyResponseProxy)

@@ -1,0 +1,12 @@
+{
+  "subject": "Du är på listan – {{eventTitle}}",
+  "title": "Du är på listan",
+  "confirmed": "Du är på listan",
+  "greeting": "Hej,",
+  "body": "Tack för att du anmälde dig till väntelistan för detta evenemang. Vi har tagit emot din förfrågan och meddelar dig på denna e-postadress när biljetter eller förköp blir tillgängliga.",
+  "notifyWhen": "Vi meddelar dig så snart biljetter eller förköp öppnar. Håll koll på din inkorg.",
+  "footer": "Detta är ett automatiskt meddelande från {{companyName}}.",
+  "copyright": "Alla rättigheter förbehållna.",
+  "help": "Behöver du hjälp? Kontakta oss på",
+  "questionsOrHelp": "Frågor eller behöver du hjälp?"
+}

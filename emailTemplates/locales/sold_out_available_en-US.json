@@ -1,0 +1,9 @@
+{
+  "subject": "Tickets are available again: {{eventTitle}}",
+  "badge": "Tickets available",
+  "greeting": "Good news!",
+  "body": "Tickets are available again for this event. Get yours before they sell out.",
+  "cta": "View event and get tickets",
+  "questionsOrHelp": "Questions or help?",
+  "copyright": "All rights reserved."
+}

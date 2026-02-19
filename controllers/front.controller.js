@@ -25,8 +25,15 @@ import { SETTINGS_CACHE_KEY } from '../const.js'
 import { manifestUpdateService } from '../src/services/manifestUpdateService.js'
 import { seatReservationService } from '../src/services/seatReservationService.js'
 import * as seatController from './seat.controller.js'
-import { EventManifest, Manifest, PlatformMarketingConsent, Survey } from '../model/mongoModel.js';
+import { EventManifest, Manifest, PlatformMarketingConsent, Survey, SurveyResponse } from '../model/mongoModel.js';
 import { Venue } from '../model/mongoModel.js'
+import { getPresalePayload, consumePresaleToken } from '../util/presaleToken.js'
+import { getSurveyTokenPayload, consumeSurveyToken } from '../util/surveyToken.js'
+
+/** True if id looks like a MongoDB ObjectId (24 hex chars); then survey is loaded by _id. */
+function isMongoId(id) {
+	return typeof id === 'string' && id.length === 24 && /^[a-fA-F0-9]{24}$/.test(id);
+}
 
 export const getDataForFront = async (req, res, next) => {
     // Get client IP and start country detection in parallel (non-blocking)
@@ -94,8 +101,24 @@ export const getDataForFront = async (req, res, next) => {
     }
     res.status(consts.HTTP_STATUS_OK).json(data)
 }
+
+/**
+ * Compute single waitlist offer for public app: 'pre_sale' | 'sold_out' | null.
+ * Pre-sale when waitlistConfig.pre_sale_enabled; sold_out when sold_out_enabled and at least one ticket sold out.
+ */
+function computeWaitlistOffer(eventDoc) {
+	if (!eventDoc || eventDoc.otherInfo?.eventExtraInfo?.eventType === 'free') return null;
+	const wc = eventDoc.waitlistConfig && typeof eventDoc.waitlistConfig === 'object' ? eventDoc.waitlistConfig : {};
+	if (wc.pre_sale_enabled) return 'pre_sale';
+	const tickets = Array.isArray(eventDoc.ticketInfo) ? eventDoc.ticketInfo : [];
+	const hasSoldOut = tickets.some((t) => t && t.status === 'sold_out');
+	if (wc.sold_out_enabled && hasSoldOut) return 'sold_out';
+	return null;
+}
+
 export const getEventById = async (req, res, next) => {
     const id = req.params.id
+    const presaleToken = req.query.presale
     try {
         const event = await Event.getEventById(id)
         if (event) {
@@ -126,8 +149,18 @@ export const getEventById = async (req, res, next) => {
             }));
             */
 
-            // waitlistConfig and event_end_date are synced from event-merchant-service via RabbitMQ (event.created / event.updated)
-            const data = { event: restOfEvent };
+            // Presale token: validate and attach presaleAccess when valid (do not consume here; do not send PII)
+            let presaleAccess = false
+            if (presaleToken && typeof presaleToken === 'string') {
+                const payload = await getPresalePayload(redisClient, presaleToken)
+                if (payload && String(payload.eventId) === String(id)) {
+                    presaleAccess = true
+                }
+            }
+            const eventPayload = { ...restOfEvent, presaleAccess }
+
+            // waitlistConfig, event_end_date, pre_sale_waitlist_count and pre_sale_waitlist_cap are synced from event-merchant-service via RabbitMQ (event.created / event.updated / waitlist.status_updated)
+            const data = { event: eventPayload };
             return res.status(consts.HTTP_STATUS_OK).json(data)
         } else {
             return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).send({ error: RESOURCE_NOT_FOUND });
@@ -493,7 +526,8 @@ const validatePaymentRequest = (reqBody) => {
         ticketName: sanitizeString(metadata.ticketName, 100),
         country: sanitizeString(metadata.country, 50),
         fullName: metadata.fullName ? sanitizeString(metadata.fullName, 200) : null,
-        nonce: metadata.nonce ? sanitizeString(metadata.nonce, 128) : null // Preserve nonce for duplicate submission prevention
+        nonce: metadata.nonce ? sanitizeString(metadata.nonce, 128) : null, // Preserve nonce for duplicate submission prevention
+        presaleToken: metadata.presaleToken ? sanitizeString(metadata.presaleToken, 200) : null // One-time presale link token; consumed after successful payment
     };
 
     // Preserve seatTickets and placeIds for pricing_configuration model
@@ -2447,6 +2481,15 @@ export const verifyPaytrailPayment = async (req, res, next) => {
 
         console.log(`[verifyPaytrailPayment] Ticket created: ${ticket._id}`);
 
+        // Consume presale token (one-time use) if present (from Redis payload or client body fallback)
+        const presaleTokenToConsume = (useRedisData && redisData.presaleToken) ? redisData.presaleToken : (req.body.presaleToken || null);
+        if (presaleTokenToConsume && typeof presaleTokenToConsume === 'string') {
+            const consumed = await consumePresaleToken(redisClient, presaleTokenToConsume);
+            if (consumed) {
+                info('[verifyPaytrailPayment] Presale token consumed after successful payment');
+            }
+        }
+
         // Update merchant stats
         await paytrailWebhook.updateMerchantPaytrailStats(merchant._id, paymentData.amount / 100);
 
@@ -2770,6 +2813,15 @@ export const handlePaymentSuccess = async (req, res, next) => {
             throw err;
         });
 
+        // Consume presale token (one-time use) if present in metadata
+        const stripePresaleToken = mergedMetadata.presaleToken || null;
+        if (stripePresaleToken && typeof stripePresaleToken === 'string') {
+            const consumed = await consumePresaleToken(redisClient, stripePresaleToken);
+            if (consumed) {
+                info('[handlePaymentSuccess] Presale token consumed after successful payment');
+            }
+        }
+
         // Generate email payload and send ticket (same as completeOrderTicket)
         // Event is already loaded above
         // Extract locale from mergedMetadata (prefer request body, fallback to Stripe metadata)
@@ -2974,6 +3026,7 @@ export const publishTicketCreationEvent = async (ticket, event, metadata, paymen
             {
                 exchangeType: 'topic',
                 publishOptions: {
+                    messageId: outboxMessageData.messageId,
                     correlationId: outboxMessageData.correlationId,
                     contentType: 'application/json',
                     persistent: true,
@@ -3932,11 +3985,11 @@ export const sendSeatOTP = async (req, res, next) => {
 		// Key format: seat_otp:{eventId}:{email}
 		const redisClient = (await import('../model/redisConnect.js')).default;
 		const otpKey = `seat_otp:${eventId}:${email}`;
-		await redisClient.set(otpKey, hashedCode, 'EX', 300); // 5 minutes
+		await redisClient.set(otpKey, hashedCode, { EX: 300 }); // 5 minutes
 
 		// Store email and fullName for later verification
 		const userDataKey = `seat_user:${eventId}:${email}`;
-		await redisClient.set(userDataKey, JSON.stringify({ email, fullName, placeIds }), 'EX', 600); // 10 minutes
+		await redisClient.set(userDataKey, JSON.stringify({ email, fullName, placeIds }), { EX: 600 }); // 10 minutes
 
 		// Extract locale from request
 		const locale = commonUtil.extractLocaleFromRequest(req);
@@ -4060,31 +4113,204 @@ export const verifySeatOTP = async (req, res, next) => {
 
 // ==================== Event-merchant-service proxies (waitlist, survey) ====================
 
+const WAITLIST_OTP_TTL = 300; // 5 minutes
+const WAITLIST_SEND_COOLDOWN = 60; // 1 minute between send-code per email per event
+
 /**
- * POST /event/:eventId/waitlist - join waitlist (public). Resolves merchant from event and proxies to event-merchant-service.
+ * POST /event/:eventId/waitlist/send-code - send verification code to email.
+ * Rate-limited; code valid 5 minutes.
+ */
+export const sendWaitlistCode = async (req, res, next) => {
+	try {
+		const eventId = req.params.eventId;
+		const { email } = req.body || {};
+		if (!email || typeof email !== 'string' || !email.includes('@')) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ error: 'Valid email required' });
+		}
+		const normalizedEmail = email.trim().toLowerCase();
+		const event = await Event.getEventById(eventId);
+		if (!event) {
+			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({ error: RESOURCE_NOT_FOUND });
+		}
+		const doc = event._doc ?? event;
+		const offer = computeWaitlistOffer(doc);
+		if (!offer) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ error: 'Waitlist is not available for this event' });
+		}
+		const redisClient = (await import('../model/redisConnect.js')).default;
+		const cooldownKey = `waitlist_sent_at:${eventId}:${normalizedEmail}`;
+		const existing = await redisClient.get(cooldownKey);
+		if (existing) {
+			return res.status(consts.HTTP_STATUS_TOO_MANY_REQUESTS).json({ error: 'Please wait before requesting another code' });
+		}
+		const VerificationCode = (await import('../model/verificationCode.js'));
+		const code = Math.floor(10000000 + Math.random() * 90000000).toString(); // 8-digit
+		const hashedCode = VerificationCode.hashCode(code);
+		const otpKey = `waitlist_otp:${eventId}:${normalizedEmail}`;
+		await redisClient.set(otpKey, hashedCode, { EX: WAITLIST_OTP_TTL });
+		await redisClient.set(cooldownKey, '1', { EX: WAITLIST_SEND_COOLDOWN });
+		const locale = commonUtil.extractLocaleFromRequest(req);
+		const emailHtml = await commonUtil.loadVerificationCodeTemplate(code, locale);
+		const { getEmailSubject } = await import('../util/emailTranslations.js');
+		const emailSubject = await getEmailSubject('verification_code', locale, { companyName: process.env.COMPANY_TITLE || 'Finnep' });
+		const sendMail = await import('../util/sendMail.js');
+		try {
+			await sendMail.forward({
+				from: process.env.EMAIL_USERNAME,
+				to: normalizedEmail,
+				subject: emailSubject,
+				html: emailHtml
+			});
+		} catch (emailErr) {
+			error('[sendWaitlistCode] email send failed', emailErr);
+			return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({ error: 'Failed to send code' });
+		}
+		return res.status(consts.HTTP_STATUS_OK).json({ message: 'Verification code sent to your email' });
+	} catch (err) {
+		error('sendWaitlistCode:', err);
+		next(err);
+	}
+};
+
+/**
+ * POST /event/:eventId/waitlist - join waitlist (public). Requires email + code (from send-code).
+ * Verifies code (5 min TTL), derives type from event state, then publishes to event-merchant-service.
  */
 export const joinWaitlistProxy = async (req, res, next) => {
 	try {
 		const eventId = req.params.eventId;
-		const { email, type } = req.body || {};
-		if (!email || !type || !['pre_sale', 'sold_out'].includes(type)) {
-			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ error: 'email and type (pre_sale|sold_out) required' });
+		const { email, code } = req.body || {};
+		info('[joinWaitlistProxy] called', { eventId, hasEmail: !!email, hasCode: !!code });
+		if (!email || typeof email !== 'string' || !email.includes('@')) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ error: 'Valid email required' });
 		}
+		if (!code || typeof code !== 'string' || code.length < 5) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ error: 'Verification code required' });
+		}
+		const normalizedEmail = email.trim().toLowerCase();
 		const event = await Event.getEventById(eventId);
-		if (!event || !event._doc) {
+		if (!event) {
+			info('[joinWaitlistProxy] event not found', { eventId });
 			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({ error: RESOURCE_NOT_FOUND });
 		}
-		const { externalMerchantId, externalEventId } = event._doc;
-		if (!externalMerchantId || !externalEventId) {
+		const doc = event._doc ?? event;
+		const type = computeWaitlistOffer(doc);
+		if (!type) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ error: 'Waitlist is not available for this event' });
+		}
+		const redisClient = (await import('../model/redisConnect.js')).default;
+		const otpKey = `waitlist_otp:${eventId}:${normalizedEmail}`;
+		const storedHashed = await redisClient.get(otpKey);
+		if (!storedHashed) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ error: 'Invalid or expired code. Request a new code.' });
+		}
+		const VerificationCode = (await import('../model/verificationCode.js'));
+		if (!VerificationCode.verifyCode(code.trim(), storedHashed)) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ error: 'Invalid verification code' });
+		}
+		await redisClient.del(otpKey);
+		// Clear send-code cooldown so user can request a new code (e.g. for another event) without waiting
+		const cooldownKey = `waitlist_sent_at:${eventId}:${normalizedEmail}`;
+		await redisClient.del(cooldownKey);
+		let externalMerchantId = doc.externalMerchantId;
+		// Normalize to string to avoid JS number precision loss (values > 2^53 lose precision as number)
+		let externalEventId = doc.externalEventId != null ? String(doc.externalEventId) : undefined;
+		if (!externalMerchantId && event.merchant) {
+			const m = event.merchant._doc ?? event.merchant;
+			externalMerchantId = m.merchantId ?? m.id;
+		}
+		if (!externalMerchantId || externalEventId == null || externalEventId === '') {
+			info('[joinWaitlistProxy] event not linked to merchant', { eventId, externalMerchantId: !!externalMerchantId, externalEventId: externalEventId != null });
 			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ error: 'Event not linked to merchant' });
 		}
 		const exchangeName = process.env.RABBITMQ_EXCHANGE || 'event-merchant-exchange';
-		await messageConsumer.publishToExchange(exchangeName, 'waitlist.join', {
-			merchant_id: externalMerchantId,
-			event_id: Number(externalEventId),
-			email,
+		// Keep event_id as string to avoid JS number precision loss (event-merchant events.id can be bigint)
+		const data = {
+			merchant_id: String(externalMerchantId),
+			event_id: String(externalEventId),
+			email: normalizedEmail,
 			type
-		}, { exchangeType: 'topic' });
+		};
+		const correlationId = uuidv4();
+		const messageId = uuidv4();
+		const aggregateId = (doc._id || event._id || event.id).toString();
+		const messageBody = {
+			eventType: 'WaitlistJoin',
+			aggregateId,
+			data,
+			metadata: {
+				correlationId,
+				causationId: messageId,
+				timestamp: new Date().toISOString(),
+				version: 1,
+				source: 'finnep-eventapp',
+			}
+		};
+		const outboxMessageData = {
+			messageId,
+			exchange: exchangeName,
+			routingKey: 'waitlist.join',
+			messageBody,
+			headers: {
+				'content-type': 'application/json',
+				'message-type': 'WaitlistJoin',
+				'correlation-id': correlationId
+			},
+			correlationId,
+			eventType: 'WaitlistJoin',
+			aggregateId,
+			status: 'pending',
+			maxRetries: 3,
+			attempts: 0
+		};
+		const outboxMessage = await OutboxMessage.createOutboxMessage(outboxMessageData);
+		info('[joinWaitlistProxy] outbox message created for waitlist.join', { messageId, eventId });
+		// Publish immediately (schedular may not be running); outbox stays for retries if publish fails
+		try {
+			await messageConsumer.publishToExchange(
+				exchangeName,
+				outboxMessageData.routingKey,
+				outboxMessageData.messageBody,
+				{
+					exchangeType: 'topic',
+					publishOptions: {
+						messageId,
+						correlationId,
+						contentType: 'application/json',
+						headers: outboxMessageData.headers
+					}
+				}
+			);
+			await OutboxMessage.markMessageAsSent(outboxMessage._id);
+			info('[joinWaitlistProxy] waitlist.join published and outbox marked sent', { messageId });
+		} catch (publishErr) {
+			error('[joinWaitlistProxy] failed to publish waitlist.join', { messageId, err: publishErr.message });
+			await OutboxMessage.markMessageAsFailed(outboxMessage._id, publishErr.message).catch(() => {});
+			// Still return 200: intent is recorded in outbox, schedular will retry
+		}
+		// Send confirmation email (locale from body/query/Accept-Language)
+		try {
+			const locale = commonUtil.extractLocaleFromRequest(req);
+			const eventTitle = doc.eventTitle || event?.eventTitle || 'Event';
+			const eventPromotionalPhoto = doc.eventPromotionPhoto || doc.eventPromotionalPhoto || event?.eventPromotionPhoto || event?.eventPromotionalPhoto;
+			const emailHtml = await commonUtil.loadWaitlistJoinedTemplate(eventTitle, locale, {
+				eventPromotionalPhoto: eventPromotionalPhoto || undefined
+			});
+			const { getEmailSubject } = await import('../util/emailTranslations.js');
+			const emailSubject = await getEmailSubject('waitlist_joined', locale, {
+				companyName: process.env.COMPANY_TITLE || 'Finnep',
+				eventTitle
+			});
+			const { queueGenericEmail } = await import('../workers/emailWorker.js');
+			await queueGenericEmail({
+				from: process.env.EMAIL_USERNAME,
+				to: normalizedEmail,
+				subject: emailSubject,
+				html: emailHtml
+			});
+		} catch (emailErr) {
+			error('[joinWaitlistProxy] failed to queue confirmation email', { err: emailErr?.message });
+		}
 		return res.status(consts.HTTP_STATUS_OK).json({ message: 'Joined waitlist' });
 	} catch (err) {
 		error('joinWaitlistProxy:', err);
@@ -4094,31 +4320,82 @@ export const joinWaitlistProxy = async (req, res, next) => {
 };
 
 /**
- * GET /survey/:surveyId - get survey (public). Requires merchantId in query. Reads from MongoDB (synced via RabbitMQ).
+ * GET /survey/:surveyId - get survey (public).
+ * - If surveyId is MongoDB ObjectId (24 hex): load by _id, no eventId required. Link from email uses this.
+ * - Else legacy: eventId query required, load by externalSurveyId + externalEventId.
  */
 export const getSurveyProxy = async (req, res, next) => {
 	try {
 		const surveyId = req.params.surveyId;
-		const merchantId = req.query.merchantId;
-		if (!merchantId) {
-			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ error: 'merchantId query required' });
-		}
-		const externalId = Number(surveyId);
-		if (Number.isNaN(externalId)) {
+		const token = req.query.token;
+		const surveyIdStr = typeof surveyId === 'string' ? surveyId.trim() : String(surveyId);
+		if (!surveyIdStr) {
 			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ error: 'Invalid surveyId' });
 		}
-		const doc = await Survey.findOne({ merchantId, externalSurveyId: externalId }).lean();
+
+		let doc;
+		let tokenPayload = null;
+		if (isMongoId(surveyIdStr)) {
+			if (token) {
+				const redisClient = (await import('../model/redisConnect.js')).default;
+				tokenPayload = await getSurveyTokenPayload(redisClient, token);
+				// 403: invalid/expired link = access refused (not 401 auth failure)
+				if (!tokenPayload) {
+					return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({ error: 'Invalid or expired survey link. Please use the link from your email.' });
+				}
+				if (tokenPayload.surveyId !== surveyIdStr) {
+					return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ error: 'Token does not match survey' });
+				}
+			}
+			doc = await Survey.findById(surveyIdStr).lean();
+		}
+        /*
+        else {
+			if (!eventId) {
+				return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ error: 'eventId query required when surveyId is not a Mongo id' });
+			}
+			const externalEventId = typeof eventId === 'string' ? eventId.trim() : String(eventId);
+			if (!externalEventId) {
+				return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ error: 'Invalid eventId' });
+			}
+			if (token) {
+				const redisClient = (await import('../model/redisConnect.js')).default;
+				const payload = await getSurveyTokenPayload(redisClient, token);
+				if (!payload) {
+					return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({ error: 'Invalid or expired survey link. Please use the link from your email.' });
+				}
+				if (payload.surveyId !== surveyIdStr || (payload.eventId && payload.eventId !== externalEventId)) {
+					return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ error: 'Token does not match survey or event' });
+				}
+			}
+			doc = await Survey.findOne({ externalSurveyId: surveyIdStr, externalEventId }).lean();
+		}
+            */
+
 		if (!doc) {
 			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({ error: RESOURCE_NOT_FOUND });
 		}
 		const survey = {
-			id: String(doc.externalSurveyId),
+			id: doc._id.toString(),
 			name: doc.name || '',
 			questions: doc.questions || [],
 			active: doc.active !== false,
 			merchantId: doc.merchantId,
-			eventId: doc.externalEventId != null ? doc.externalEventId : undefined
+			eventId: doc.externalEventId != null ? doc.externalEventId : undefined,
+			submitted: !!tokenPayload?.used
 		};
+		if (doc.externalEventId && doc.merchantId) {
+			const [eventDoc, merchantDoc] = await Promise.all([
+				Event.getEventByExternalIds(doc.merchantId, doc.externalEventId),
+				Merchant.getMerchantByMerchantId(doc.merchantId)
+			]);
+			const eventTitle = eventDoc?.eventTitle ?? null;
+			const eventDate = eventDoc?.eventDate ? (eventDoc.eventDate instanceof Date ? eventDoc.eventDate.toISOString() : eventDoc.eventDate) : null;
+			const merchantName = merchantDoc?.name ?? null;
+			if (eventTitle != null || eventDate != null || merchantName != null) {
+				survey.context = { eventTitle, eventDate, merchantName };
+			}
+		}
 		return res.status(consts.HTTP_STATUS_OK).json(survey);
 	} catch (err) {
 		error('getSurveyProxy:', err);
@@ -4128,30 +4405,66 @@ export const getSurveyProxy = async (req, res, next) => {
 };
 
 /**
- * POST /survey/:surveyId/response - submit survey response (public). Body: { merchantId?, respondent_identifier?, responses }.
- * Publishes to RabbitMQ; event-merchant-service consumes and persists.
+ * POST /survey/:surveyId/response - submit survey response (public). Body: { token, respondent_identifier?, responses }. eventId only for legacy external-id links.
+ * Consumes token (one-time), saves to MongoDB, then publishes to RabbitMQ; event-merchant-service persists to Postgres.
  */
 export const submitSurveyResponseProxy = async (req, res, next) => {
 	try {
 		const surveyId = req.params.surveyId;
-		const { merchantId, respondent_identifier, responses } = req.body || {};
-		if (!merchantId) {
-			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ error: 'merchantId required in body' });
+		const { eventId, token, respondent_identifier, responses } = req.body || {};
+		if (!token || typeof token !== 'string') {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ error: 'token required in body (from survey link)' });
 		}
 		if (!responses || typeof responses !== 'object') {
 			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ error: 'responses object required' });
 		}
-		const surveyIdNum = Number(surveyId);
-		if (Number.isNaN(surveyIdNum)) {
+		const surveyIdStr = typeof surveyId === 'string' ? surveyId.trim() : String(surveyId);
+		if (!surveyIdStr) {
 			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ error: 'Invalid surveyId' });
 		}
+
+		const redisClient = (await import('../model/redisConnect.js')).default;
+		const payload = await consumeSurveyToken(redisClient, token);
+		// 403: invalid/expired/used link = access refused (not 401 auth failure)
+		if (!payload) {
+			return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({ error: 'Invalid or expired survey link. This link has already been used or has expired.' });
+		}
+		if (payload.surveyId !== surveyIdStr) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ error: 'Token does not match survey' });
+		}
+
+		let surveyDoc;
+		if (isMongoId(surveyIdStr)) {
+			surveyDoc = await Survey.findById(surveyIdStr).lean();
+		} else {
+			const externalEventId = eventId != null && typeof eventId === 'string' ? eventId.trim() : String(eventId || '');
+			if (!externalEventId) {
+				return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ error: 'eventId required in body when surveyId is not a Mongo id' });
+			}
+			surveyDoc = await Survey.findOne({ externalSurveyId: surveyIdStr, externalEventId }).lean();
+		}
+
+		if (!surveyDoc) {
+			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({ error: RESOURCE_NOT_FOUND });
+		}
+		const merchantId = surveyDoc.merchantId;
+		const externalSurveyId = surveyDoc.externalSurveyId;
+		const externalEventId = surveyDoc.externalEventId != null ? surveyDoc.externalEventId : null;
+		await SurveyResponse.create({
+			merchantId,
+			externalSurveyId,
+			externalEventId,
+			respondentIdentifier: respondent_identifier ?? payload.recipientIdentifier ?? null,
+			responses: responses || {}
+		});
 		const exchangeName = process.env.RABBITMQ_EXCHANGE || 'event-merchant-exchange';
+		const messageId = uuidv4();
 		await messageConsumer.publishToExchange(exchangeName, 'survey.response.submit', {
 			merchant_id: merchantId,
-			survey_id: surveyIdNum,
-			respondent_identifier: respondent_identifier || null,
+			survey_id: externalSurveyId,
+			respondent_identifier: respondent_identifier ?? payload.recipientIdentifier ?? null,
 			responses: responses || {}
-		}, { exchangeType: 'topic' });
+		}, { exchangeType: 'topic', publishOptions: { messageId } });
 		return res.status(consts.HTTP_STATUS_OK).json({ message: 'Response submitted' });
 	} catch (err) {
 		error('submitSurveyResponseProxy:', err);

@@ -1,0 +1,12 @@
+{
+  "subject": "Vous êtes sur la liste – {{eventTitle}}",
+  "title": "Vous êtes sur la liste",
+  "confirmed": "Vous êtes sur la liste",
+  "greeting": "Bonjour,",
+  "body": "Merci d'avoir rejoint la liste d'attente pour cet événement. Nous avons bien reçu votre demande et vous informerons à cette adresse e-mail lorsque les billets ou la prévente seront disponibles.",
+  "notifyWhen": "Nous vous préviendrons dès que les billets ou la prévente seront ouverts. Surveillez votre boîte de réception.",
+  "footer": "Ceci est un message automatique de {{companyName}}.",
+  "copyright": "Tous droits réservés.",
+  "help": "Besoin d'aide ? Contactez-nous à",
+  "questionsOrHelp": "Des questions ou besoin d'aide ?"
+}

@@ -378,9 +378,11 @@ const eventSchema = new mongoose.Schema({
 		endDate: { type: Date }, // When featuring ends (for temporary)
 		featuredAt: { type: Date, default: Date.now }
 	},
-	// Synced from event-merchant-service via RabbitMQ (event.created / event.updated)
+	// Synced from event-merchant-service via RabbitMQ (event.created / event.updated / waitlist.status_updated)
 	waitlistConfig: { type: mongoose.Schema.Types.Mixed },
 	event_end_date: { type: Date },
+	pre_sale_waitlist_count: { type: Number },
+	pre_sale_waitlist_cap: { type: Number },
 	createdAt: { type: Date, default: Date.now },
 	updatedAt:{ type:Date, default:Date.now }
 })
@@ -722,10 +724,11 @@ inboxMessageSchema.index({ aggregateId: 1 });
 inboxMessageSchema.plugin(auditPlugin);
 
 // Survey (synced from event-merchant-service via RabbitMQ survey.created/updated/deleted)
+// externalSurveyId/externalEventId are String to avoid JS number precision loss for large IDs (e.g. 1300000000000000010)
 const surveySchema = new mongoose.Schema({
 	merchantId: { type: String, required: true, index: true },
-	externalSurveyId: { type: Number, required: true, index: true },
-	externalEventId: { type: Number, index: true }, // event-merchant-service event id; which event this survey is for
+	externalSurveyId: { type: String, required: true, index: true },
+	externalEventId: { type: String, index: true }, // event-merchant-service event id; which event this survey is for
 	name: { type: String, default: '' },
 	questions: { type: mongoose.Schema.Types.Mixed, default: [] },
 	active: { type: Boolean, default: true },
@@ -733,6 +736,17 @@ const surveySchema = new mongoose.Schema({
 }, { _id: true });
 surveySchema.index({ merchantId: 1, externalSurveyId: 1 }, { unique: true });
 surveySchema.index({ merchantId: 1, externalEventId: 1 }); // find surveys by event
+
+// Survey responses (MongoDB first; then synced to Postgres via RabbitMQ survey.response.submit)
+const surveyResponseSchema = new mongoose.Schema({
+	merchantId: { type: String, required: true, index: true },
+	externalSurveyId: { type: String, required: true, index: true },
+	externalEventId: { type: String, index: true },
+	respondentIdentifier: { type: String, default: null },
+	responses: { type: mongoose.Schema.Types.Mixed, default: {} },
+	createdAt: { type: Date, default: Date.now }
+}, { _id: true });
+surveyResponseSchema.index({ merchantId: 1, externalSurveyId: 1, createdAt: -1 });
 
 const ticketAnalyticsSchema = new mongoose.Schema({
 	merchant: { type: mongoose.Schema.Types.ObjectId, ref: 'Merchant', required: true },
@@ -1287,3 +1301,4 @@ export const Merchant = mongoose.model('Merchant', merchantSchema);
 export const TicketAnalytics = mongoose.model('TicketAnalytics', ticketAnalyticsSchema);
 export const ExternalTicketSales = mongoose.model('ExternalTicketSales', externalTicketSalesSchema);
 export const Survey = mongoose.model('Survey', surveySchema);
+export const SurveyResponse = mongoose.model('SurveyResponse', surveyResponseSchema);

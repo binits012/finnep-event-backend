@@ -97,8 +97,8 @@ export const queueTicketEmail = async (ticketId, emailPayload) => {
             type: 'exponential',
             delay: 2000 // Start with 2s, then 4s, then 8s
         },
-        removeOnComplete: 100, // Keep last 100 completed jobs
-        removeOnFail: 500      // Keep last 500 failed jobs for debugging
+        removeOnComplete: true,  // Remove from Redis as soon as email is sent
+        removeOnFail: { age: 86400 }  // Keep failed jobs for 1 day for debugging
     });
 };
 
@@ -113,8 +113,8 @@ export const queueGenericEmail = async (emailPayload) => {
             type: 'exponential',
             delay: 2000
         },
-        removeOnComplete: 100,
-        removeOnFail: 500
+        removeOnComplete: true,
+        removeOnFail: { age: 86400 }  // Keep failed jobs for 1 day for debugging
     });
 };
 

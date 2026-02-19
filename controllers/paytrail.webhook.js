@@ -121,16 +121,25 @@ export async function createTicketFromPaytrailPayment(paymentData, transactionId
         }
     }
 
+    const placeIds = paymentData.placeIds || paymentData.seats || [];
+    const seatTickets = Array.isArray(paymentData.seatTickets) ? paymentData.seatTickets : (paymentData.seatTickets ? (typeof paymentData.seatTickets === 'string' ? (() => { try { return JSON.parse(paymentData.seatTickets); } catch { return []; } })() : []) : []);
+
     console.log('[createTicketFromPaytrailPayment] Payment data received:', {
         hasBasePrice: !!paymentData.basePrice,
         hasServiceFee: !!paymentData.serviceFee,
         basePrice: paymentData.basePrice,
         serviceFee: paymentData.serviceFee,
         vatAmount: paymentData.vatAmount,
-        amount: paymentData.amount
+        amount: paymentData.amount,
+        hasSeatTickets: !!seatTickets.length,
+        seatTicketsLength: seatTickets.length,
+        placeIdsLength: placeIds.length
     });
 
     const otp = await commonUtil.createCode(8);
+
+    // Load event for venue info (same structure as Stripe ticketInfo)
+    const event = await Event.getEventById(paymentData.eventId);
 
     const ticketInfo = {
         eventName: paymentData.eventName,
@@ -164,10 +173,25 @@ export async function createTicketFromPaytrailPayment(paymentData, transactionId
         totalServiceFee: paymentData.totalServiceFee ? parseFloat(paymentData.totalServiceFee) : undefined,
         country: paymentData.country,
         fullName: paymentData.fullName,
-        placeIds: paymentData.placeIds || paymentData.seats || [],
-        // Include seatTickets with decoded ticketName if available
-        seatTickets: paymentData.seatTickets || []
+        placeIds,
+        // seatTickets: same as Stripe - array of { placeId, ticketId, ticketName } for display
+        seatTickets
     };
+
+    // Add venue (same structure as Stripe) so ticket display is consistent
+    if (event && event.venue) {
+        ticketInfo.venue = {
+            venueId: event.venue.venueId || null,
+            externalVenueId: event.venue.externalVenueId || null,
+            venueName: event.venue.name || null,
+            hasSeatSelection: !!event.venue.venueId
+        };
+    }
+
+    // Add seats array (same structure as Stripe) for seat-based events
+    if (event && event.venue && event.venue.venueId && placeIds.length > 0) {
+        ticketInfo.seats = placeIds.map(placeId => ({ placeId }));
+    }
 
     const emailCrypto = await hash.getCryptoBySearchIndex(paymentData.email, 'email');
     let emailHash = emailCrypto.length > 0 ? emailCrypto[0]._id : (await hash.createHashData(paymentData.email, 'email'))._id;
@@ -197,7 +221,7 @@ export async function createTicketFromPaytrailPayment(paymentData, transactionId
 
     // Queue ticket email via BullMQ (non-blocking, with retries)
     // Only queue email if ticket was just created (not existing) and email hasn't been sent yet
-    const event = await Event.getEventById(paymentData.eventId);
+    // event already loaded above for ticketInfo.venue / ticketInfo.seats
 
     if (!ticket.isSend) {
         const { normalizeLocale } = await import('../util/common.js');
@@ -216,7 +240,7 @@ export async function createTicketFromPaytrailPayment(paymentData, transactionId
     }
 
     // Mark seats as sold for seat-based events (same as Stripe flow)
-    const placeIds = paymentData.placeIds || paymentData.seats || [];
+    // placeIds already computed above
     console.log('[createTicketFromPaytrailPayment] Checking seat marking:', {
         hasEvent: !!event,
         hasVenue: !!(event && event.venue),

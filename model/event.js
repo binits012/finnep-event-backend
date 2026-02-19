@@ -200,6 +200,13 @@ export const getEventByExternalEventId = async(externalEventId) =>{
     return await model.Event.findOne({externalEventId:externalEventId}).exec()
 }
 
+export const getEventByExternalIds = async (externalMerchantId, externalEventId) => {
+    return await model.Event.findOne({
+        externalMerchantId: String(externalMerchantId),
+        externalEventId: String(externalEventId)
+    }).populate('merchant').exec();
+}
+
 export const updateEventById = async (id, obj) =>{
     try {
         return await model.Event.findByIdAndUpdate(id, {

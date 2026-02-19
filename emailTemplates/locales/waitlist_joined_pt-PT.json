@@ -1,0 +1,12 @@
+{
+  "subject": "Está na lista – {{eventTitle}}",
+  "title": "Está na lista",
+  "confirmed": "Está na lista",
+  "greeting": "Olá,",
+  "body": "Obrigado por se juntar à lista de espera para este evento. Recebemos o seu pedido e notificá-lo-emos neste endereço de e-mail quando os bilhetes ou a pré-venda estiverem disponíveis.",
+  "notifyWhen": "Avisá-lo-emos assim que os bilhetes ou a pré-venda abrirem. Fique atento à sua caixa de entrada.",
+  "footer": "Esta é uma mensagem automática de {{companyName}}.",
+  "copyright": "Todos os direitos reservados.",
+  "help": "Precisa de ajuda? Contacte-nos em",
+  "questionsOrHelp": "Perguntas ou precisa de ajuda?"
+}

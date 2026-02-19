@@ -5,6 +5,8 @@ import { handleExternalTicketSalesMessage } from '../handlers/externalTicketSale
 import { handleSeatAvailabilityCheck } from '../handlers/seatAvailabilityHandler.js';
 import { handleSeatedEventTicketCreated } from '../handlers/seatedEventTicketHandler.js';
 import { handleSurveyMessage } from '../handlers/surveyHandler.js';
+import { handlePresaleSendEmails } from '../handlers/presaleSendEmailsHandler.js';
+import { handleWaitlistStatusUpdated } from '../handlers/waitlistStatusHandler.js';
 import { info, error, warn } from '../../model/logger.js';
 
 // Track if queues have been set up to prevent duplicate setup
@@ -110,6 +112,26 @@ const setupQueues = async () => {
         await messageConsumer.consumeQueue('survey-events-queue', async (message) => {
             await handleSurveyMessage(message);
         }, surveyEventsQueueOptions);
+
+        const presaleSendEmailsQueueOptions = {
+            prefetch: QUEUE_PREFETCH,
+            deadLetterExchange: 'event-merchant-dlx',
+            deadLetterRoutingKey: 'dlq.presale-send-emails-queue.retry-1'
+        };
+        info('Setting up presale-send-emails-queue with options:', presaleSendEmailsQueueOptions);
+        await messageConsumer.consumeQueue('presale-send-emails-queue', async (message) => {
+            await handlePresaleSendEmails(message);
+        }, presaleSendEmailsQueueOptions);
+
+        const waitlistStatusSyncQueueOptions = {
+            prefetch: QUEUE_PREFETCH,
+            deadLetterExchange: 'event-merchant-dlx',
+            deadLetterRoutingKey: 'dlq.waitlist-status-sync-queue.retry-1'
+        };
+        info('Setting up waitlist-status-sync-queue with options:', waitlistStatusSyncQueueOptions);
+        await messageConsumer.consumeQueue('waitlist-status-sync-queue', async (message) => {
+            await handleWaitlistStatusUpdated(message);
+        }, waitlistStatusSyncQueueOptions);
 
         isSetupComplete = true;
         info('All queues set up and consuming messages');

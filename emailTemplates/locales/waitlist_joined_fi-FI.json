@@ -1,0 +1,12 @@
+{
+  "subject": "Olet listalla – {{eventTitle}}",
+  "title": "Olet listalla",
+  "confirmed": "Olet listalla",
+  "greeting": "Hei,",
+  "body": "Kiitos, että liityit tapahtuman odotuslistalle. Olemme vastaanottaneet pyyntösi ja ilmoitamme tähän sähköpostiosoitteeseen, kun liput tai ennakkomyynti tulevat saataville.",
+  "notifyWhen": "Ilmoitamme sinulle heti, kun liput tai ennakkomyynti avautuu. Pidä silmällä postilaatikkoasi.",
+  "footer": "Tämä on automaattinen viesti palvelusta {{companyName}}.",
+  "copyright": "Kaikki oikeudet pidätetään.",
+  "help": "Tarvitsetko apua? Ota yhteyttä:",
+  "questionsOrHelp": "Kysymyksiä tai tarvitsetko apua?"
+}

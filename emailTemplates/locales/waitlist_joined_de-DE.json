@@ -1,0 +1,12 @@
+{
+  "subject": "Sie sind auf der Liste – {{eventTitle}}",
+  "title": "Sie sind auf der Liste",
+  "confirmed": "Sie sind auf der Liste",
+  "greeting": "Hallo,",
+  "body": "Vielen Dank, dass Sie sich für die Warteliste dieser Veranstaltung angemeldet haben. Wir haben Ihre Anfrage erhalten und benachrichtigen Sie unter dieser E-Mail-Adresse, sobald Karten oder der Vorverkauf verfügbar sind.",
+  "notifyWhen": "Wir benachrichtigen Sie, sobald Karten oder Vorverkauf starten. Behalten Sie Ihren Posteingang im Auge.",
+  "footer": "Dies ist eine automatische Nachricht von {{companyName}}.",
+  "copyright": "Alle Rechte vorbehalten.",
+  "help": "Brauchen Sie Hilfe? Kontaktieren Sie uns unter",
+  "questionsOrHelp": "Fragen oder Hilfe?"
+}

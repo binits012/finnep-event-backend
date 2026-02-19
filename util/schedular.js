@@ -175,7 +175,10 @@ function defineJobs() {
                 message.messageBody,
                 {
                   exchangeType: 'topic',
-                  durable: true
+                  durable: true,
+                  ...(message.messageId && {
+                    publishOptions: { messageId: message.messageId }
+                  })
                 }
               );
 
