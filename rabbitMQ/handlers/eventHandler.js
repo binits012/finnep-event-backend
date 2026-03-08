@@ -6,7 +6,12 @@ import { pricingManifestSyncService } from '../../src/services/pricingManifestSy
 import { sendPricingSyncErrorEmail } from '../../util/sendMail.js';
 
 export const handleEventMessage = async (message) => {
-    console.log('Processing event message:', message);
+    console.log('Processing event message:', {
+        routingKey: message?.routingKey,
+        type: message?.type,
+        id: message?.id,
+        merchantId: message?.merchantId
+    });
     if (!message || typeof message !== 'object') {
         error('Invalid message format - not an object %s', { message });
         throw new Error('Message must be an object');
@@ -56,14 +61,27 @@ export const handleEventMessage = async (message) => {
             default:
                 console.log(`Unknown event message type: ${message.type}`);
         }
-    } catch (error) {
-        console.error('Error handling event message:', error);
-        throw error;
+    } catch (err) {
+        console.error('Error handling event message:', {
+            routingKey: message?.routingKey,
+            type: message?.type,
+            id: message?.id,
+            merchantId: message?.merchantId,
+            error: err?.message,
+            stack: err?.stack
+        });
+        throw err;
     }
 };
 
 async function handleEventCreated(message) {
-    console.log(message, 'creating event:');
+    console.log('[handleEventCreated] Received message', {
+        id: message?.id,
+        merchantId: message?.merchantId,
+        routingKey: message?.routingKey,
+        hasSeatSelection: message?.venue?.hasSeatSelection,
+        pricingModel: message?.venue?.pricingModel
+    });
     const externalMerchantId = message.merchantId;
     const merchant = await getMerchantByMerchantId(externalMerchantId)
     if (!merchant) {
@@ -108,6 +126,12 @@ async function handleEventCreated(message) {
     const waitlistConfig = message?.waitlist_config ?? undefined;
     const event_end_date = message?.event_end_date ? new Date(message.event_end_date) : undefined;
 
+    console.log('[handleEventCreated] Creating event in MongoDB', {
+        externalEventId,
+        externalMerchantId,
+        title: eventTitle
+    });
+
     await Event.createEvent(
         eventTitle, eventDescription, eventDate, occupancy,
         ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress,
@@ -118,10 +142,18 @@ async function handleEventCreated(message) {
     );
 
     await inboxModel.markProcessed(message?.metaData?.causationId);
+    console.log('[handleEventCreated] Successfully created event and marked inbox message processed', {
+        externalEventId,
+        merchantId: externalMerchantId
+    });
 }
 
 async function handleEventUpdated(message) {
-    console.log('Updating event:', message);
+    console.log('[handleEventUpdated] Received message', {
+        id: message?.id,
+        merchantId: message?.merchantId,
+        routingKey: message?.routingKey
+    });
     const externalMerchantId = message.merchantId;
     const merchant = await getMerchantByMerchantId(externalMerchantId)
     if (!merchant) {
@@ -161,8 +193,14 @@ async function handleEventUpdated(message) {
     const venueInfo = message?.venue_info;
     // Keep as string to avoid JS number precision loss (event-merchant event id can be bigint)
     const externalEventId = message?.id != null ? String(message.id) : undefined;
-    const existingEvent = await Event.getEventByMerchantAndExternalId(externalMerchantId,
-        externalEventId);
+    const existingEvent = await Event.getEventByMerchantAndExternalId(
+        externalMerchantId,
+        externalEventId
+    );
+    console.log('[handleEventUpdated] Lookup existing event result', {
+        externalEventId,
+        found: !!existingEvent
+    });
 
     // When venue is explicitly cleared (venueId null/empty or venue null), clear venue in MongoDB
     const venueCleared = message?.venueId == null || message?.venueId === '' || message?.venue === null;

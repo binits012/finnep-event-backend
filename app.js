@@ -37,30 +37,26 @@ var app = express();
     }
 })();
 
-// Configure CORS to work with frontend CSP
+const STATIC_APP_ORIGINS = [
+  'https://finnep-eventapp-test.s3.eu-central-1.amazonaws.com',
+  'https://d3ibhfrhdk2dm6.cloudfront.net',
+  'https://test.okazzo.eu',
+  'https://okazzo.eu',
+  'https://www.okazzo.eu',
+  'http://localhost:3000',
+  'http://localhost:3002',
+  'http://localhost:3003',
+  'http://192.168.1.107:3003'
+];
+
 const corsOptions = {
   origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
 
-    // Get allowed origins from environment variable, fallback to default
-    const allowedOrigins = process.env.CORS_ORIGINS
+    const fromEnv = process.env.CORS_ORIGINS
       ? process.env.CORS_ORIGINS.split(',').map(url => url.trim()).filter(url => url.length > 0)
-      : [
-          'http://localhost:3002',
-          'http://localhost:3000',
-          'http://localhost:3003',
-          'https://test.okazzo.eu',
-          'https://okazzo.eu',
-          'https://cmstest.okazzo.eu',
-          'http://192.168.1.107:3003', 
-          'https://www.okazzo.eu',
-          'https://cms.okazzo.eu',
-          'https://okazzo.fi',
-          'https://www.okazzo.fi',
-          'https://cms.okazzo.fi',
-          process.env.FRONTEND_URL || 'http://localhost:3000'
-        ];
+      : [];
+    const allowedOrigins = [...new Set([...STATIC_APP_ORIGINS, ...fromEnv, process.env.FRONTEND_URL].filter(Boolean))];
 
     if (allowedOrigins.includes(origin)) {
       callback(null, true);

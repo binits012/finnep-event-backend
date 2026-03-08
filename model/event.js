@@ -256,6 +256,20 @@ export const listEvent = async(filter) =>{
     }).populate('merchant').sort({'position':-1}).lean()
 }
 
+/** Single aggregation to get active ticket counts per event (avoids N+1). Returns { [eventIdStr]: count }. */
+async function getTicketCountsByEventIds(eventIds) {
+    if (!eventIds || eventIds.length === 0) return {};
+    const counts = await Ticket.aggregate([
+        { $match: { active: true, event: { $in: eventIds } } },
+        { $group: { _id: '$event', count: { $sum: 1 } } }
+    ]);
+    const map = {};
+    for (const c of counts) {
+        map[c._id.toString()] = c.count;
+    }
+    return map;
+}
+
 export const listEventFiltered = async({ city, country, page = 1, limit = 1000 } = {}) => {
     const q = {}
     if (city) {
@@ -282,11 +296,11 @@ export const listEventFiltered = async({ city, country, page = 1, limit = 1000 }
         .limit(numericLimit)
         .lean()
 
-    // append ticketsSold like getEventsWithTicketCounts does
-    const itemsWithCounts = await Promise.all(items.map(async (event) => {
-        const ticketsSold = await Ticket.countDocuments({ active: true, event: event._id })
-        const {  ...cleaned } = event
-        return { ...cleaned, ticketsSold }
+    const eventIds = items.map((e) => e._id)
+    const countByEventId = await getTicketCountsByEventIds(eventIds)
+    const itemsWithCounts = items.map((event) => ({
+        ...event,
+        ticketsSold: countByEventId[event._id.toString()] || 0
     }))
 
     return { items: itemsWithCounts, total }
@@ -357,20 +371,12 @@ export const getEventsWithPositioning = async() => {
         // Combine and sort: featured first, then regular
         const allEvents = [...featuredEvents, ...regularEvents];
 
-        // Add ticket counts
-        const eventsWithTicketCounts = await Promise.all(
-            allEvents.map(async (event) => {
-                const ticketsSold = await Ticket.countDocuments({
-                    active: true,
-                    event: event._id
-                });
-
-                return {
-                    ...event,
-                    ticketsSold
-                };
-            })
-        );
+        const eventIds = allEvents.map((e) => e._id)
+        const countByEventId = await getTicketCountsByEventIds(eventIds)
+        const eventsWithTicketCounts = allEvents.map((event) => ({
+            ...event,
+            ticketsSold: countByEventId[event._id.toString()] || 0
+        }));
 
         return eventsWithTicketCounts;
     } catch (error) {

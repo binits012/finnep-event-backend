@@ -57,8 +57,27 @@ export const deleteTicketById = async(id) =>{
     return await model.Ticket.findOneAndDelete({_id:id})
 }
 
-export const getAllTicketByEventId = async(eventId) =>{
-    return await model.Ticket.find().populate({path:'event', select: 'id ticketInfo', match:{_id:eventId}}).populate('ticketFor').select('-qrCode -ics').exec()
+export const getAllTicketByEventId = async(eventId, options = {}) =>{
+    const { skip = 0, limit } = options
+
+    let query = model.Ticket.find({ event: eventId })
+        .populate({path:'event', select: 'id ticketInfo'})
+        .populate('ticketFor')
+        .select('-qrCode -ics')
+
+    if (typeof skip === 'number' && skip > 0) {
+        query = query.skip(skip)
+    }
+
+    if (typeof limit === 'number' && limit > 0) {
+        query = query.limit(limit)
+    }
+
+    return await query.exec()
+}
+
+export const countTicketsByEventId = async(eventId) =>{
+    return await model.Ticket.countDocuments({ event: eventId }).exec()
 }
 
 export const getAllTickets = async() =>{

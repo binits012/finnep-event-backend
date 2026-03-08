@@ -161,6 +161,13 @@ export const getAllTicketByEventId = async(req,res,next) =>{
 
     const token = req.headers.authorization
     const eventId = req.params.id
+    const pageSize = 1000
+
+    // page is 1-based, default to 1
+    const rawPage = parseInt(req.query.page, 10)
+    const page = Number.isNaN(rawPage) || rawPage <= 0 ? 1 : rawPage
+    const skip = (page - 1) * pageSize
+
     await jwtToken.verifyJWT(token, async (err, data) => {
         if (err || data === null) {
             return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({
@@ -183,24 +190,40 @@ export const getAllTicketByEventId = async(req,res,next) =>{
             })
 
             if(!res.headersSent){
-                const ticket = await Ticket.getAllTicketByEventId(event.id).then(async data=>{
-                    if(data !== null || data.length >0){
-                        //https://mongodb.com/blog/post/6-rules-of-thumb-for-mongodb-schema-design
-                        // no denormalization is done on schema therefore populate will show null event id for all the tickets
-                        // therefore filter out the db response with given event Id
+                try{
+                    const [tickets, total] = await Promise.all([
+                        Ticket.getAllTicketByEventId(event.id, { skip, limit: pageSize }),
+                        Ticket.countTicketsByEventId(event.id)
+                    ])
 
-                        data = data.filter(e=>e.event !=null && e.event.id===eventId)
+                    if(!Array.isArray(tickets) || tickets.length === 0){
+                        return res.status(consts.HTTP_STATUS_OK).json({
+                            data: [],
+                            pagination: {
+                                total: 0,
+                                page,
+                                pageSize,
+                                totalPages: 0
+                            }
+                        })
+                    }
 
-                        //email is still in encrypted state
-                        // decrypt them
-                        data = data.map(async e=>{
+                    //https://mongodb.com/blog/post/6-rules-of-thumb-for-mongodb-schema-design
+                    // no denormalization is done on schema therefore populate will show null event id for all the tickets
+                    // therefore filter out the db response with given event Id
 
+                    let data = tickets.filter(e=>e.event !=null && e.event.id===eventId)
+
+                    //email is still in encrypted state
+                    // decrypt them
+                    const mappedTickets = await Promise.all(
+                        data.map(async e=>{
                             const email= await  getEmail(e?.ticketFor?.id)
 
                             let ticketType = e?.event?.ticketInfo.filter(el =>e.type === el.name)?.map(el=>el.name)
 
                             if(ticketType.length == 0) ticketType = e?.event?.ticketInfo.filter(el =>e.type === el.id)?.map(el=>el.name)
-                            const data = {
+                            const ticketData = {
                                 id: e.id,
                                 ticketFor: email,
                                 event:e.event.id, //only event id is relevant here
@@ -214,27 +237,29 @@ export const getAllTicketByEventId = async(req,res,next) =>{
                                 totalPrice: e?.ticketInfo?.get("totalPrice"),
                                 createdAt: e.createdAt
                             }
-                            return data
+                            return ticketData
                         })
-                        const tempData = new Array()
-                        Promise.all(data).then(el=>{
-                            tempData.push(el)
-                        }).then(()=>{
-                            const flattenedArray = tempData.reduce((acc, curr)=>acc.concat(curr),[])
-                            res.status(consts.HTTP_STATUS_OK).json({data:flattenedArray})
-                        }).catch(err=>{
-                            error('error',err)
-                            throw err
-                        })
+                    )
 
-                    }
+                    const totalPages = Math.ceil(total / pageSize)
 
-                }).catch(err=>{
-                    console.log(err)
-                    return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
-                        message: 'Sorry, get all tickets by event failed.', error: appText.INTERNAL_SERVER_ERROR
+                    res.status(consts.HTTP_STATUS_OK).json({
+                        data: mappedTickets,
+                        pagination: {
+                            total,
+                            page,
+                            pageSize,
+                            totalPages
+                        }
                     })
-                })
+                }catch(err){
+                    error('error',err.stack)
+                    if(!res.headersSent){
+                        return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
+                            message: 'Sorry, get all tickets by event failed.', error: appText.INTERNAL_SERVER_ERROR
+                        })
+                    }
+                }
             }
 
         }

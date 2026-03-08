@@ -36,11 +36,10 @@ function isMongoId(id) {
 }
 
 export const getDataForFront = async (req, res, next) => {
-    // Get client IP and start country detection in parallel (non-blocking)
+    // Get client IP (fast), then run country detection in parallel with main data fetch
     const clientIP = await getClientIdentifier(req);
-    const countryPromise = await getCountryFromIP(clientIP); // Don't await - run in parallel
-    console.log("countryPromise", countryPromise)
-    // Fetch all data in parallel
+    const countryPromise = getCountryFromIP(clientIP); // Do not await – runs in parallel with Promise.all below
+    // Fetch all data in parallel (country lookup runs alongside)
     const [photo, notification, event, setting] = await Promise.all([
         Photo.listPhoto(),
         Notification.getAllNotification(),
@@ -80,9 +79,8 @@ export const getDataForFront = async (req, res, next) => {
     // Filter events by active status
     let filteredEvents = event ? event.filter(e => e.active) : [];
 
-    // Await country detection only when needed for filtering (non-blocking)
-    // Always returns a country code (defaults to 'FI' if lookup fails)
-    const detectedCountry = countryPromise;
+    // Await country detection only when needed for filtering
+    const detectedCountry = await countryPromise;
     if (filteredEvents.length > 0) {
         filteredEvents = filteredEvents.filter(e => {
             // Show event if:
@@ -664,14 +662,15 @@ const validateMerchantAndEvent = async (metadata) => {
 };
 
 const calculateExpectedPrice = (ticket, event, quantity, metadata = {}) => {
-    // Convert strings to numbers for calculations
-    const ticketPrice = parseFloat(ticket.price) || 0;
-    const serviceFee = parseFloat(ticket.serviceFee) || 0;
-    const vatRate = parseFloat(ticket.vat) || 0;
+    // Pricing from ticket only; amount comes from frontend — server computes expected from ticket then compares in validatePriceCalculation.
+    const ticketPrice =   parseFloat(ticket.price) ?? 0;
+    const serviceFee =  parseFloat(ticket.serviceFee) ?? 0;
     const entertainmentTax = parseFloat(ticket.entertainmentTax) || 0;
-    const serviceTax = parseFloat(ticket.serviceTax) || 0;
-    const orderFee = parseFloat(ticket.orderFee) || 0;
-    const qty = parseInt(quantity) || 1;
+    const vatRate =  parseFloat(ticket.vat) || entertainmentTax;
+
+    const serviceTax =   parseFloat(ticket.serviceTax) ?? 0;
+    const orderFee =   parseFloat(ticket.orderFee) ?? 0;
+    const qty = parseInt(metadata.quantity || quantity, 10) || 1;
 
     // Check if this is a seat-based purchase
     // 1. Check if placeIds are present in metadata
