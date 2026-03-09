@@ -81,7 +81,7 @@ export const countTicketsByEventId = async(eventId) =>{
 }
 
 export const getAllTickets = async() =>{
-    return await model.Ticket.find().select('-qrCode -ics').exec()
+    return await model.Ticket.find().select('-qrCode -ics').lean().exec()
 }
 
 export const genericSearch = async (filter) =>{

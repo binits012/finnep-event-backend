@@ -301,29 +301,21 @@ export const dashboard = async(req, res, next) =>{
                 })
             }
             try{
-                const eventAll = await event.getAllEventsForDashboard().catch(err=>{
-                    error('error',err)
-                    throw err
-                })
-                const photoAll = await photo.getAllPhotoForDashboard().catch(err=>{
-                    error('error',err)
-                    throw err
-                })
-                const notificationAll = await notification.getAllNotificationForDashboard().catch(err=>{
-                    error('error',err)
-                    throw err
-                })
-                const photoTypes = await photoType.getPhotoTypes().catch(err=>{
-                    error('error',err)
-                    throw err
-
-                })
-                const tickets = await ticket.getAllTickets().catch(err=>{
-                    error('error',err)
-                    throw err
-
-                })
-                const notificationType = await NotificationType.getNotificationTypes()
+                const [
+                    eventAll,
+                    photoAll,
+                    notificationAll,
+                    photoTypes,
+                    tickets,
+                    notificationType
+                ] = await Promise.all([
+                    event.getAllEventsForDashboard(),
+                    photo.getAllPhotoForDashboard(),
+                    notification.getAllNotificationForDashboard(),
+                    photoType.getPhotoTypes(),
+                    ticket.getAllTickets(),
+                    NotificationType.getNotificationTypes()
+                ])
                 const dashboardData = {
                     event:eventAll,
                     photoType:photoTypes,
@@ -335,7 +327,7 @@ export const dashboard = async(req, res, next) =>{
                 }
                 return res.status(consts.HTTP_STATUS_OK).json({ data: dashboardData })
             }catch(err){
-                console.log(err)
+                error('error', err)
                 if(!res.headersSent){
                     return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
                         message: 'Sorry, fetching dashboard data failed', error: appText.DASHBOARD_DATA_FAILED

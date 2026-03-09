@@ -151,7 +151,7 @@ export const getEvents = async(page = 1, limit = 10, filters = {}) =>{
 }
 
 export const getAllEventsForDashboard = async() => {
-    // Get all events without pagination for dashboard
+    // Dashboard only needs a small subset of fields; avoid heavy populate/toObject work.
     const events = await model.Event.find({})
         .populate('merchant')
         .sort({eventDate:-1})
