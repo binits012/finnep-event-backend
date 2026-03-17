@@ -1645,8 +1645,16 @@ export const createPaytrailPaymentApp = async (req, res, next) => {
  */
 export const paytrailAppReturnPage = (req, res) => {
     const stamp = req.query.stamp || req.query.STAMP || '';
-    const transactionId = req.query.transactionId || req.query.CHECKOUT_TRANSACTION_ID || req.query.checkout_transaction_id || '';
-    const status = req.query.status || (req.query.cancel !== undefined ? 'cancel' : 'ok');
+    const transactionId = req.query.transactionId
+        || req.query.CHECKOUT_TRANSACTION_ID
+        || req.query.checkout_transaction_id
+        || req.query['checkout-transaction-id']
+        || req.query['CHECKOUT-TRANSACTION-ID']
+        || '';
+    const status = req.query.status
+        || req.query['checkout-status']
+        || req.query['CHECKOUT-STATUS']
+        || (req.query.cancel !== undefined ? 'cancel' : 'ok');
     const params = new URLSearchParams();
     if (stamp) params.set('stamp', stamp);
     if (transactionId) params.set('transactionId', transactionId);
