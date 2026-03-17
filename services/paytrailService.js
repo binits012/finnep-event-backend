@@ -145,6 +145,8 @@ class PaytrailShopInShopService {
             'checkout-timestamp': new Date().toISOString()
         };
 
+        const successBase = paymentData.redirectSuccessUrl || process.env.PAYTRAIL_CALLBACK_SUCCESS_URL;
+        const cancelBase = paymentData.redirectCancelUrl || process.env.PAYTRAIL_CALLBACK_CANCEL_URL;
         const body = {
             stamp: stamp, // Stamp encodes merchant ID: M{merchantId}-E{eventId}-T{ticketId}-{timestamp}
             reference: reference,
@@ -154,8 +156,8 @@ class PaytrailShopInShopService {
             items: items, // No sub-merchant or commission fields (single account mode)
             customer: customer,
             redirectUrls: {
-                success: `${process.env.PAYTRAIL_CALLBACK_SUCCESS_URL}?payment=paytrail&stamp=${stamp}`,
-                cancel: `${process.env.PAYTRAIL_CALLBACK_CANCEL_URL}?payment=paytrail&stamp=${stamp}`
+                success: `${successBase}?payment=paytrail&stamp=${stamp}`,
+                cancel: `${cancelBase}?payment=paytrail&stamp=${stamp}`
             },
             callbackUrls: {
                 success: `${process.env.PAYTRAIL_WEBHOOK_URL}/success`,
@@ -232,6 +234,8 @@ class PaytrailShopInShopService {
             'checkout-timestamp': new Date().toISOString()
         };
 
+        const successBase = paymentData.redirectSuccessUrl || process.env.PAYTRAIL_CALLBACK_SUCCESS_URL;
+        const cancelBase = paymentData.redirectCancelUrl || process.env.PAYTRAIL_CALLBACK_CANCEL_URL;
         const body = {
             stamp: stamp,
             reference: reference,
@@ -250,8 +254,8 @@ class PaytrailShopInShopService {
             })),
             customer: customer,
             redirectUrls: {
-                success: `${process.env.PAYTRAIL_CALLBACK_SUCCESS_URL}?payment=paytrail&stamp=${stamp}`,
-                cancel: `${process.env.PAYTRAIL_CALLBACK_CANCEL_URL}?payment=paytrail&stamp=${stamp}`
+                success: `${successBase}?payment=paytrail&stamp=${stamp}`,
+                cancel: `${cancelBase}?payment=paytrail&stamp=${stamp}`
             },
             callbackUrls: {
                 success: `${process.env.PAYTRAIL_WEBHOOK_URL}/success`,

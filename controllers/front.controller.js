@@ -1343,7 +1343,7 @@ export const createPaymentIntent = async (req, res, next) => {
     }
 }
 
-export const createPaytrailPayment = async (req, res, next) => {
+const _createPaytrailPaymentInternal = async (req, res, next, { redirectSuccessUrl, redirectCancelUrl } = {}) => {
     try {
         // Security Layer 1: Request size validation
         validateRequestSize(req.body);
@@ -1520,32 +1520,28 @@ export const createPaytrailPayment = async (req, res, next) => {
         };
 
         let paytrailPayment;
+        const paymentOptions = {
+            amount: amount,
+            currency: currency.toUpperCase(),
+            merchantId: metadata.merchantId,
+            eventId: metadata.eventId,
+            ticketId: metadata.ticketId,
+            email: metadata.email,
+            items: items,
+            customer: customer
+        };
+        if (redirectSuccessUrl) paymentOptions.redirectSuccessUrl = redirectSuccessUrl;
+        if (redirectCancelUrl) paymentOptions.redirectCancelUrl = redirectCancelUrl;
         if (isShopInShopEnabled) {
-            // Use shop-in-shop payment method
             paytrailPayment = await paytrailService.createShopInShopPayment({
-                amount: amount,
-                currency: currency.toUpperCase(),
-                merchantId: metadata.merchantId,
-                eventId: metadata.eventId,
-                ticketId: metadata.ticketId,
-                email: metadata.email,
-                items: items,
-                customer: customer,
+                ...paymentOptions,
                 subMerchantId: merchant.paytrailSubMerchantId,
                 commissionRate: merchant.paytrailShopInShopData?.commissionRate
                     || parseFloat(process.env.PAYTRAIL_PLATFORM_COMMISSION || '3')
             });
         } else {
-            // Single account mode: use platform account, no sub-merchant needed
             paytrailPayment = await paytrailService.createSingleAccountPayment({
-                amount: amount,
-                currency: currency.toUpperCase(),
-                merchantId: metadata.merchantId,
-                eventId: metadata.eventId,
-                ticketId: metadata.ticketId,
-                email: metadata.email,
-                items: items,
-                customer: customer,
+                ...paymentOptions,
                 commissionRate: merchant.paytrailShopInShopData?.commissionRate
                     || parseFloat(process.env.PAYTRAIL_PLATFORM_COMMISSION || '3')
             });
@@ -1622,6 +1618,45 @@ export const createPaytrailPayment = async (req, res, next) => {
         });
     }
 }
+
+// Web/default flow (no app deep-link redirect)
+export const createPaytrailPayment = async (req, res, next) => {
+    return _createPaytrailPaymentInternal(req, res, next);
+};
+
+// Mobile app flow: redirect back via PAYTRAIL_APP_RETURN_URL (HTML page then deep-links into the app)
+export const createPaytrailPaymentApp = async (req, res, next) => {
+    const appReturnUrl = process.env.PAYTRAIL_APP_RETURN_URL || '';
+    if (!appReturnUrl || !appReturnUrl.startsWith('https://')) {
+        return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            error: 'PAYTRAIL_APP_RETURN_URL missing or not https://'
+        });
+    }
+    return _createPaytrailPaymentInternal(req, res, next, {
+        redirectSuccessUrl: appReturnUrl,
+        redirectCancelUrl: appReturnUrl
+    });
+};
+
+/**
+ * GET Paytrail app return page. Paytrail redirects here after payment (success or cancel).
+ * This page redirects the browser to the mobile app via okazzo:// so the app can verify and show success.
+ * Set PAYTRAIL_APP_RETURN_URL to this route (e.g. https://test.okazzo.eu/front/paytrail-app-return).
+ */
+export const paytrailAppReturnPage = (req, res) => {
+    const stamp = req.query.stamp || req.query.STAMP || '';
+    const transactionId = req.query.transactionId || req.query.CHECKOUT_TRANSACTION_ID || req.query.checkout_transaction_id || '';
+    const status = req.query.status || (req.query.cancel !== undefined ? 'cancel' : 'ok');
+    const params = new URLSearchParams();
+    if (stamp) params.set('stamp', stamp);
+    if (transactionId) params.set('transactionId', transactionId);
+    params.set('status', status);
+    const deepLink = `okazzo://paytrail-return?${params.toString()}`;
+    const escaped = deepLink.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${escaped}"></head><body><p>Returning to app…</p><p><a href="${escaped}">Open Okazzo app</a></p></body></html>`;
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+};
 
 // Handle Paytrail payment failure/cancellation
 // Releases seat reservations and cleans up payment data
