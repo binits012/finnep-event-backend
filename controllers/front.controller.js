@@ -614,10 +614,12 @@ const validateMerchantAndEvent = async (metadata) => {
         // For pricing_configuration mode, create a dummy ticket object with pricing from metadata
         // NOTE: Frontend sends 'basePrice' not 'price', so we need to check both
         if (isPricingConfiguration) {
+            // Prefer entertainmentTax over vat for pricing (align with Flutter and web)
+            const effectiveTax = parseFloat(metadata.entertainmentTax) || parseFloat(metadata.vatRate) || parseFloat(metadata.vat) || 0;
             const dummyTicket = {
                 price: parseFloat(metadata.basePrice) || parseFloat(metadata.price) || 0,
                 serviceFee: parseFloat(metadata.serviceFee) || 0,
-                vat: parseFloat(metadata.vatRate) || parseFloat(metadata.vat) || 0,
+                vat: effectiveTax,
                 entertainmentTax: parseFloat(metadata.entertainmentTax) || 0,
                 serviceTax: parseFloat(metadata.serviceTax) || 0,
                 orderFee: parseFloat(metadata.orderFee) || 0
@@ -666,7 +668,8 @@ const calculateExpectedPrice = (ticket, event, quantity, metadata = {}) => {
     const ticketPrice =   parseFloat(ticket.price) ?? 0;
     const serviceFee =  parseFloat(ticket.serviceFee) ?? 0;
     const entertainmentTax = parseFloat(ticket.entertainmentTax) || 0;
-    const vatRate =  parseFloat(ticket.vat) || entertainmentTax;
+    // Prefer entertainmentTax over vat for price calculation (Stripe + Paytrail)
+    const vatRate = entertainmentTax || parseFloat(ticket.vat) || 0;
 
     const serviceTax =   parseFloat(ticket.serviceTax) ?? 0;
     const orderFee =   parseFloat(ticket.orderFee) ?? 0;
