@@ -392,12 +392,85 @@ export const getTicketById = async (req, res, next) => {
                 }
 
                 // Sanitize ticketInfo - only include safe, display-related fields
-                const sanitizedTicketInfo = ticket.ticketInfo ? {
-                    ticketName: ticket.ticketInfo.ticketName || null,
-                    quantity: ticket.ticketInfo.quantity || null,
-                    price: ticket.ticketInfo.price || null,
-                    currency: ticket.ticketInfo.currency || null,
-                    purchaseDate: ticket.ticketInfo.purchaseDate || null
+                // `ticket.ticketInfo` is stored as a Mongoose Map, so normalize it to a plain object first.
+                let ticketInfoPlain = null;
+                if (ticket.ticketInfo) {
+                    if (ticket.ticketInfo instanceof Map) {
+                        ticketInfoPlain = Object.fromEntries(ticket.ticketInfo.entries());
+                    } else if (typeof ticket.ticketInfo === 'object') {
+                        ticketInfoPlain = ticket.ticketInfo;
+                    }
+                }
+
+                const paymentCurrency = process.env.PAYMENT_CURRENCY || null;
+                const derivedPurchaseDate =
+                    ticketInfoPlain?.purchaseDate ||
+                    (ticket.createdAt ? new Date(ticket.createdAt).toISOString() : null);
+
+                // Seating: for seated events, `placeIds` may be stored directly or under `seats: [{ placeId }]`.
+                let placeIds = [];
+                if (Array.isArray(ticketInfoPlain?.placeIds)) {
+                    placeIds = ticketInfoPlain.placeIds;
+                } else if (Array.isArray(ticketInfoPlain?.seats)) {
+                    placeIds = ticketInfoPlain.seats
+                        .map(s => s?.placeId)
+                        .filter(Boolean);
+                }
+
+                // Seat ticket breakdown (optional; used by the mobile UI).
+                // Keep it display-focused: seat ticket name + pricing.
+                let seatTickets = null;
+                if (Array.isArray(ticketInfoPlain?.seatTickets)) {
+                    seatTickets = ticketInfoPlain.seatTickets
+                        .map(st => {
+                            const pricing = st?.pricing && typeof st.pricing === 'object' ? st.pricing : null;
+                            return {
+                                placeId: st?.placeId ?? null,
+                                ticketName: st?.ticketName ?? null,
+                                pricing: pricing
+                                    ? {
+                                          basePrice: pricing.basePrice ?? pricing.unitPrice ?? null,
+                                          tax: pricing.tax ?? pricing.vat ?? null,
+                                          serviceFee: pricing.serviceFee ?? null,
+                                          serviceTax: pricing.serviceTax ?? null,
+                                          orderFee: pricing.orderFee ?? null,
+                                          currency: pricing.currency ?? null
+                                      }
+                                    : null
+                            };
+                        })
+                        .filter(x => x.ticketName || x.placeId || x.pricing);
+                }
+
+                const sanitizedTicketInfo = ticketInfoPlain ? {
+                    // Prefer ticketInfo.ticketName; fall back to the ticket's `type` (often the display name).
+                    ticketName: ticketInfoPlain.ticketName || ticket.type || ticketInfoPlain.ticketType || null,
+                    quantity: ticketInfoPlain.quantity ?? ticketInfoPlain.qty ?? null,
+                    // Some flows store `price`, others store `basePrice` / `totalBasePrice`.
+                    // Keep it flexible so free/unseated/priced-seat events still show something.
+                    price: ticketInfoPlain.price ??
+                        ticketInfoPlain.unitPrice ??
+                        ticketInfoPlain.totalPrice ??
+                        ticketInfoPlain.basePrice ??
+                        ticketInfoPlain.totalBasePrice ??
+                        null,
+                    // Service + totals are optional; include them when available so clients can render a breakdown.
+                    serviceFee: ticketInfoPlain.serviceFee ??
+                        ticketInfoPlain.serviceFeeTotal ??
+                        ticketInfoPlain.totalServiceFee ??
+                        ticketInfoPlain.ticketServiceFee ??
+                        null,
+                    totalAmount: ticketInfoPlain.totalAmount ??
+                        ticketInfoPlain.total ??
+                        ticketInfoPlain.amount ??
+                        ticketInfoPlain.totalPrice ??
+                        ticketInfoPlain.totalPaid ??
+                        ticketInfoPlain.grandTotal ??
+                        // Last resort: if we don't have the grand total, show the best-available price.
+                        (ticketInfoPlain.price ?? ticketInfoPlain.basePrice ?? null),
+                    currency: ticketInfoPlain.currency || paymentCurrency,
+                    purchaseDate: derivedPurchaseDate,
+                    ...(seatTickets ? { seatTickets } : {})
                     // Exclude sensitive fields: paymentIntentId, email, merchantId, eventId, ticketId, eventName
                 } : null;
 
@@ -416,7 +489,8 @@ export const getTicketById = async (req, res, next) => {
                         },
                         type: ticket.type,
                         otp: ticket.otp,
-                        ticketInfo: sanitizedTicketInfo,
+                        ticketInfo: sanitizedTicketInfo, 
+                        ...(placeIds && placeIds.length > 0 ? { placeIds } : {}),
                         qrCode: qrCodeBase64,
                         ics: icsContent,
                         createdAt: ticket.createdAt,
