@@ -24,16 +24,41 @@ import busboy from 'busboy'
 import { SETTINGS_CACHE_KEY } from '../const.js'
 import { manifestUpdateService } from '../src/services/manifestUpdateService.js'
 import { seatReservationService } from '../src/services/seatReservationService.js'
+import { resolveSoldPlaceIdsForPayment } from '../src/services/paymentSeatResolutionService.js'
 import * as seatController from './seat.controller.js'
 import { EventManifest, Manifest, PlatformMarketingConsent, Survey, SurveyResponse } from '../model/mongoModel.js';
 import { Venue } from '../model/mongoModel.js'
 import { getPresalePayload, consumePresaleToken } from '../util/presaleToken.js'
 import { getSurveyTokenPayload, consumeSurveyToken } from '../util/surveyToken.js'
 
+const resolveSectionMode = (section) => {
+	if (!section) return 'seat';
+	// Hard guard: Seating sections are always seat-based.
+	if (section.sectionType === 'Seating') return 'seat';
+	if (section.selectionMode) return section.selectionMode;
+	return 'area';
+};
+
+const placeHasSeatCoordinates = (place) => {
+	if (!place) return false;
+	return (
+		place.row !== null && place.row !== undefined && String(place.row).trim() !== '' &&
+		place.seat !== null && place.seat !== undefined && String(place.seat).trim() !== ''
+	);
+};
+
 /** True if id looks like a MongoDB ObjectId (24 hex chars); then survey is loaded by _id. */
 function isMongoId(id) {
 	return typeof id === 'string' && id.length === 24 && /^[a-fA-F0-9]{24}$/.test(id);
 }
+
+const isEventCurrentlyValid = (event, now = new Date()) => {
+    if (!event) return false;
+    const endRaw = event.event_end_date || event.eventEndDate || event.eventDate;
+    const endDate = endRaw ? new Date(endRaw) : null;
+    if (!endDate || Number.isNaN(endDate.getTime())) return false;
+    return endDate >= now;
+};
 
 export const getDataForFront = async (req, res, next) => {
     // Get client IP (fast), then run country detection in parallel with main data fetch
@@ -76,8 +101,9 @@ export const getDataForFront = async (req, res, next) => {
         return el
     }));
 
-    // Filter events by active status
-    let filteredEvents = event ? event.filter(e => e.active) : [];
+    // Public visibility should follow validity window, not legacy active/status flags.
+    const now = new Date();
+    let filteredEvents = event ? event.filter(e => isEventCurrentlyValid(e, now)) : [];
 
     // Await country detection only when needed for filtering
     const detectedCountry = await countryPromise;
@@ -86,7 +112,7 @@ export const getDataForFront = async (req, res, next) => {
             // Show event if:
             // 1. Event has no country set (available to all)
             // 2. Event country matches detected country
-            return !e.country || e.country === detectedCountry;
+            return !e.country || String(e.country).trim().toLowerCase() === String(detectedCountry || '').trim().toLowerCase();
         });
     }
 
@@ -534,6 +560,9 @@ const validatePaymentRequest = (reqBody) => {
     }
     if (metadata.placeIds) {
         sanitizedMetadata.placeIds = metadata.placeIds;
+    }
+    if (metadata.sectionSelections) {
+        sanitizedMetadata.sectionSelections = metadata.sectionSelections;
     }
 
     // Preserve pricing fields for pricing_configuration model
@@ -1412,6 +1441,23 @@ const _createPaytrailPaymentInternal = async (req, res, next, { redirectSuccessU
             }
         }
 
+        if (validatedData.metadata.sectionSelections) {
+            if (typeof validatedData.metadata.sectionSelections === 'string') {
+                try {
+                    parsedMetadata.sectionSelections = JSON.parse(validatedData.metadata.sectionSelections);
+                } catch (e) {
+                    parsedMetadata.sectionSelections = validatedData.metadata.sectionSelections;
+                }
+            }
+            if (typeof parsedMetadata.sectionSelections === 'string' && parsedMetadata.sectionSelections.trim().startsWith('[')) {
+                try {
+                    parsedMetadata.sectionSelections = JSON.parse(parsedMetadata.sectionSelections);
+                } catch (e) {
+                    // Keep as is
+                }
+            }
+        }
+
         console.log('[createPaytrailPayment] Parsed metadata:', {
             hasPlaceIds: !!parsedMetadata.placeIds,
             placeIdsType: typeof parsedMetadata.placeIds,
@@ -1577,6 +1623,7 @@ const _createPaytrailPaymentInternal = async (req, res, next, { redirectSuccessU
             quantity: parseInt(parsedMetadata.quantity),
             placeIds: Array.isArray(parsedMetadata.placeIds) ? parsedMetadata.placeIds : (parsedMetadata.placeIds || []),
             seatTickets: Array.isArray(parsedMetadata.seatTickets) ? parsedMetadata.seatTickets : (parsedMetadata.seatTickets || []),
+            sectionSelections: Array.isArray(parsedMetadata.sectionSelections) ? parsedMetadata.sectionSelections : (parsedMetadata.sectionSelections || []),
             seats: Array.isArray(parsedMetadata.placeIds) ? parsedMetadata.placeIds : (parsedMetadata.placeIds || []),
             // Payment mode
             isShopInShop: isShopInShopEnabled,
@@ -2661,6 +2708,18 @@ export const handlePaymentSuccess = async (req, res, next) => {
             finalSeatTickets = [];
         }
 
+        let finalSectionSelections = mergedMetadata.sectionSelections || [];
+        if (typeof finalSectionSelections === 'string') {
+            try {
+                finalSectionSelections = JSON.parse(finalSectionSelections);
+            } catch (e) {
+                finalSectionSelections = [];
+            }
+        }
+        if (!Array.isArray(finalSectionSelections)) {
+            finalSectionSelections = [];
+        }
+
         const sanitizedMetadata = {
             eventId: sanitizeString(mergedMetadata.eventId, 50),
             ticketId: mergedMetadata.ticketId ? sanitizeString(mergedMetadata.ticketId, 50) : null, // Allow null for pricing_configuration
@@ -2673,6 +2732,7 @@ export const handlePaymentSuccess = async (req, res, next) => {
             marketingOptIn: sanitizeBoolean(mergedMetadata?.marketingOptIn || false),
             placeIds: finalPlaceIds, // Array of place IDs for seat-based events
             seatTickets: finalSeatTickets, // Array of { placeId, ticketId, ticketName } for seat-ticket mapping
+            sectionSelections: finalSectionSelections,
             // Additional metadata fields for ticket record - use merged metadata
             fullName: mergedMetadata.fullName ? sanitizeString(mergedMetadata.fullName, 200) : null,
             basePrice: mergedMetadata.basePrice ? sanitizeString(mergedMetadata.basePrice, 20) : null,
@@ -2764,6 +2824,41 @@ export const handlePaymentSuccess = async (req, res, next) => {
             totalBasePrice: sanitizedMetadata.totalBasePrice !== undefined ? sanitizedMetadata.totalBasePrice : null,
             totalServiceFee: sanitizedMetadata.totalServiceFee !== undefined ? sanitizedMetadata.totalServiceFee : null
         };
+
+        // Optional recurring/season support:
+        // If the selected ticket type config includes `scanCount`, override `ticketInfo.quantity`
+        // (this becomes the EMS scan allowance via `ticket_info.quantity`).
+        // If `scanCount` is missing/unparsable, keep existing behavior (use order quantity).
+        try {
+            const ticketTypeId = sanitizedMetadata.ticketId;
+            if (ticketTypeId) {
+                const ticketTypeConfig = Array.isArray(event?.ticketInfo)
+                    ? event.ticketInfo.find(t => String(t?._id ?? t?.id ?? '') === String(ticketTypeId))
+                    : null;
+
+                const scanCountRaw = ticketTypeConfig?.scanCount ?? ticketTypeConfig?.scan_count;
+                const scanCount = scanCountRaw != null ? parseInt(scanCountRaw, 10) : null;
+
+                if (scanCount != null && !Number.isNaN(scanCount) && scanCount > 0) {
+                    const quantityNum = parseInt(sanitizedMetadata.quantity, 10);
+                    // ScanCount passes represent a single personal pass/QR.
+                    // Standard rule: enforce quantity=1 for these tickets.
+                    if (Number.isNaN(quantityNum) || quantityNum !== 1) {
+                        return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                            success: false,
+                            error: 'Invalid quantity for scanCount ticket (must be 1)'
+                        });
+                    }
+
+                    // No multiplication by order quantity (scanCount is per QR/ticket).
+                    ticketInfo.quantity = scanCount.toString();
+                }
+            }
+        } catch (e) {
+            // Non-fatal: if scanCount override fails, keep original ticketInfo.quantity.
+            console.warn('[handlePaymentSuccess] scanCount override failed:', e);
+        }
+
         // Add venue information if available
         if (event && event.venue) {
             ticketInfo.venue = {
@@ -2777,6 +2872,9 @@ export const handlePaymentSuccess = async (req, res, next) => {
         // Add seat-ticket mapping if available
         if (sanitizedMetadata.seatTickets && sanitizedMetadata.seatTickets.length > 0) {
             ticketInfo.seatTickets = sanitizedMetadata.seatTickets;
+        }
+        if (sanitizedMetadata.sectionSelections && sanitizedMetadata.sectionSelections.length > 0) {
+            ticketInfo.sectionSelections = sanitizedMetadata.sectionSelections;
         }
 
         // For seat-based events, store basic seat information
@@ -2883,28 +2981,51 @@ export const handlePaymentSuccess = async (req, res, next) => {
         });
 
         // Handle seat marking for seat-based events
-        if (event && event.venue && event.venue.venueId && sanitizedMetadata.placeIds && sanitizedMetadata.placeIds.length > 0) {
+        if (event && event.venue && event.venue.venueId) {
             try {
+                const { placeIds: placeIdsToMarkSold, areaSoldIncrements, unresolvedSelections } = await resolveSoldPlaceIdsForPayment({
+                    eventId: sanitizedMetadata.eventId,
+                    sessionId: sanitizedMetadata.sessionId,
+                    placeIds: sanitizedMetadata.placeIds,
+                    sectionSelections: sanitizedMetadata.sectionSelections
+                });
+
+                if (!placeIdsToMarkSold || placeIdsToMarkSold.length === 0) {
+                    info(`[handlePaymentSuccess] No placeIds resolved for sold update (event ${sanitizedMetadata.eventId})`);
+                }
+                if (unresolvedSelections.length > 0) {
+                    error('[handlePaymentSuccess] Could not fully resolve some sectionSelections:', unresolvedSelections);
+                }
+
                 // Find EventManifest by eventId (more reliable than using lockedManifestId)
                 const eventMongoId = String(event._id);
                 const eventManifest = await EventManifest.findOne({ eventId: eventMongoId });
 
-                if (eventManifest) {
+                if (eventManifest && areaSoldIncrements.length > 0) {
+                    await manifestUpdateService.markAreaSelectionsSold(
+                        eventManifest._id.toString(),
+                        areaSoldIncrements
+                    );
+                }
+
+                if (eventManifest && placeIdsToMarkSold.length > 0) {
                     // Mark seats as sold in EventManifest
                     await manifestUpdateService.markSeatsAsSold(
                         eventManifest._id.toString(),
-                        sanitizedMetadata.placeIds
+                        placeIdsToMarkSold
                     );
 
                     // Release Redis reservations
                     await seatReservationService.releaseReservations(
                         sanitizedMetadata.eventId,
-                        sanitizedMetadata.placeIds
+                        placeIdsToMarkSold
                     );
 
-                    info(`Seats marked as sold for event ${sanitizedMetadata.eventId}: ${sanitizedMetadata.placeIds.length} seats`);
+                    info(`Seats marked as sold for event ${sanitizedMetadata.eventId}: ${placeIdsToMarkSold.length} seats`);
                 } else {
-                    error(`EventManifest not found for event ${sanitizedMetadata.eventId}. Cannot mark seats as sold.`);
+                    if (!eventManifest) {
+                        error(`EventManifest not found for event ${sanitizedMetadata.eventId}. Cannot mark seats as sold.`);
+                    }
                 }
             } catch (seatError) {
                 error(`Error marking seats as sold for event ${sanitizedMetadata.eventId}:`, seatError);
@@ -2953,6 +3074,11 @@ export const handlePaymentSuccess = async (req, res, next) => {
         // Publish ticket creation event to notify other systems
         try {
             console.log('sanitizedMetadata', sanitizedMetadata, metadata);
+            // Validity enforcement for recurring/season tickets:
+            // store the ticket expiry as `validUntil` (FEB) so EMS can map it to `valid_until` (Postgres).
+            if (event?.event_end_date) {
+                ticket.validUntil = new Date(event.event_end_date);
+            }
             await publishTicketCreationEvent(ticket, event, sanitizedMetadata, paymentIntentId);
         } catch (publishError) {
             console.error('Failed to publish ticket creation event:', publishError);
@@ -3356,7 +3482,7 @@ export const handleFreeEventRegistration = async (req, res, next) => {
         // Security Layer 1: Request size validation
         validateRequestSize(req.body);
 
-        const { email, quantity, eventId, ticketId, merchantId, externalMerchantId, eventName, ticketName, marketingOptIn } = req.body;
+        const { email, quantity, eventId, ticketId, merchantId, externalMerchantId, eventName, ticketName, marketingOptIn, sectionSelections } = req.body;
 
         // Security Layer 2: Validate required fields
         if (!email || !quantity || !eventId || !merchantId || !externalMerchantId || !eventName || !ticketName) {
@@ -3373,7 +3499,8 @@ export const handleFreeEventRegistration = async (req, res, next) => {
             externalMerchantId: sanitizeString(externalMerchantId, 50),
             eventName: sanitizeString(eventName, 200),
             ticketName: sanitizeString(ticketName, 200),
-            marketingOptIn: sanitizeBoolean(marketingOptIn || false)
+            marketingOptIn: sanitizeBoolean(marketingOptIn || false),
+            sectionSelections: Array.isArray(sectionSelections) ? sectionSelections : []
         };
 
         // Validate email format
@@ -3472,6 +3599,21 @@ export const handleFreeEventRegistration = async (req, res, next) => {
             ticketId: sanitizedData.ticketId || null,
             isFree: true
         };
+        if (Array.isArray(sanitizedData.sectionSelections) && sanitizedData.sectionSelections.length > 0) {
+            ticketInfo.sectionSelections = sanitizedData.sectionSelections;
+        }
+
+        // Optional recurring/season support for free events:
+        // If the selected ticket type config includes `scanCount`, override `ticketInfo.quantity`.
+        try {
+            const scanCountRaw = selectedTicket?.scanCount ?? selectedTicket?.scan_count;
+            const scanCount = scanCountRaw != null ? parseInt(scanCountRaw, 10) : null;
+            if (scanCount != null && !Number.isNaN(scanCount) && scanCount > 0) {
+                ticketInfo.quantity = scanCount.toString();
+            }
+        } catch (e) {
+            console.warn('[handleFreeEventRegistration] scanCount override failed:', e);
+        }
 
         // Get or create crypto hash for email (using efficient search)
         const emailCrypto = await hash.getCryptoBySearchIndex(sanitizedData.email, 'email');
@@ -3530,6 +3672,11 @@ export const handleFreeEventRegistration = async (req, res, next) => {
 
         // Publish ticket creation event to notify other systems
         try {
+            // Validity enforcement for recurring/season tickets:
+            // store the ticket expiry as `validUntil` (FEB) so EMS can map it to `valid_until` (Postgres).
+            if (event?.event_end_date) {
+                ticket.validUntil = new Date(event.event_end_date);
+            }
             await publishTicketCreationEvent(ticket, event, sanitizedData, null); // null for paymentIntentId since it's free
         } catch (publishError) {
             console.error('Failed to publish ticket creation event:', publishError);
@@ -3792,9 +3939,20 @@ export const getEventSeatsPublic = async (req, res, next) => {
 		const reservedPlaceIds = Array.from(reservedMap.keys());
 
 		// 6. Format sections from venue (contains polygon and spacingConfig)
-		const formattedSections = (venue.sections || []).map(section => ({
+		const venuePlaces = Array.isArray(venueManifest.places) ? venueManifest.places : [];
+		const formattedSections = (venue.sections || []).map(section => {
+			const sectionId = section.id || section._id?.toString() || section.name;
+			const sectionPlaces = venuePlaces.filter((p) => p.section === section.name || p.section === sectionId);
+			const hasSeatLikePlaces = sectionPlaces.some(placeHasSeatCoordinates);
+			// Runtime correction for stale manifests: if section has real row/seat places,
+			// treat it as seat mode regardless of persisted selectionMode.
+			const correctedSelectionMode = hasSeatLikePlaces ? 'seat' : resolveSectionMode(section);
+			return {
 			id: section.id || section._id?.toString() || section.name,
 			name: section.name,
+			sectionType: section.sectionType || 'Seating',
+			selectionMode: correctedSelectionMode,
+			capacity: section.capacity || 0,
 			color: section.color || '#2196F3',
 			bounds: section.bounds || null,
 			// Clean polygon points to remove MongoDB _id fields
@@ -3803,7 +3961,31 @@ export const getEventSeatsPublic = async (req, res, next) => {
 				y: point.y
 			})) : null,
 			spacingConfig: section.spacingConfig || null
-		}));
+		};
+		});
+
+		const soldSet = new Set(encodedManifest.availability?.sold || []);
+		const reservedSet = new Set(reservedPlaceIds);
+		const areaSections = formattedSections
+			.filter(section => section.selectionMode === 'area')
+			.map((section) => {
+				const sectionPlaces = venuePlaces.filter((p) => p.section === section.name || p.section === section.id);
+				const soldCount = sectionPlaces.filter((p) => soldSet.has(p.placeId)).length;
+				const reservedCount = sectionPlaces.filter((p) => reservedSet.has(p.placeId)).length;
+				const inferredCapacity = sectionPlaces.length;
+				const capacity = Number(section.capacity || inferredCapacity || 0);
+				return {
+					id: section.id,
+					name: section.name,
+					sectionType: section.sectionType || 'Custom',
+					selectionMode: 'area',
+					capacity,
+					soldCount,
+					reservedCount,
+					availableCount: Math.max(0, capacity - soldCount - reservedCount),
+					color: section.color || '#2196F3'
+				};
+			});
 
 		// 7. Return EventManifest + Venue Manifest data (everything in one response)
 		// With .lean(), encodedManifest and venue are already plain objects (no .toObject() needed)
@@ -3829,6 +4011,7 @@ export const getEventSeatsPublic = async (req, res, next) => {
 			// Note: places array removed - frontend decodes everything from placeIds
 			backgroundSvg: venue.backgroundSvg || null,
 			sections: formattedSections, // Use venue.sections with polygon and spacingConfig
+			areaSections,
 
 			// Metadata
 			venue: {
@@ -3851,14 +4034,9 @@ export const getEventSeatsPublic = async (req, res, next) => {
 export const reserveSeatsPublic = async (req, res, next) => {
 	try {
 		const eventId = req.params.eventId;
-		const { placeIds, sessionId, email } = req.body;
+		const { placeIds, sectionSelections, sessionId, email } = req.body;
 
-		if (!placeIds || !Array.isArray(placeIds) || placeIds.length === 0) {
-			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
-				message: 'placeIds array is required',
-				error: 'INVALID_DATA'
-			});
-		}
+		let resolvedPlaceIds = Array.isArray(placeIds) ? [...placeIds] : [];
 
 		if (!sessionId) {
 			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -3873,6 +4051,55 @@ export const reserveSeatsPublic = async (req, res, next) => {
 				error: 'INVALID_EMAIL'
 			});
 		}
+		const normalizedEmail = email.trim().toLowerCase();
+
+		if ((resolvedPlaceIds.length === 0) && Array.isArray(sectionSelections) && sectionSelections.length > 0) {
+			const event = await Event.getEventById(eventId);
+			if (!event) {
+				return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+					message: 'Event not found',
+					error: RESOURCE_NOT_FOUND
+				});
+			}
+			const eventMongoId = String(event._id);
+			const encodedManifest = await EventManifest.findOne({ eventId: eventMongoId }).lean();
+			const venueManifest = await Manifest.findOne({ venue: event.venue?.venueId }).sort({ createdAt: -1 }).lean();
+			const soldSet = new Set(encodedManifest?.availability?.sold || []);
+			const reservedMap = await seatReservationService.getReservedSeats(eventId);
+			const reservedSet = new Set(reservedMap.keys());
+			const venueSections = Array.isArray(event?.venue?.sections) ? event.venue.sections : [];
+			const sectionsById = new Map(venueSections.map((s) => [String(s.id || s._id || s.name), s]));
+			const places = Array.isArray(venueManifest?.places) ? venueManifest.places : [];
+
+			for (const selection of sectionSelections) {
+				const sectionId = String(selection.sectionId || '');
+				const requestedSectionName = typeof selection.sectionName === 'string' ? selection.sectionName : null;
+				const quantity = Number(selection.quantity || 0);
+				if (!sectionId || quantity <= 0) continue;
+				const section = sectionsById.get(sectionId);
+				const sectionName = requestedSectionName || section?.name;
+				// Best-effort match: places may reference section by `name` or by `id`.
+				const sectionPlaces = places.filter((p) => {
+					if (!p?.section) return false;
+					if (sectionName && p.section === sectionName) return true;
+					return p.section === sectionId;
+				});
+				const hasSeatLikePlaces = sectionPlaces.some(placeHasSeatCoordinates);
+				// If we couldn't resolve the section metadata (missing in venue manifest),
+				// fall back to seat/area inference based purely on whether the places look seat-like.
+				const selectionMode = hasSeatLikePlaces ? 'seat' : (section ? resolveSectionMode(section) : 'area');
+				if (selectionMode !== 'area') continue;
+				const candidates = sectionPlaces.filter((p) => !soldSet.has(p.placeId) && !reservedSet.has(p.placeId));
+				resolvedPlaceIds.push(...candidates.slice(0, quantity).map((p) => p.placeId));
+			}
+		}
+
+		if (!resolvedPlaceIds || resolvedPlaceIds.length === 0) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+				message: 'placeIds or sectionSelections are required',
+				error: 'INVALID_DATA'
+			});
+		}
 
 		// Validate sessionId format (UUID)
 		const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -3884,7 +4111,7 @@ export const reserveSeatsPublic = async (req, res, next) => {
 		}
 
 		// Check if seats are available (pass email to allow same-user re-reservation)
-		const availability = await seatReservationService.checkAvailability(eventId, placeIds, sessionId, email);
+		const availability = await seatReservationService.checkAvailability(eventId, resolvedPlaceIds, sessionId, normalizedEmail);
 		if (availability.reserved.length > 0) {
 			return res.status(consts.HTTP_STATUS_CONFLICT).json({
 				message: 'Some seats are already reserved',
@@ -3897,7 +4124,7 @@ export const reserveSeatsPublic = async (req, res, next) => {
 		}
 
 		// Reserve seats
-		const result = await seatReservationService.reserveSeats(eventId, placeIds, sessionId, email);
+		const result = await seatReservationService.reserveSeats(eventId, resolvedPlaceIds, sessionId, normalizedEmail);
 
 		if (result.failed.length > 0) {
 			return res.status(consts.HTTP_STATUS_CONFLICT).json({
@@ -3909,7 +4136,11 @@ export const reserveSeatsPublic = async (req, res, next) => {
 
 		return res.status(consts.HTTP_STATUS_OK).json({
 			message: 'Seats reserved successfully',
-			data: result
+			data: {
+				...result,
+				resolvedPlaceIds,
+				sectionSelections: sectionSelections || []
+			}
 		});
 	} catch (err) {
 		error('Error reserving seats (public):', err);
@@ -3945,6 +4176,7 @@ export const releaseSeatsPublic = async (req, res, next) => {
 				error: 'INVALID_EMAIL'
 			});
 		}
+		const normalizedEmail = email.trim().toLowerCase();
 
 		// Validate sessionId format (UUID)
 		const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -3957,7 +4189,7 @@ export const releaseSeatsPublic = async (req, res, next) => {
 
 		// Verify reservations belong to this email before releasing
 		for (const placeId of placeIds) {
-			const reservationSessionId = await seatReservationService.getReservation(eventId, placeId, email);
+			const reservationSessionId = await seatReservationService.getReservation(eventId, placeId, normalizedEmail);
 			if (reservationSessionId && reservationSessionId !== sessionId) {
 				return res.status(consts.HTTP_STATUS_CONFLICT).json({
 					message: `Seat ${placeId} is reserved by a different session`,
@@ -3967,7 +4199,7 @@ export const releaseSeatsPublic = async (req, res, next) => {
 		}
 
 		// Release reservations (pass email to release only this user's reservations)
-		const releasedCount = await seatReservationService.releaseReservations(eventId, placeIds, email);
+		const releasedCount = await seatReservationService.releaseReservations(eventId, placeIds, normalizedEmail);
 
 		return res.status(consts.HTTP_STATUS_OK).json({
 			message: 'Seat reservations released successfully',
@@ -3986,7 +4218,7 @@ export const releaseSeatsPublic = async (req, res, next) => {
 export const sendSeatOTP = async (req, res, next) => {
 	try {
 		const eventId = req.params.eventId;
-		const { email, fullName, placeIds } = req.body;
+		const { email, fullName, placeIds, sectionSelections } = req.body;
 
 		if (!email || typeof email !== 'string' || !email.includes('@')) {
 			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -3994,6 +4226,8 @@ export const sendSeatOTP = async (req, res, next) => {
 				error: 'INVALID_EMAIL'
 			});
 		}
+		// Normalize email so OTP lookup is stable even if frontend changes casing/whitespace.
+		const normalizedEmail = email.trim().toLowerCase();
 
 		if (!fullName || typeof fullName !== 'string' || fullName.trim().length === 0) {
 			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -4002,9 +4236,11 @@ export const sendSeatOTP = async (req, res, next) => {
 			});
 		}
 
-		if (!placeIds || !Array.isArray(placeIds) || placeIds.length === 0) {
+		const hasPlaceIds = Array.isArray(placeIds) && placeIds.length > 0;
+		const hasSectionSelections = Array.isArray(sectionSelections) && sectionSelections.some(s => Number(s?.quantity || 0) > 0);
+		if (!hasPlaceIds && !hasSectionSelections) {
 			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
-				message: 'placeIds array is required',
+				message: 'placeIds or sectionSelections are required',
 				error: 'INVALID_DATA'
 			});
 		}
@@ -4029,12 +4265,16 @@ export const sendSeatOTP = async (req, res, next) => {
 		// Store verification code in Redis with email as key (5 minute TTL)
 		// Key format: seat_otp:{eventId}:{email}
 		const redisClient = (await import('../model/redisConnect.js')).default;
-		const otpKey = `seat_otp:${eventId}:${email}`;
+		const otpKey = `seat_otp:${eventId}:${normalizedEmail}`;
 		await redisClient.set(otpKey, hashedCode, { EX: 300 }); // 5 minutes
 
 		// Store email and fullName for later verification
-		const userDataKey = `seat_user:${eventId}:${email}`;
-		await redisClient.set(userDataKey, JSON.stringify({ email, fullName, placeIds }), { EX: 600 }); // 10 minutes
+		const userDataKey = `seat_user:${eventId}:${normalizedEmail}`;
+		await redisClient.set(
+			userDataKey,
+			JSON.stringify({ email: normalizedEmail, fullName, placeIds: placeIds || [], sectionSelections: sectionSelections || [] }),
+			{ EX: 600 }
+		); // 10 minutes
 
 		// Extract locale from request
 		const locale = commonUtil.extractLocaleFromRequest(req);
@@ -4045,7 +4285,7 @@ export const sendSeatOTP = async (req, res, next) => {
 		const emailSubject = await getEmailSubject('verification_code', locale, { companyName: process.env.COMPANY_TITLE || 'Finnep' });
 		const emailPayload = {
 			from: process.env.EMAIL_USERNAME,
-			to: email,
+			to: normalizedEmail,
 			subject: emailSubject,
 			html: emailHtml
 		};
@@ -4073,7 +4313,7 @@ export const sendSeatOTP = async (req, res, next) => {
 export const verifySeatOTP = async (req, res, next) => {
 	try {
 		const eventId = req.params.eventId;
-		const { email, otp, placeIds } = req.body;
+		const { email, otp, placeIds, sectionSelections } = req.body;
 
 		if (!email || typeof email !== 'string' || !email.includes('@')) {
 			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -4081,6 +4321,8 @@ export const verifySeatOTP = async (req, res, next) => {
 				error: 'INVALID_EMAIL'
 			});
 		}
+		// Normalize email so OTP lookup is stable even if frontend changes casing/whitespace.
+		const normalizedEmail = email.trim().toLowerCase();
 
 		if (!otp || typeof otp !== 'string' || otp.length !== 8) {
 			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -4089,16 +4331,18 @@ export const verifySeatOTP = async (req, res, next) => {
 			});
 		}
 
-		if (!placeIds || !Array.isArray(placeIds) || placeIds.length === 0) {
+		const hasPlaceIds = Array.isArray(placeIds) && placeIds.length > 0;
+		const hasSectionSelections = Array.isArray(sectionSelections) && sectionSelections.some(s => Number(s?.quantity || 0) > 0);
+		if (!hasPlaceIds && !hasSectionSelections) {
 			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
-				message: 'placeIds array is required',
+				message: 'placeIds or sectionSelections are required',
 				error: 'INVALID_DATA'
 			});
 		}
 
 		// Get stored OTP from Redis
 		const redisClient = (await import('../model/redisConnect.js')).default;
-		const otpKey = `seat_otp:${eventId}:${email}`;
+		const otpKey = `seat_otp:${eventId}:${normalizedEmail}`;
 		const storedHashedCode = await redisClient.get(otpKey);
 
 		if (!storedHashedCode) {
@@ -4123,7 +4367,7 @@ export const verifySeatOTP = async (req, res, next) => {
 		await redisClient.del(otpKey);
 
 		// Get user data
-		const userDataKey = `seat_user:${eventId}:${email}`;
+		const userDataKey = `seat_user:${eventId}:${normalizedEmail}`;
 		const userDataStr = await redisClient.get(userDataKey);
 		if (!userDataStr) {
 			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -4135,9 +4379,16 @@ export const verifySeatOTP = async (req, res, next) => {
 		const userData = JSON.parse(userDataStr);
 
 		// Verify placeIds match
-		if (JSON.stringify(userData.placeIds.sort()) !== JSON.stringify(placeIds.sort())) {
+		const normalizedIncomingPlaceIds = Array.isArray(placeIds) ? [...placeIds].sort() : [];
+		const normalizedStoredPlaceIds = Array.isArray(userData.placeIds) ? [...userData.placeIds].sort() : [];
+		const normalizedIncomingSections = Array.isArray(sectionSelections) ? [...sectionSelections] : [];
+		const normalizedStoredSections = Array.isArray(userData.sectionSelections) ? [...userData.sectionSelections] : [];
+		if (
+			JSON.stringify(normalizedStoredPlaceIds) !== JSON.stringify(normalizedIncomingPlaceIds) ||
+			JSON.stringify(normalizedStoredSections) !== JSON.stringify(normalizedIncomingSections)
+		) {
 			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
-				message: 'Selected seats do not match',
+				message: 'Selected seats/sections do not match',
 				error: 'PLACEIDS_MISMATCH'
 			});
 		}

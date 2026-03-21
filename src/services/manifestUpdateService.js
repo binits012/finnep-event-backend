@@ -67,6 +67,52 @@ export class ManifestUpdateService {
 		}
 	}
 
+	/**
+	 * Increment sold counters for area/standing sections.
+	 * @param {string} manifestId - MongoDB Manifest ID
+	 * @param {Array<{sectionId: string, quantity: number}>} areaSelections
+	 * @returns {Promise<Object>} Updated manifest
+	 */
+	async markAreaSelectionsSold(manifestId, areaSelections) {
+		try {
+			if (!manifestId || !Array.isArray(areaSelections) || areaSelections.length === 0) {
+				throw new Error('Invalid parameters: manifestId and areaSelections are required');
+			}
+
+			const manifest = await EventManifest.findById(manifestId);
+			if (!manifest) {
+				throw new Error(`Event manifest not found: ${manifestId}`);
+			}
+
+			if (!manifest.availability) {
+				manifest.availability = { sold: [], areaSoldCounts: {} };
+			}
+
+			if (!manifest.availability.areaSoldCounts) {
+				manifest.availability.areaSoldCounts = new Map();
+			}
+
+			let totalIncremented = 0;
+			for (const sel of areaSelections) {
+				const sectionId = String(sel?.sectionId || '').trim();
+				const quantity = Number(sel?.quantity || 0);
+				if (!sectionId || quantity <= 0) continue;
+
+				const current = Number(manifest.availability.areaSoldCounts.get(sectionId) || 0);
+				manifest.availability.areaSoldCounts.set(sectionId, current + quantity);
+				totalIncremented += quantity;
+			}
+
+			manifest.updatedAt = new Date();
+			const updatedManifest = await manifest.save();
+			info(`Incremented area sold counters by ${totalIncremented} on event manifest ${manifestId}`);
+			return updatedManifest;
+		} catch (err) {
+			error(`Error incrementing area sold counters for event manifest ${manifestId}:`, err);
+			throw err;
+		}
+	}
+
 
 	/**
 	 * Get event manifest

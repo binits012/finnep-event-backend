@@ -12,6 +12,7 @@ import { publishTicketCreationEvent } from './front.controller.js';
 import { EventManifest, PlatformMarketingConsent } from '../model/mongoModel.js';
 import { manifestUpdateService } from '../src/services/manifestUpdateService.js';
 import { seatReservationService } from '../src/services/seatReservationService.js';
+import { resolveSoldPlaceIdsForPayment } from '../src/services/paymentSeatResolutionService.js';
 
 export const handlePaytrailWebhook = async (req, res, next) => {
     try {
@@ -240,7 +241,6 @@ export async function createTicketFromPaytrailPayment(paymentData, transactionId
     }
 
     // Mark seats as sold for seat-based events (same as Stripe flow)
-    // placeIds already computed above
     console.log('[createTicketFromPaytrailPayment] Checking seat marking:', {
         hasEvent: !!event,
         hasVenue: !!(event && event.venue),
@@ -253,8 +253,22 @@ export async function createTicketFromPaytrailPayment(paymentData, transactionId
         eventId: paymentData.eventId
     });
 
-    if (event && event.venue && event.venue.venueId && placeIds.length > 0) {
+    if (event && event.venue && event.venue.venueId) {
         try {
+            const { placeIds: placeIdsToMarkSold, areaSoldIncrements, unresolvedSelections } = await resolveSoldPlaceIdsForPayment({
+                eventId: paymentData.eventId,
+                sessionId: paymentData.sessionId,
+                placeIds,
+                sectionSelections: paymentData.sectionSelections
+            });
+
+            if (!placeIdsToMarkSold || placeIdsToMarkSold.length === 0) {
+                info(`[createTicketFromPaytrailPayment] No placeIds resolved for sold update (event ${paymentData.eventId})`);
+            }
+            if (unresolvedSelections.length > 0) {
+                error('[createTicketFromPaytrailPayment] Could not fully resolve some sectionSelections:', unresolvedSelections);
+            }
+
             // Find EventManifest by eventId
             const eventMongoId = String(event._id);
             const eventManifest = await EventManifest.findOne({ eventId: eventMongoId });
@@ -268,42 +282,37 @@ export async function createTicketFromPaytrailPayment(paymentData, transactionId
                 eventIdMatches: eventManifest ? (eventManifest.eventId === eventMongoId) : false
             });
 
-            // Verify we found the correct manifest
-            if (eventManifest && eventManifest.eventId !== eventMongoId) {
-                error(`[createTicketFromPaytrailPayment] WRONG MANIFEST FOUND! Expected eventId: ${eventMongoId}, Found manifest with eventId: ${eventManifest.eventId}, manifestId: ${eventManifest._id}`);
-                // Try to find the correct manifest
-                const correctManifest = await EventManifest.findOne({ eventId: eventMongoId });
-                if (correctManifest) {
-                    info(`[createTicketFromPaytrailPayment] Found correct manifest: ${correctManifest._id} for event ${eventMongoId}`);
-                    eventManifest = correctManifest;
-                } else {
-                    // Don't mark seats in wrong manifest - this would corrupt data
-                    throw new Error(`Wrong manifest found: manifest belongs to event ${eventManifest.eventId}, not ${eventMongoId}. Correct manifest not found.`);
-                }
+            if (eventManifest && areaSoldIncrements.length > 0) {
+                await manifestUpdateService.markAreaSelectionsSold(
+                    eventManifest._id.toString(),
+                    areaSoldIncrements
+                );
             }
 
-            if (eventManifest) {
+            if (eventManifest && placeIdsToMarkSold.length > 0) {
                 // Mark seats as sold in EventManifest
                 console.log('[createTicketFromPaytrailPayment] Marking seats as sold:', {
                     manifestId: eventManifest._id.toString(),
-                    placeIds: placeIds,
-                    placeIdsCount: placeIds.length
+                    placeIds: placeIdsToMarkSold,
+                    placeIdsCount: placeIdsToMarkSold.length
                 });
 
                 await manifestUpdateService.markSeatsAsSold(
                     eventManifest._id.toString(),
-                    placeIds
+                    placeIdsToMarkSold
                 );
 
                 // Release Redis reservations
                 await seatReservationService.releaseReservations(
                     paymentData.eventId,
-                    placeIds
+                    placeIdsToMarkSold
                 );
 
-                info(`Seats marked as sold for Paytrail payment - event: ${paymentData.eventId}, seats: ${placeIds.length}`);
+                info(`Seats marked as sold for Paytrail payment - event: ${paymentData.eventId}, seats: ${placeIdsToMarkSold.length}`);
             } else {
-                error(`EventManifest not found for event ${paymentData.eventId}. Cannot mark seats as sold.`);
+                if (!eventManifest) {
+                    error(`EventManifest not found for event ${paymentData.eventId}. Cannot mark seats as sold.`);
+                }
             }
         } catch (seatError) {
             error(`Error marking seats as sold for Paytrail payment - event: ${paymentData.eventId}:`, seatError);

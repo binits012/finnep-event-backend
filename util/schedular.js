@@ -425,18 +425,49 @@ function defineJobs() {
       // Add 5 hour buffer to account for events that might still be ongoing
       // Only deactivate events that ended at least 5 hours ago
       const fiveHoursAgo = new Date(now.getTime() - (5 * 60 * 60 * 1000));
+      const effectiveEndDateExpr = {
+        $ifNull: ['$event_end_date', { $ifNull: ['$eventEndDate', '$eventDate'] }]
+      };
       info('inactive past events ================== Starting job at', now);
-      info(`Deactivating events with eventDate before: ${fiveHoursAgo} (5 hours buffer)`);
+      info(`Deactivating events with effective end date before: ${fiveHoursAgo} (5 hours buffer)`);
+
+      // Self-heal: reactivate events that are still within validity window but were previously marked completed.
+      const baseReactivationFilter = {
+        $expr: { $gte: [effectiveEndDateExpr, now] },
+        $or: [{ active: false }, { status: 'completed' }]
+      };
+      const reactivateOngoing = await Event.updateMany(
+        {
+          ...baseReactivationFilter,
+          eventDate: { $lte: now }
+        },
+        {
+          $set: { active: true, status: 'on-going', updatedAt: new Date() }
+        }
+      );
+      const reactivateUpcoming = await Event.updateMany(
+        {
+          ...baseReactivationFilter,
+          eventDate: { $gt: now }
+        },
+        {
+          $set: { active: true, status: 'up-coming', updatedAt: new Date() }
+        }
+      );
+      const reactivatedCount = (reactivateOngoing.modifiedCount || 0) + (reactivateUpcoming.modifiedCount || 0);
+      if (reactivatedCount > 0) {
+        info(`Reactivated ${reactivatedCount} events still valid by end date`);
+      }
 
       // First, find all past events that need to be deactivated (before updating)
-      // Primary condition: eventDate is at least 5 hours in the past
-      // This accounts for events that might still be ongoing even if eventDate has passed
+      // Primary condition: effective end date is at least 5 hours in the past
+      // (event_end_date -> eventEndDate -> eventDate fallback)
       // We deactivate ALL such events regardless of:
       //   - Current status (up-coming, on-going, etc.)
       //   - Active state (true or false)
       // The only optimization: skip events already marked as 'completed' to avoid unnecessary updates
       const eventsToDeactivate = await Event.find({
-        eventDate: { $lt: fiveHoursAgo }, // PRIMARY CONDITION: Event date is at least 5 hours in the past
+        $expr: { $lt: [effectiveEndDateExpr, fiveHoursAgo] }, // PRIMARY CONDITION: effective end date is at least 5 hours in the past
         status: { $ne: 'completed' } // Optimization: skip already-completed events
       }).lean();
 
@@ -451,12 +482,12 @@ function defineJobs() {
       const eventIds = eventsToDeactivate.map(event => event._id);
 
       // Batch update all past events to inactive in a single operation
-      // Primary condition: eventDate < (now - 5 hours) to account for ongoing events
+      // Primary condition: effective end date < (now - 5 hours) to account for ongoing events
       // We update ALL past events regardless of their current status or active state
       const result = await Event.updateMany(
         {
           _id: { $in: eventIds },
-          eventDate: { $lt: fiveHoursAgo } // Primary condition: event date is at least 5 hours in the past
+          $expr: { $lt: [effectiveEndDateExpr, fiveHoursAgo] } // Primary condition: effective end date is at least 5 hours in the past
           // No status filter - we update all past events found above
         },
         {

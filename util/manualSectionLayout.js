@@ -30,11 +30,14 @@ export const generateManualSectionLayout = (config, placeIds) => {
 	// Calculate total capacity
 	// If rowConfig exists, calculate from rowConfig; otherwise use capacity or rows*seatsPerRow
 	const totalCapacity = sections.reduce((sum, section) => {
+		const sectionSelectionMode = section.sectionType === 'Seating'
+			? 'seat'
+			: (section.selectionMode || 'area')
 		if (section.capacity) {
 			return sum + section.capacity
 		}
 		// If rowConfig exists, sum up seatCount from all rows
-		if (section.rowConfig && Array.isArray(section.rowConfig) && section.rowConfig.length > 0) {
+		if (sectionSelectionMode === 'seat' && section.rowConfig && Array.isArray(section.rowConfig) && section.rowConfig.length > 0) {
 			const rowConfigCapacity = section.rowConfig.reduce((rowSum, row) => {
 				return rowSum + (row.seatCount || 0)
 			}, 0)
@@ -42,24 +45,33 @@ export const generateManualSectionLayout = (config, placeIds) => {
 			return sum + rowConfigCapacity
 		}
 		// Fallback to rows * seatsPerRow
-		return sum + ((section.rows || 0) * (section.seatsPerRow || 0))
+		if (sectionSelectionMode === 'seat') {
+			return sum + ((section.rows || 0) * (section.seatsPerRow || 0))
+		}
+		return sum
 	}, 0)
 
 	console.log(`[generateManualSectionLayout] Total capacity: ${totalCapacity}, Total placeIds: ${placeIds.length}`)
 
 	// Distribute placeIds across sections based on capacity
 	sections.forEach((section) => {
+		const sectionSelectionMode = section.sectionType === 'Seating'
+			? 'seat'
+			: (section.selectionMode || 'area')
 		// Calculate section capacity: use explicit capacity, or calculate from rowConfig, or fallback to rows*seatsPerRow
 		let sectionCapacity = section.capacity
 		if (!sectionCapacity) {
-			if (section.rowConfig && Array.isArray(section.rowConfig) && section.rowConfig.length > 0) {
+			if (sectionSelectionMode === 'seat' && section.rowConfig && Array.isArray(section.rowConfig) && section.rowConfig.length > 0) {
 				// Calculate from rowConfig
 				sectionCapacity = section.rowConfig.reduce((sum, row) => {
 					return sum + (row.seatCount || 0)
 				}, 0)
-			} else {
+			} else if (sectionSelectionMode === 'seat') {
 				// Fallback to rows * seatsPerRow
 				sectionCapacity = (section.rows || 0) * (section.seatsPerRow || 0)
+			} else {
+				// Area sections must be explicit capacity-driven.
+				sectionCapacity = 0
 			}
 		}
 		if (sectionCapacity === 0) return
@@ -85,13 +97,19 @@ export const generateManualSectionLayout = (config, placeIds) => {
 			placeIndex += seatsForSection
 		}
 
-		// Generate seats within this section
-		const sectionSeats = generateSeatsInSection(section, sectionPlaceIds, {
-			seatSpacing,
-			rowSpacing
-		})
-
-		places.push(...sectionSeats)
+		if (sectionSelectionMode === 'seat') {
+			// Generate seat-level entries only for Seating sections.
+			const sectionSeats = generateSeatsInSection(section, sectionPlaceIds, {
+				seatSpacing,
+				rowSpacing
+			})
+			places.push(...sectionSeats)
+		} else {
+			// For area sections (Standing, VIP, etc.) create logical inventory entries
+			// without row/seat allocation so checkout stays section-quantity based.
+			const sectionAreaPlaces = generateAreaPlacesInSection(section, sectionPlaceIds)
+			places.push(...sectionAreaPlaces)
+		}
 	})
 
 	// Assign remaining placeIds to the last section or distribute evenly
@@ -187,6 +205,18 @@ const generateSeatsInSection = (section, placeIds, spacing, seatOffset = 0) => {
 	}
 
 	return places
+}
+
+const generateAreaPlacesInSection = (section, placeIds) => {
+	return (placeIds || []).map((placeId) => ({
+		placeId,
+		x: null,
+		y: null,
+		row: null,
+		seat: null,
+		section: section.name || 'Unknown',
+		zone: section.priceTier || null
+	}))
 }
 
 /**

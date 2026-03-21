@@ -258,15 +258,83 @@ export const getTickets = async (req, res, next) => {
                 return res.status(consts.HTTP_STATUS_OK).json({
                     success: true,
                     data: yearFiltered.map(t => {
-                        // Sanitize ticketInfo - only include safe, display-related fields
-                        const sanitizedTicketInfo = t.ticketInfo ? {
-                            ticketName: t.ticketInfo.ticketName || null,
-                            quantity: t.ticketInfo.quantity || null,
-                            price: t.ticketInfo.price || null,
-                            currency: t.ticketInfo.currency || null,
-                            purchaseDate: t.ticketInfo.purchaseDate || null
+                        let ticketInfoPlain = null;
+                        if (t.ticketInfo) {
+                            if (t.ticketInfo instanceof Map) {
+                                ticketInfoPlain = Object.fromEntries(t.ticketInfo.entries());
+                            } else if (typeof t.ticketInfo === 'object') {
+                                ticketInfoPlain = t.ticketInfo;
+                            }
+                        }
+
+                        const paymentCurrency = process.env.PAYMENT_CURRENCY || null;
+                        const derivedPurchaseDate =
+                            ticketInfoPlain?.purchaseDate ||
+                            (t.createdAt ? new Date(t.createdAt).toISOString() : null);
+
+                        let seatTickets = null;
+                        if (Array.isArray(ticketInfoPlain?.seatTickets)) {
+                            seatTickets = ticketInfoPlain.seatTickets
+                                .map(st => {
+                                    const pricing = st?.pricing && typeof st.pricing === 'object' ? st.pricing : null;
+                                    return {
+                                        placeId: st?.placeId ?? null,
+                                        ticketName: st?.ticketName ?? null,
+                                        pricing: pricing ? {
+                                            basePrice: pricing.basePrice ?? pricing.unitPrice ?? null,
+                                            tax: pricing.tax ?? pricing.vat ?? null,
+                                            serviceFee: pricing.serviceFee ?? null,
+                                            serviceTax: pricing.serviceTax ?? null,
+                                            orderFee: pricing.orderFee ?? null,
+                                            currency: pricing.currency ?? null
+                                        } : null
+                                    };
+                                })
+                                .filter(x => x.ticketName || x.placeId || x.pricing);
+                        }
+
+                        const sanitizedTicketInfo = ticketInfoPlain ? {
+                            ticketName: ticketInfoPlain.ticketName || t.type || ticketInfoPlain.ticketType || null,
+                            quantity: ticketInfoPlain.quantity ?? ticketInfoPlain.qty ?? null,
+                            // Base price should prefer pre-tax fields.
+                            price: ticketInfoPlain.basePrice ??
+                                ticketInfoPlain.totalBasePrice ??
+                                ticketInfoPlain.perUnitSubtotal ??
+                                ticketInfoPlain.price ??
+                                ticketInfoPlain.unitPrice ??
+                                ticketInfoPlain.totalPrice ??
+                                null,
+                            serviceFee: ticketInfoPlain.serviceFee ??
+                                ticketInfoPlain.serviceFeeTotal ??
+                                ticketInfoPlain.totalServiceFee ??
+                                ticketInfoPlain.ticketServiceFee ??
+                                null,
+                            vatAmount: ticketInfoPlain.vatAmount ??
+                                ticketInfoPlain.totalVatAmount ??
+                                ticketInfoPlain.taxAmount ??
+                                ticketInfoPlain.entertainmentTaxAmount ??
+                                null,
+                            vatRate: ticketInfoPlain.vatRate ??
+                                ticketInfoPlain.entertainmentTax ??
+                                ticketInfoPlain.tax ??
+                                null,
+                            totalAmount: ticketInfoPlain.totalAmount ??
+                                ticketInfoPlain.total ??
+                                ticketInfoPlain.amount ??
+                                ticketInfoPlain.totalPrice ??
+                                ticketInfoPlain.totalPaid ??
+                                ticketInfoPlain.grandTotal ??
+                                (ticketInfoPlain.price ?? ticketInfoPlain.basePrice ?? null),
+                            pricingModel: ticketInfoPlain.pricingModel ??
+                                t.event?.venue?.pricingModel ??
+                                null,
+                            currency: ticketInfoPlain.currency || paymentCurrency,
+                            purchaseDate: derivedPurchaseDate,
+                            ...(seatTickets ? { seatTickets } : {})
                             // Exclude sensitive fields: paymentIntentId, email, merchantId, eventId, ticketId, eventName
                         } : null;
+
+                        const resolvedEventEndDate = t.event?.eventEndDate || t.event?.event_end_date || t.event?.eventDate || null;
 
                         return {
                             _id: t._id,
@@ -274,6 +342,7 @@ export const getTickets = async (req, res, next) => {
                                 _id: t.event?._id,
                                 eventTitle: t.event?.eventTitle,
                                 eventDate: t.event?.eventDate,
+                                eventEndDate: resolvedEventEndDate,
                                 eventLocationAddress: t.event?.eventLocationAddress,
                                 active: t.event?.active,
                                 otherInfo: t.event?.otherInfo
@@ -360,8 +429,8 @@ export const getTicketById = async (req, res, next) => {
                     });
                 }
 
-                // Allow download for all events (upcoming or past)
-                // No need to check active status or date
+                // Always allow viewing ticket details from this endpoint.
+                // End-date gating, if needed, should be applied only to explicit download actions.
 
                 // Convert QR code and ICS buffers to base64 strings
                 let qrCodeBase64 = null;
@@ -448,11 +517,13 @@ export const getTicketById = async (req, res, next) => {
                     quantity: ticketInfoPlain.quantity ?? ticketInfoPlain.qty ?? null,
                     // Some flows store `price`, others store `basePrice` / `totalBasePrice`.
                     // Keep it flexible so free/unseated/priced-seat events still show something.
-                    price: ticketInfoPlain.price ??
+                    // Base price should prefer pre-tax fields.
+                    price: ticketInfoPlain.basePrice ??
+                        ticketInfoPlain.totalBasePrice ??
+                        ticketInfoPlain.perUnitSubtotal ??
+                        ticketInfoPlain.price ??
                         ticketInfoPlain.unitPrice ??
                         ticketInfoPlain.totalPrice ??
-                        ticketInfoPlain.basePrice ??
-                        ticketInfoPlain.totalBasePrice ??
                         null,
                     // Service + totals are optional; include them when available so clients can render a breakdown.
                     serviceFee: ticketInfoPlain.serviceFee ??
@@ -484,6 +555,7 @@ export const getTicketById = async (req, res, next) => {
                             _id: event._id,
                             eventTitle: event.eventTitle,
                             eventDate: event.eventDate,
+                            eventEndDate: event.eventEndDate || event.event_end_date || event.eventDate,
                             eventLocationAddress: event.eventLocationAddress,
                             active: event.active
                         },

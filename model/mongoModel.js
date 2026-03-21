@@ -380,6 +380,7 @@ const eventSchema = new mongoose.Schema({
 	},
 	// Synced from event-merchant-service via RabbitMQ (event.created / event.updated / waitlist.status_updated)
 	waitlistConfig: { type: mongoose.Schema.Types.Mixed },
+	isSeatedEvent: { type: Boolean, default: false },
 	event_end_date: { type: Date },
 	pre_sale_waitlist_count: { type: Number },
 	pre_sale_waitlist_cap: { type: Number },
@@ -913,6 +914,34 @@ const venueSchema = new mongoose.Schema({
 	sections: [{
 		id: { type: String, required: true },
 		name: { type: String, required: true },
+		sectionType: {
+			type: String,
+			enum: ['Seating', 'Standing', 'Private Box', 'Lounge', 'Bar', 'Accessible', 'VIP', 'Premium', 'General Admission', 'Custom'],
+			default: function () {
+				const legacyType = (this.type || 'seating').toString().toLowerCase()
+				const map = {
+					seating: 'Seating',
+					standing: 'Standing',
+					box: 'Private Box',
+					lounge: 'Lounge',
+					bar: 'Bar',
+					accessible: 'Accessible',
+					vip: 'VIP',
+					premium: 'Premium',
+					general: 'General Admission',
+					custom: 'Custom'
+				}
+				return map[legacyType] || 'Seating'
+			}
+		},
+		selectionMode: {
+			type: String,
+			enum: ['seat', 'area'],
+			default: function () {
+				const sectionType = this.sectionType || 'Seating'
+				return sectionType === 'Seating' ? 'seat' : 'area'
+			}
+		},
 
 		// Section type
 		type: {
@@ -1062,6 +1091,40 @@ const venueSchema = new mongoose.Schema({
 	createdAt: { type: Date, default: Date.now },
 	updatedAt: { type: Date, default: Date.now }
 });
+venueSchema.pre('validate', function normalizeSectionModes(next) {
+	if (Array.isArray(this.sections)) {
+		this.sections = this.sections.map((section) => {
+			const normalized = section
+			if (!normalized.sectionType) {
+				const legacy = (normalized.type || 'seating').toString().toLowerCase()
+				const map = {
+					seating: 'Seating',
+					standing: 'Standing',
+					box: 'Private Box',
+					lounge: 'Lounge',
+					bar: 'Bar',
+					accessible: 'Accessible',
+					vip: 'VIP',
+					premium: 'Premium',
+					general: 'General Admission',
+					custom: 'Custom'
+				}
+				normalized.sectionType = map[legacy] || 'Seating'
+			}
+			if (!normalized.selectionMode) {
+				normalized.selectionMode = normalized.sectionType === 'Seating' ? 'seat' : 'area'
+			}
+			if (normalized.sectionType !== 'Seating') {
+				normalized.selectionMode = 'area'
+				normalized.rows = undefined
+				normalized.seatsPerRow = undefined
+				normalized.rowConfig = undefined
+			}
+			return normalized
+		})
+	}
+	next()
+})
 venueSchema.index({ merchant: 1 });
 venueSchema.index({ externalVenueId: 1 });
 venueSchema.index({ country: 1 }); // Index for country-based filtering
@@ -1179,6 +1242,9 @@ const manifestSchema = new mongoose.Schema({
 	sections: [{
 		id: { type: String },
 		name: { type: String },
+		sectionType: { type: String },
+		selectionMode: { type: String, enum: ['seat', 'area'] },
+		capacity: { type: Number },
 		color: { type: String },
 		bounds: { type: mongoose.Schema.Types.Mixed }, // For section overlay
 		polygon: [{ x: { type: Number }, y: { type: Number } }]
@@ -1215,7 +1281,10 @@ const eventManifestSchema = new mongoose.Schema({
 
 	// Availability tracking (for sold seats)
 	availability: {
-		sold: [{ type: String }] // Array of sold placeIds
+		sold: [{ type: String }], // Array of sold placeIds
+		// For standing/area sections where placeIds may be non-unique placeholders,
+		// track sold quantity per section directly.
+		areaSoldCounts: { type: Map, of: Number, default: {} }
 	},
 
 	// Pricing zones (for internal price lookup - not part of Ticketmaster format)

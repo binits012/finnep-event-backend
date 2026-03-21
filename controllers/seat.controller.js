@@ -6,6 +6,62 @@ import { manifestUpdateService } from '../src/services/manifestUpdateService.js'
 import { seatReservationService } from '../src/services/seatReservationService.js';
 import { error, info } from '../model/logger.js';
 
+const resolveSectionMode = (section) => {
+	if (!section) return 'seat';
+	// Seating sections must remain seat-based even if stale data has selectionMode='area'
+	// from older manifests.
+	if (section.sectionType === 'Seating') return 'seat';
+	if (section.selectionMode) return section.selectionMode;
+	return section.sectionType === 'Seating' ? 'seat' : 'area';
+};
+
+const normalizeAreaSections = (fullManifest, soldSet, reservedSet, areaSoldCounts = {}) => {
+	const readAreaSoldCount = (key) => {
+		if (!key) return 0;
+		// Handle both plain objects and Mongoose Map/JS Map.
+		if (typeof areaSoldCounts?.get === 'function') {
+			const v = areaSoldCounts.get(String(key));
+			return Number(v || 0) || 0;
+		}
+		const v = areaSoldCounts?.[String(key)];
+		return Number(v || 0) || 0;
+	};
+
+	const sections = Array.isArray(fullManifest?.sections) ? fullManifest.sections : [];
+	const places = Array.isArray(fullManifest?.places) ? fullManifest.places : [];
+	const seatSections = [];
+	const areaSections = [];
+
+	for (const section of sections) {
+		const sectionId = section.id || section._id || section.name;
+		const selectionMode = resolveSectionMode(section);
+		if (selectionMode === 'seat') {
+			seatSections.push(section);
+			continue;
+		}
+		const sectionPlaces = places.filter((p) => p.section === section.name || p.section === sectionId);
+		const areaSoldByCounter = readAreaSoldCount(sectionId) || readAreaSoldCount(section.name);
+		const soldCountByPlaceId = sectionPlaces.filter((p) => soldSet.has(p.placeId)).length;
+		const soldCount = Math.max(areaSoldByCounter, soldCountByPlaceId);
+		const reservedCount = sectionPlaces.filter((p) => reservedSet.has(p.placeId)).length;
+		const inferredCapacity = sectionPlaces.length;
+		const capacity = Number(section.capacity || inferredCapacity || 0);
+		areaSections.push({
+			id: sectionId,
+			name: section.name,
+			sectionType: section.sectionType || 'Custom',
+			selectionMode: 'area',
+			capacity,
+			soldCount,
+			reservedCount,
+			availableCount: Math.max(0, capacity - soldCount - reservedCount),
+			color: section.color || '#2196F3'
+		});
+	}
+
+	return { seatSections, areaSections };
+};
+
 /**
  * Get seat map with availability for an event
  * Merges encoded manifest (MongoDB EventManifest) + enriched manifest (S3) + Redis reservations
@@ -129,12 +185,17 @@ export const getEventSeats = async (req, res, next) => {
 					}
 				}
 
+				const areaSoldCounts = encodedManifest?.availability?.areaSoldCounts || {};
+				const { seatSections, areaSections } = normalizeAreaSections(fullManifest, soldSet, reservedSet, areaSoldCounts);
+
 				// 7. Return merged data
 				// backgroundSvg and sections come from full manifest (venue configuration), not encoded manifest
 				return res.status(consts.HTTP_STATUS_OK).json({
 					data: {
 						backgroundSvg: fullManifest.backgroundSvg || null, // From venue manifest
 						sections: sections, // From venue manifest
+						seatSections,
+						areaSections,
 						seats: seats, // Merged from encoded manifest (placeIds) + full manifest (coordinates) + availability
 						total: seats.length,
 						available: seats.filter(s => s.status === 'available').length,
@@ -160,14 +221,7 @@ export const reserveSeats = async (req, res, next) => {
 	try {
 		const token = req.headers.authorization;
 		const eventId = req.params.eventId;
-		const { placeIds, sessionId, email } = req.body;
-
-		if (!placeIds || !Array.isArray(placeIds) || placeIds.length === 0) {
-			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
-				message: 'placeIds array is required',
-				error: appText.INVALID_DATA
-			});
-		}
+		const { placeIds, sectionSelections, sessionId, email } = req.body;
 
 		if (!sessionId) {
 			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -188,8 +242,43 @@ export const reserveSeats = async (req, res, next) => {
 			}
 
 			try {
+				let resolvedPlaceIds = Array.isArray(placeIds) ? [...placeIds] : [];
+
+				if ((!resolvedPlaceIds || resolvedPlaceIds.length === 0) && Array.isArray(sectionSelections) && sectionSelections.length > 0) {
+					const encodedManifest = await manifestUpdateService.getEventManifest(eventId);
+					const { downloadPricingFromS3 } = await import('../../util/aws.js');
+					const fullManifest = await downloadPricingFromS3(encodedManifest.s3Key);
+					const soldSet = new Set(encodedManifest.availability?.sold || []);
+					const reservedMap = await seatReservationService.getReservedSeats(eventId);
+					const reservedSet = new Set(reservedMap.keys());
+					const sectionsById = new Map((fullManifest.sections || []).map((s) => [String(s.id || s._id || s.name), s]));
+					const places = Array.isArray(fullManifest.places) ? fullManifest.places : [];
+
+					for (const selection of sectionSelections) {
+						const sectionId = String(selection.sectionId || '');
+						const quantity = Number(selection.quantity || 0);
+						if (!sectionId || quantity <= 0) continue;
+						const section = sectionsById.get(sectionId);
+						if (!section || resolveSectionMode(section) !== 'area') continue;
+
+						const candidates = places.filter((p) =>
+							(p.section === section.name || p.section === sectionId) &&
+							!soldSet.has(p.placeId) &&
+							!reservedSet.has(p.placeId)
+						);
+						resolvedPlaceIds.push(...candidates.slice(0, quantity).map((p) => p.placeId));
+					}
+				}
+
+				if (!resolvedPlaceIds || resolvedPlaceIds.length === 0) {
+					return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+						message: 'placeIds or sectionSelections are required',
+						error: appText.INVALID_DATA
+					});
+				}
+
 				// Check if seats are available (pass sessionId to allow same-session re-reservation)
-				const availability = await seatReservationService.checkAvailability(eventId, placeIds, sessionId);
+				const availability = await seatReservationService.checkAvailability(eventId, resolvedPlaceIds, sessionId);
 				if (availability.reserved.length > 0) {
 					return res.status(consts.HTTP_STATUS_CONFLICT).json({
 						message: 'Some seats are already reserved',
@@ -202,7 +291,7 @@ export const reserveSeats = async (req, res, next) => {
 				}
 
 				// Reserve seats
-				const result = await seatReservationService.reserveSeats(eventId, placeIds, sessionId, email);
+				const result = await seatReservationService.reserveSeats(eventId, resolvedPlaceIds, sessionId, email);
 
 				if (result.failed.length > 0) {
 					return res.status(consts.HTTP_STATUS_CONFLICT).json({
@@ -214,7 +303,11 @@ export const reserveSeats = async (req, res, next) => {
 
 				return res.status(consts.HTTP_STATUS_OK).json({
 					message: 'Seats reserved successfully',
-					data: result
+					data: {
+						...result,
+						resolvedPlaceIds,
+						sectionSelections: sectionSelections || []
+					}
 				});
 			} catch (err) {
 				error('Error reserving seats:', err);
@@ -234,14 +327,7 @@ export const confirmSeats = async (req, res, next) => {
 	try {
 		const token = req.headers.authorization;
 		const eventId = req.params.eventId;
-		const { placeIds, sessionId } = req.body;
-
-		if (!placeIds || !Array.isArray(placeIds) || placeIds.length === 0) {
-			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
-				message: 'placeIds array is required',
-				error: appText.INVALID_DATA
-			});
-		}
+		const { placeIds, sectionSelections, sessionId } = req.body;
 
 		await jwtToken.verifyJWT(token, async (err, data) => {
 			if (err) {
@@ -261,9 +347,46 @@ export const confirmSeats = async (req, res, next) => {
 					});
 				}
 
+				let resolvedPlaceIds = Array.isArray(placeIds) ? [...placeIds] : [];
+
+				if ((!resolvedPlaceIds || resolvedPlaceIds.length === 0) && Array.isArray(sectionSelections) && sectionSelections.length > 0) {
+					const encodedManifest = await manifestUpdateService.getEventManifest(eventId);
+					const { downloadPricingFromS3 } = await import('../../util/aws.js');
+					const fullManifest = await downloadPricingFromS3(encodedManifest.s3Key);
+					const sectionsById = new Map((fullManifest.sections || []).map((s) => [String(s.id || s._id || s.name), s]));
+					const places = Array.isArray(fullManifest.places) ? fullManifest.places : [];
+
+					for (const selection of sectionSelections) {
+						const sectionId = String(selection.sectionId || '');
+						const quantity = Number(selection.quantity || 0);
+						if (!sectionId || quantity <= 0) continue;
+						const section = sectionsById.get(sectionId);
+						if (!section || resolveSectionMode(section) !== 'area') continue;
+						const sectionPlaces = places
+							.filter((p) => p.section === section.name || p.section === sectionId)
+							.map((p) => p.placeId);
+						const chosen = [];
+						for (const candidate of sectionPlaces) {
+							const reservationSessionId = await seatReservationService.getReservation(eventId, candidate);
+							if (!sessionId || reservationSessionId === sessionId) {
+								chosen.push(candidate);
+							}
+							if (chosen.length >= quantity) break;
+						}
+						resolvedPlaceIds.push(...chosen);
+					}
+				}
+
+				if (!resolvedPlaceIds || resolvedPlaceIds.length === 0) {
+					return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+						message: 'placeIds or sectionSelections are required',
+						error: appText.INVALID_DATA
+					});
+				}
+
 				// Verify reservations belong to this session
 				if (sessionId) {
-					for (const placeId of placeIds) {
+					for (const placeId of resolvedPlaceIds) {
 						const reservationSessionId = await seatReservationService.getReservation(eventId, placeId);
 						if (reservationSessionId !== sessionId) {
 							return res.status(consts.HTTP_STATUS_CONFLICT).json({
@@ -275,16 +398,16 @@ export const confirmSeats = async (req, res, next) => {
 				}
 
 				// Mark seats as sold in manifest
-				await manifestUpdateService.markSeatsAsSold(event.venue.lockedManifestId, placeIds);
+				await manifestUpdateService.markSeatsAsSold(event.venue.lockedManifestId, resolvedPlaceIds);
 
 				// Release Redis reservations
-				await seatReservationService.releaseReservations(eventId, placeIds);
+				await seatReservationService.releaseReservations(eventId, resolvedPlaceIds);
 
-				info(`Seats confirmed for event ${eventId}: ${placeIds.length} seats`);
+				info(`Seats confirmed for event ${eventId}: ${resolvedPlaceIds.length} seats`);
 
 				return res.status(consts.HTTP_STATUS_OK).json({
 					message: 'Seats confirmed successfully',
-					data: { placeIds }
+					data: { placeIds: resolvedPlaceIds, sectionSelections: sectionSelections || [] }
 				});
 			} catch (err) {
 				error('Error confirming seats:', err);

@@ -4,6 +4,38 @@ import { getMerchantByMerchantId } from '../../model/merchant.js';
 import { error, info } from '../../model/logger.js';
 import { pricingManifestSyncService } from '../../src/services/pricingManifestSyncService.js';
 import { sendPricingSyncErrorEmail } from '../../util/sendMail.js';
+import moment from 'moment-timezone';
+
+function deriveEventEndOfDay({ eventDate, eventTimezone }) {
+    const tz = eventTimezone || process.env.TIME_ZONE || 'Europe/Helsinki';
+    return moment(eventDate).tz(tz).endOf('day').toDate();
+}
+
+function resolveEventEndDate({ message, existingEvent }) {
+    const rawEnd = message?.event_end_date;
+    if (rawEnd) return new Date(rawEnd);
+
+    // Preserve existing DB value when the broker message doesn't include it.
+    if (existingEvent?.event_end_date) return existingEvent.event_end_date;
+
+    // Fallback: derive from event_date end-of-day.
+    if (message?.event_date) {
+        return deriveEventEndOfDay({ eventDate: message.event_date, eventTimezone: message?.event_timezone });
+    }
+
+    // Let caller decide how to handle (schema is required, so ideally this shouldn't happen).
+    return undefined;
+}
+
+function resolveIsSeatedEvent({ message, existingEvent, venue }) {
+    if (typeof message?.is_seated_event === 'boolean') return message.is_seated_event;
+    if (typeof existingEvent?.isSeatedEvent === 'boolean') return existingEvent.isSeatedEvent;
+    if (typeof message?.hasSeatSelection === 'boolean') return message.hasSeatSelection;
+    if (typeof message?.venue?.hasSeatSelection === 'boolean') return message.venue.hasSeatSelection;
+    if (typeof venue?.hasSeatSelection === 'boolean') return venue.hasSeatSelection;
+    if (typeof existingEvent?.venue?.hasSeatSelection === 'boolean') return existingEvent.venue.hasSeatSelection;
+    return false;
+}
 
 export const handleEventMessage = async (message) => {
     console.log('Processing event message:', {
@@ -124,7 +156,8 @@ async function handleEventCreated(message) {
     // venue from message should contain: venueId, externalVenueId, hasSeatSelection, etc.
     const venue = message?.venue || {};
     const waitlistConfig = message?.waitlist_config ?? undefined;
-    const event_end_date = message?.event_end_date ? new Date(message.event_end_date) : undefined;
+    const event_end_date = resolveEventEndDate({ message });
+    const isSeatedEvent = resolveIsSeatedEvent({ message, venue });
 
     console.log('[handleEventCreated] Creating event in MongoDB', {
         externalEventId,
@@ -138,7 +171,7 @@ async function handleEventCreated(message) {
         eventLocationGeoCode, transportLink, socialMedia, lang, position,
         active, eventName, videoUrl, otherInfo, eventTimezone,
         city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue,
-        waitlistConfig, event_end_date
+        waitlistConfig, event_end_date, isSeatedEvent
     );
 
     await inboxModel.markProcessed(message?.metaData?.causationId);
@@ -220,7 +253,8 @@ async function handleEventUpdated(message) {
     // If event doesn't exist, create it instead of throwing error (upsert behavior)
     // This handles cases where update message arrives before create message
     const waitlistConfig = message?.waitlist_config ?? undefined;
-    const event_end_date = message?.event_end_date ? new Date(message.event_end_date) : undefined;
+    const event_end_date = resolveEventEndDate({ message, existingEvent });
+    const isSeatedEvent = resolveIsSeatedEvent({ message, existingEvent, venue });
 
     if (!existingEvent) {
         console.log(`Event with ID ${externalEventId} not found, creating new event instead`);
@@ -230,7 +264,7 @@ async function handleEventUpdated(message) {
             eventLocationGeoCode, transportLink, socialMedia, lang, position,
             active, eventName, videoUrl, otherInfo, eventTimezone,
             city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue,
-            waitlistConfig, event_end_date
+            waitlistConfig, event_end_date, isSeatedEvent
         );
     } else {
         const updatePayload = {
@@ -239,7 +273,7 @@ async function handleEventUpdated(message) {
             eventLocationGeoCode, transportLink, socialMedia, lang, position,
             active, eventName, videoUrl, otherInfo, eventTimezone,
             city, country, venueInfo, venue,
-            waitlistConfig, event_end_date
+            waitlistConfig, event_end_date, isSeatedEvent
         };
         // Sync pre-sale waitlist cap so client has it before any join; count comes only from waitlist.status_updated (on each join)
         if (waitlistConfig && typeof waitlistConfig === 'object' && waitlistConfig.pre_sale_cap != null) {
@@ -251,7 +285,11 @@ async function handleEventUpdated(message) {
     // Handle pricing manifest sync if needed
     // Check if pricing configuration needs to be synced and event has seat selection
     const pricingConfiguration = message?.pricingConfiguration;
-    const hasSeatSelection = message?.hasSeatSelection || existingEvent?.hasSeatSelection;
+    const hasSeatSelection =
+        isSeatedEvent === true ||
+        message?.hasSeatSelection === true ||
+        venue?.hasSeatSelection === true ||
+        existingEvent?.venue?.hasSeatSelection === true;
     const pricingModel = venue?.pricingModel || existingEvent?.venue?.pricingModel;
 
     // Only sync pricing manifest if:

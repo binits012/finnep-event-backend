@@ -1,6 +1,15 @@
 import * as model from '../model/mongoModel.js'
 import {error} from './logger.js'
 import { Ticket } from '../model/mongoModel.js'
+
+const buildValidityWindowFilter = (now) => ([
+    { event_end_date: { $gte: now } },
+    { eventEndDate: { $gte: now } },
+    { eventDate: { $gte: now } },
+    { status: 'on-going' },
+]);
+const escapeRegExp = (value = '') => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 export class Event {
 
     constructor(eventTitle, eventDescription, eventDate,
@@ -8,7 +17,7 @@ export class Event {
         eventLocationGeoCode, transportLink,
         socialMedia, lang, position, active, eventName, videoUrl, otherInfo,
         eventTimezone, city, country, venueInfo, externalMerchantId, merchant,
-        externalEventId, venue, waitlistConfig, event_end_date
+        externalEventId, venue, waitlistConfig, event_end_date, isSeatedEvent
     ) {
         this.eventTitle = eventTitle
         this.eventDescription = eventDescription
@@ -37,6 +46,7 @@ export class Event {
         this.venue = venue
         this.waitlistConfig = waitlistConfig
         this.event_end_date = event_end_date
+        this.isSeatedEvent = isSeatedEvent
     }
     async saveToDB() {
         try {
@@ -80,6 +90,7 @@ export class Event {
                 venue: this.venue,
                 waitlistConfig: this.waitlistConfig,
                 event_end_date: this.event_end_date,
+                isSeatedEvent: this.isSeatedEvent,
             })
             return await event.save()
         } catch (err) {
@@ -93,13 +104,13 @@ export class Event {
 export const createEvent = async (eventTitle, eventDescription, eventDate,
     occupancy, ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
     socialMedia, lang, position, active, eventName, videoUrl, otherInfo,
-    eventTimezone, city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue, waitlistConfig, event_end_date
+    eventTimezone, city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue, waitlistConfig, event_end_date, isSeatedEvent
     ) =>{
 
     const event = new Event(eventTitle, eventDescription, eventDate,
         occupancy, ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
         socialMedia, lang, position, active, eventName, videoUrl, otherInfo,
-        eventTimezone, city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue, waitlistConfig, event_end_date)
+        eventTimezone, city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue, waitlistConfig, event_end_date, isSeatedEvent)
     return await event.saveToDB()
 }
 
@@ -110,7 +121,7 @@ export const getEvents = async(page = 1, limit = 10, filters = {}) =>{
     const queryFilter = {}
 
     if (filters.country) {
-        queryFilter.country = filters.country
+        queryFilter.country = new RegExp(`^${escapeRegExp(String(filters.country).trim())}$`, 'i')
     }
 
     if (filters.merchantId) {
@@ -120,6 +131,10 @@ export const getEvents = async(page = 1, limit = 10, filters = {}) =>{
     if (filters.category) {
         queryFilter['otherInfo.categoryName'] = filters.category
     }
+
+    // Event is listable while its validity window has not ended.
+    const now = new Date()
+    queryFilter.$or = buildValidityWindowFilter(now)
 
     // Get total count for pagination metadata with filters
     const total = await model.Event.countDocuments(queryFilter).exec()
@@ -249,10 +264,10 @@ export const deleteEventById = async(id) =>{
 
 
 export const listEvent = async(filter) =>{
-    // Only return future events
+    // Return events that are still valid.
     const now = new Date();
     return await model.Event.find({
-        eventDate: { $gte: now }
+        $or: buildValidityWindowFilter(now)
     }).populate('merchant').sort({'position':-1}).lean()
 }
 
@@ -276,14 +291,12 @@ export const listEventFiltered = async({ city, country, page = 1, limit = 1000 }
         q.city = city
     }
     if (country) {
-        q.country = country
+        q.country = new RegExp(`^${escapeRegExp(String(country).trim())}$`, 'i')
     }
-    // Active only by default
-    q.active = { $ne: false }
 
-    // Only return future events
+    // Return events that are still valid.
     const now = new Date();
-    q.eventDate = { $gte: now }
+    q.$or = buildValidityWindowFilter(now)
 
     const numericPage = Math.max(parseInt(String(page), 10) || 1, 1)
     const numericLimit = Math.min(Math.max(parseInt(String(limit), 10) || 1000, 1), limit)
@@ -320,8 +333,9 @@ export const getFeaturedEvents = async() => {
                     'featured.endDate': { $gte: now }
                 }
             ],
-            active: true,
-            eventDate: { $gte: now } // Only future events
+            $and: [
+                { $or: buildValidityWindowFilter(now) }
+            ]
         })
         .populate('merchant')
         .sort({
@@ -346,8 +360,9 @@ export const getRegularEvents = async(skipFeaturedIds = []) => {
                 { 'featured.isFeatured': false },
                 { 'featured.isFeatured': { $exists: false } }
             ],
-            active: true,
-            eventDate: { $gte: now },
+            $and: [
+                { $or: buildValidityWindowFilter(now) }
+            ],
             _id: { $nin: skipFeaturedIds }
         })
         .populate('merchant')

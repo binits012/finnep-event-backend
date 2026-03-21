@@ -257,6 +257,9 @@ export class ManifestEncoderService {
 			return fullManifest.venue.sections.map(section => ({
 				id: section._id?.toString() || section.id || section.name,
 				name: section.name,
+				sectionType: section.sectionType || 'Seating',
+				selectionMode: section.selectionMode || (section.sectionType === 'Seating' ? 'seat' : 'area'),
+				capacity: section.capacity || 0,
 				color: section.color || '#2196F3', // Default blue
 				bounds: section.bounds || null,
 				polygon: section.polygon || null
@@ -271,6 +274,9 @@ export class ManifestEncoderService {
 					sectionMap.set(place.section, {
 						id: place.section,
 						name: place.section,
+						sectionType: 'Seating',
+						selectionMode: 'seat',
+						capacity: 0,
 						color: '#2196F3', // Default blue
 						bounds: null,
 						polygon: null
