@@ -537,6 +537,26 @@ const ticketSchema = new mongoose.Schema({
 // Add indexes for Paytrail transaction lookups
 ticketSchema.index({ paytrailTransactionId: 1 });
 ticketSchema.index({ paytrailSubMerchantId: 1 });
+ticketSchema.index({ createdAt: -1 });
+ticketSchema.index({ isRead: 1, readAt: -1 });
+ticketSchema.index({ isSend: 1, createdAt: 1 });
+
+const childTicketQrSchema = new mongoose.Schema({
+	createdAt: { type: Date, default: Date.now },
+	parentTicketId: { type: mongoose.Schema.Types.ObjectId, ref: 'Ticket', required: true },
+	childIndex: { type: Number, required: true, min: 1 },
+	childQrCodeValue: { type: String, required: true, unique: true },
+	event: { type: mongoose.Schema.Types.ObjectId, ref: 'Event', required: true },
+	merchant: { type: mongoose.Schema.Types.ObjectId, ref: 'Merchant', required: true },
+	externalMerchantId: { type: String, required: true },
+	isRead: { type: Boolean, required: true, default: false },
+	readBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+	readAt: { type: Date },
+	active: { type: Boolean, required: true, default: true }
+})
+
+childTicketQrSchema.index({ parentTicketId: 1, childIndex: 1 }, { unique: true });
+childTicketQrSchema.index({ childQrCodeValue: 1 });
 
 // Platform-wise marketing consent: one record per email (emailCryptoId), default opt-in for new emails
 const platformMarketingConsentSchema = new mongoose.Schema({
@@ -1016,14 +1036,15 @@ const venueSchema = new mongoose.Schema({
 
 		// Visual spacing and sizing configuration (optional, with defaults)
 		spacingConfig: {
-			topPadding: { type: Number, default: 40 }, // Top padding in pixels (default: 40px)
-			seatSpacingMultiplier: { type: Number, default: 0.65 }, // Seat spacing multiplier (0.65 = 35% reduction, default: 0.65)
-			rowSpacingMultiplier: { type: Number, default: 0.75 }, // Row spacing multiplier (0.75 = 25% reduction, default: 0.75)
-			curveDepthMultiplier: { type: Number, default: 0.7 }, // Curve depth as percentage of row spacing (default: 70%)
-			seatRadius: { type: Number, default: 7 }, // Seat dot radius in pixels (default: 7px)
+			innerPadding: { type: Number, default: 0 }, // Unified inner padding in pixels (applies to section insets)
+			topPadding: { type: Number, default: 1 }, // Top padding in pixels (default: 40px)
+			seatSpacingMultiplier: { type: Number, default: 1 }, // Seat spacing multiplier (0.65 = 35% reduction, default: 0.65)
+			rowSpacingMultiplier: { type: Number, default: 1 }, // Row spacing multiplier (0.75 = 25% reduction, default: 0.75)
+			curveDepthMultiplier: { type: Number, default: 1 }, // Curve depth as percentage of row spacing (default: 70%)
+			seatRadius: { type: Number, default: 2 }, // Seat dot radius in pixels (default: 7px)
 			seatSpacingVisual: { type: Number, default: 1.0 }, // Visual spacing between seats (frontend multiplier, 1.0 = no scaling)
 			rowSpacingVisual: { type: Number, default: 1.0 }, // Visual spacing between rows (frontend multiplier, 1.0 = no scaling)
-			topMargin: { type: Number, default: 30 }, // Top margin in pixels for frontend rendering (default: 30px)
+			topMargin: { type: Number, default: 1 }, // Top margin in pixels for frontend rendering (default: 30px)
 			rotationAngle: { type: Number, default: 0 }, // Seat rotation angle in degrees for angled sections (default: 0°)
 			curveDirection: { type: String, default: 'frown' }, // Curve direction: 'frown' (edges up) or 'smile' (edges down)
 			topMarginY: { type: Number }, // Top margin Y for row positioning
@@ -1145,6 +1166,7 @@ const manifestSchema = new mongoose.Schema({
 		y: { type: Number }, // Y coordinate (if available)
 		row: { type: String }, // Row identifier
 		seat: { type: String }, // Seat number
+		subSectionName: { type: String, index: true }, // Optional grouping within a section
 		section: { type: String, index: true }, // Section name
 		zone: { type: String, index: true }, // Pricing zone
 
@@ -1332,7 +1354,7 @@ const schemas = [
 	orderTicketSchema,paymentSchema,settingSchema,ticketSchema,messageSchema,photoSchema,photoTypeSchema,
 	notificationSchema,notificationTypeSchema,tokenSchema,eventSchema,timeBasedPriceSchema,eventTypeSchema,
 	socialMediaSchema,contactSchema,cryptoSchema,roleSchema, userSchema, ticketAnalyticsSchema, externalTicketSalesSchema,
-	venueSchema, manifestSchema, eventManifestSchema
+	venueSchema, manifestSchema, eventManifestSchema, childTicketQrSchema
 ];
 
 schemas.forEach(schema => {
@@ -1347,6 +1369,7 @@ export const OrderTicket = mongoose.model('OrderTicket',orderTicketSchema)
 export const Payment = mongoose.model('Payment', paymentSchema)
 export const Setting = mongoose.model('Setting', settingSchema)
 export const Ticket = new mongoose.model('Ticket',ticketSchema)
+export const ChildTicketQR = mongoose.model('ChildTicketQR', childTicketQrSchema)
 export const Message = mongoose.model('Message',messageSchema)
 export const Reply = new mongoose.model('Reply', messageReply)
 export const Photo = mongoose.model('Photo', photoSchema)

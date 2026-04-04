@@ -426,7 +426,8 @@ function defineJobs() {
       // Only deactivate events that ended at least 5 hours ago
       const fiveHoursAgo = new Date(now.getTime() - (5 * 60 * 60 * 1000));
       const effectiveEndDateExpr = {
-        $ifNull: ['$event_end_date', { $ifNull: ['$eventEndDate', '$eventDate'] }]
+        // Respect explicit event end date first; fallback to legacy aliases, then eventDate.
+        $ifNull: ['$event_end_date', { $ifNull: ['$eventEndDate', { $ifNull: ['$endDate', '$eventDate'] }] }]
       };
       info('inactive past events ================== Starting job at', now);
       info(`Deactivating events with effective end date before: ${fiveHoursAgo} (5 hours buffer)`);

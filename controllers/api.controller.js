@@ -20,7 +20,38 @@ import * as venueController from './venue.controller.js'
 import * as seatController from './seat.controller.js'
 import * as systemResources from '../util/systemResources.js'
 
+export const getHealth = (req, res) => {
+    res.status(consts.HTTP_STATUS_OK).json({
+        ok: true,
+        service: 'finnep-eventapp-backend'
+    })
+}
+
 /** USER STUFF BEGINGS */
+
+/**
+ * Lightweight JWT validation for CMS server BFF (e.g. ops proxy).
+ * Uses the same verifyJWT + Redis token cache as other CMS routes.
+ */
+export const getSession = async (req, res, next) => {
+    const token = req.headers.authorization
+    await jwtToken.verifyJWT(token, async (err, data) => {
+        if (err || data === null) {
+            return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({
+                message: 'Unauthorized',
+                error: 'INVALID_TOKEN'
+            })
+        }
+        if (data.role === consts.ROLE_MEMBER) {
+            return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
+                message: 'Forbidden',
+                error: 'INSUFFICIENT_PERMISSIONS'
+            })
+        }
+        return res.status(consts.HTTP_STATUS_OK).json({ ok: true, role: data.role })
+    })
+}
+
 export const login = async (req, res, next) => {
     await user.login(req,res,next)
 }
@@ -424,6 +455,14 @@ export const ticketCheckIn = async(req,res,next) =>{
         })
         await ticket.ticketCheckIn(req,res,next)
     }))
+}
+
+export const getTicketByChildQrValue = async (req, res, next) => {
+    await ticket.getTicketByChildQrValue(req, res, next)
+}
+
+export const childTicketCheckIn = async (req, res, next) => {
+    await ticket.childTicketCheckIn(req, res, next)
 }
 
 export const searchTicket = async(req, res, next) => {

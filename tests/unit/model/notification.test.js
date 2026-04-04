@@ -239,7 +239,7 @@ describe('Notification Model', () => {
   });
 
   describe('getAllNotificationForWebsite', () => {
-    it('should retrieve published notifications for website', async () => {
+    it('should retrieve active published notifications for website', async () => {
       // Arrange
       const mockNotifications = [
         {
@@ -251,10 +251,10 @@ describe('Notification Model', () => {
       ];
 
       mockNotificationModel.find.mockReturnValue({
-        where: jest.fn().mockReturnValue({
-          sort: jest.fn().mockReturnValue({
-            populate: jest.fn().mockReturnValue({
-              limit: jest.fn().mockResolvedValue(mockNotifications)
+        sort: jest.fn().mockReturnValue({
+          populate: jest.fn().mockReturnValue({
+            limit: jest.fn().mockReturnValue({
+              exec: jest.fn().mockResolvedValue(mockNotifications)
             })
           })
         })
@@ -264,7 +264,12 @@ describe('Notification Model', () => {
       const result = await Notification.getAllNotificationForWebsite();
 
       // Assert
-      expect(mockNotificationModel.find).toHaveBeenCalledWith({ 'publish': true });
+      expect(mockNotificationModel.find).toHaveBeenCalled();
+      const findArg = mockNotificationModel.find.mock.calls[0][0];
+      expect(findArg.publish).toBe(true);
+      expect(findArg.startDate).toEqual({ $lte: expect.any(Date) });
+      expect(findArg.endDate).toEqual({ $gte: expect.any(Date) });
+      expect(findArg.$or).toBeDefined();
       expect(result).toBeDefined();
       expect(Array.isArray(result)).toBe(true);
     });

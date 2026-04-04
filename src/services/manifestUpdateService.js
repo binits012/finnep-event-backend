@@ -92,6 +92,20 @@ export class ManifestUpdateService {
 				manifest.availability.areaSoldCounts = new Map();
 			}
 
+			// Be defensive: older manifests can hold plain objects instead of a Mongoose Map.
+			// Normalize to a Map so get/set calls below always work.
+			if (
+				typeof manifest.availability.areaSoldCounts?.get !== 'function' ||
+				typeof manifest.availability.areaSoldCounts?.set !== 'function'
+			) {
+				const source = manifest.availability.areaSoldCounts || {};
+				const normalized = new Map();
+				for (const [k, v] of Object.entries(source)) {
+					normalized.set(String(k), Number(v || 0) || 0);
+				}
+				manifest.availability.areaSoldCounts = normalized;
+			}
+
 			let totalIncremented = 0;
 			for (const sel of areaSelections) {
 				const sectionId = String(sel?.sectionId || '').trim();
@@ -105,6 +119,9 @@ export class ManifestUpdateService {
 
 			manifest.updatedAt = new Date();
 			const updatedManifest = await manifest.save();
+			if (totalIncremented <= 0) {
+				info(`No area sold counters incremented for event manifest ${manifestId}; selections=${JSON.stringify(areaSelections)}`);
+			}
 			info(`Incremented area sold counters by ${totalIncremented} on event manifest ${manifestId}`);
 			return updatedManifest;
 		} catch (err) {

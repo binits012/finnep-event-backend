@@ -19,6 +19,7 @@ import redisClient from './model/redisConnect.js'; // Ensure Redis client is imp
 const stripe = new Stripe(process.env.STRIPE_KEY)
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET
 var app = express();
+const rabbitConsumerWatchQueues = ['event-events-queue', 'merchant-events-queue'];
 
 // Add this block right after app initialization to test Redis early
 (async () => {
@@ -252,7 +253,7 @@ setupSwagger().then(swagger => {
 
 app.use('/api', api)
 app.use('/front', front)
-app.set('port', process.env.PORT || process.env.PORT);
+app.set('port', process.env.PORT || 3000);
 
 // Only start server if not in test mode
 if (process.env.NODE_ENV !== 'test') {
@@ -277,17 +278,85 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 // Initialize and start queue consumers
+let queueWatchdogInterval = null;
+let queueWatchdogRunning = false;
+
 try {
     console.log('Initializing RabbitMQ connection...');
     await rabbitMQ.connect();
     console.log('RabbitMQ connected, setting up queues...');
     await setupQueues();
+    rabbitMQ.onReconnect(async () => {
+        console.log('RabbitMQ reconnected, forcing queue consumer re-setup...');
+        await setupQueues(true);
+    });
+    const queueWatchdogMs = parseInt(process.env.RABBITMQ_QUEUE_WATCHDOG_MS || '30000', 10);
+    queueWatchdogInterval = setInterval(async () => {
+        if (queueWatchdogRunning) return;
+        queueWatchdogRunning = true;
+        try {
+            const channel = messageConsumer.consumeChannel;
+            if (!channel) return;
+            const zeroConsumerQueues = [];
+            for (const queueName of rabbitConsumerWatchQueues) {
+                const queueInfo = await channel.checkQueue(queueName);
+                if ((queueInfo?.consumerCount || 0) === 0) {
+                    zeroConsumerQueues.push(queueName);
+                }
+            }
+            if (zeroConsumerQueues.length > 0) {
+                console.warn('Queue watchdog detected missing consumers, forcing queue setup:', zeroConsumerQueues.join(', '));
+                await setupQueues(true);
+            }
+        } catch (watchdogError) {
+            console.error('Queue watchdog error:', watchdogError.message || watchdogError);
+        } finally {
+            queueWatchdogRunning = false;
+        }
+    }, queueWatchdogMs);
     console.log('Queue setup completed successfully');
 } catch (error) {
     console.error('Failed to setup RabbitMQ/queues:', error.message || error);
     console.log('Application will continue without RabbitMQ functionality');
     // Don't crash the app, just log the error and continue
 }
+
+app.get('/health/consumers', async (req, res) => {
+    try {
+        const channel = messageConsumer.consumeChannel;
+        if (!channel) {
+            return res.status(503).json({
+                status: 'unhealthy',
+                reason: 'consume channel not available',
+                queues: []
+            });
+        }
+
+        const queues = [];
+        for (const queueName of rabbitConsumerWatchQueues) {
+            const queueInfo = await channel.checkQueue(queueName);
+            queues.push({
+                queue: queueName,
+                messages: queueInfo?.messageCount || 0,
+                consumers: queueInfo?.consumerCount || 0
+            });
+        }
+
+        const zeroConsumerQueues = queues.filter((q) => q.consumers === 0).map((q) => q.queue);
+        const healthy = zeroConsumerQueues.length === 0;
+
+        return res.status(healthy ? 200 : 503).json({
+            status: healthy ? 'healthy' : 'unhealthy',
+            zeroConsumerQueues,
+            queues
+        });
+    } catch (healthError) {
+        return res.status(503).json({
+            status: 'unhealthy',
+            reason: healthError.message || 'consumer health check failed'
+        });
+    }
+});
 
 // Global error handlers to prevent crashes
 process.on('uncaughtException', (error) => {
@@ -307,6 +376,10 @@ process.on('unhandledRejection', (reason, promise) => {
 process.on('SIGINT', async () => {
     console.log('Shutting down gracefully...');
     try {
+        if (queueWatchdogInterval) {
+            clearInterval(queueWatchdogInterval);
+            queueWatchdogInterval = null;
+        }
         // Close messageConsumer channels if they exist
         if (messageConsumer.publishChannel) {
             await messageConsumer.publishChannel.close();

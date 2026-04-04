@@ -8,6 +8,8 @@ import * as express from 'express'
 const router = express.Router()
 import * as api  from '../controllers/api.controller.js'
 import * as report from '../controllers/report.controller.js'
+import * as monitor from '../controllers/monitor.controller.js'
+import * as dashboard from '../controllers/dashboard.controller.js'
 import { authenticate, requireAdmin } from '../middleware/auth.middleware.js'
 import {
     createPaytrailSubMerchant,
@@ -15,7 +17,10 @@ import {
     toggleShopInShopMode
 } from '../controllers/paytrail.admin.controller.js'
 
+router.get('/health', api.getHealth)
+
 router.route('/auth/user/login').post(api.login)
+router.route('/auth/user/session').get(api.getSession)
 router.route('/auth/user/changePassword').post(api.changePassword)
 router.route('/user/admin')
     .post(api.createAdminUser)
@@ -60,6 +65,7 @@ router.route('/queue/config/email')
 router.route('/queue/config/metrics')
     .get(api.getSystemMetrics)
 
+router.get('/admin/monitor-kpis', authenticate, requireAdmin, monitor.getMonitorKpis)
 
 router.route('/event')
     .post(api.createEvent)
@@ -106,8 +112,17 @@ router.route('/ticket/:id')
 router.route('/ticket/:id/checkIn')
     .put(api.ticketCheckIn)
 
+router.route('/ticket/child/:qrValue')
+    .get(api.getTicketByChildQrValue)
+
+router.route('/ticket/child/:qrValue/checkIn')
+    .put(api.childTicketCheckIn)
+
+/** Legacy full dashboard dump (events/photos/tickets); prefer GET /dashboard/summary for CMS home. */
 router.route('/dashboard')
     .get(api.dashboard)
+router.route('/dashboard/summary')
+    .get(dashboard.getDashboardSummary)
 router.route('/logout')
     .get(api.logout)
 

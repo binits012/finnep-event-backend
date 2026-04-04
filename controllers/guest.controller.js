@@ -330,6 +330,7 @@ export const getTickets = async (req, res, next) => {
                                 null,
                             currency: ticketInfoPlain.currency || paymentCurrency,
                             purchaseDate: derivedPurchaseDate,
+                            childQRCodes: Array.isArray(ticketInfoPlain.childQRCodes) ? ticketInfoPlain.childQRCodes : [],
                             ...(seatTickets ? { seatTickets } : {})
                             // Exclude sensitive fields: paymentIntentId, email, merchantId, eventId, ticketId, eventName
                         } : null;
@@ -541,6 +542,7 @@ export const getTicketById = async (req, res, next) => {
                         (ticketInfoPlain.price ?? ticketInfoPlain.basePrice ?? null),
                     currency: ticketInfoPlain.currency || paymentCurrency,
                     purchaseDate: derivedPurchaseDate,
+                    childQRCodes: Array.isArray(ticketInfoPlain.childQRCodes) ? ticketInfoPlain.childQRCodes : [],
                     ...(seatTickets ? { seatTickets } : {})
                     // Exclude sensitive fields: paymentIntentId, email, merchantId, eventId, ticketId, eventName
                 } : null;

@@ -93,3 +93,52 @@ export const getTicketsByEmailCryptoId = async (emailCryptoId) => {
         .select('-qrCode -ics')
         .exec()
 }
+
+export const upsertChildTicketQR = async (payload) => {
+    const {
+        parentTicketId,
+        childIndex,
+        childQrCodeValue,
+        event,
+        merchant,
+        externalMerchantId
+    } = payload
+
+    return await model.ChildTicketQR.findOneAndUpdate(
+        { parentTicketId, childIndex },
+        {
+            $set: {
+                childQrCodeValue,
+                event,
+                merchant,
+                externalMerchantId,
+                active: true
+            }
+        },
+        { new: true, upsert: true, setDefaultsOnInsert: true }
+    ).exec()
+}
+
+export const getChildTicketQRByValue = async (childQrCodeValue) => {
+    return await model.ChildTicketQR.findOne({ childQrCodeValue })
+        .populate('parentTicketId')
+        .populate('event')
+        .populate('readBy')
+        .exec()
+}
+
+export const updateChildTicketQRByValue = async (childQrCodeValue, obj) => {
+    return await model.ChildTicketQR.findOneAndUpdate(
+        { childQrCodeValue },
+        { $set: obj },
+        { new: true }
+    ).populate('parentTicketId').populate('event').populate('readBy').exec()
+}
+
+export const getChildTicketQRsByParentTicketId = async (parentTicketId) => {
+    return await model.ChildTicketQR.find({ parentTicketId, active: true })
+        .sort({ childIndex: 1 })
+        .select('-qrCode')
+        .lean()
+        .exec()
+}

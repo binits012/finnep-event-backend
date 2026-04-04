@@ -4,6 +4,24 @@ import { downloadPricingFromS3 } from '../../util/aws.js';
 import { error, info } from '../../model/logger.js';
 import * as Event from '../../model/event.js';
 const mongoose = await import('mongoose');
+
+const getAreaSoldTotal = (areaSoldCounts) => {
+	if (!areaSoldCounts) return 0;
+	if (typeof areaSoldCounts?.values === 'function') {
+		let total = 0;
+		for (const value of areaSoldCounts.values()) {
+			total += Number(value || 0) || 0;
+		}
+		return total;
+	}
+	return Object.values(areaSoldCounts).reduce((sum, value) => sum + (Number(value || 0) || 0), 0);
+};
+
+const hasManifestSales = (manifest) => {
+	const soldCount = Array.isArray(manifest?.availability?.sold) ? manifest.availability.sold.length : 0;
+	const areaSoldTotal = getAreaSoldTotal(manifest?.availability?.areaSoldCounts);
+	return soldCount > 0 || areaSoldTotal > 0;
+};
 /**
  * Pricing Manifest Sync Service
  * Handles synchronization of pricing configurations from S3 to MongoDB
@@ -239,6 +257,8 @@ export class PricingManifestSyncService {
 				existingManifestId = existingEvent.venue.lockedManifestId;
 			}
 
+			let existingManifestDoc = null;
+
 			// Build event manifest document
 			// Pricing information is now encoded directly into placeIds via tier codes
 			// pricingConfig contains the tier mappings for decoding pricing from placeIds
@@ -276,9 +296,41 @@ export class PricingManifestSyncService {
 						info(`[PricingManifestSyncService] Manifest ${existingManifestId} not found in EventManifest collection (may be from old Manifest collection), creating new manifest instead`);
 						existingManifestId = null;
 					} else {
+						existingManifestDoc = existingManifest;
 						info(`[PricingManifestSyncService] Found existing EventManifest ${existingManifestId}, will update`);
 					}
 				}
+			}
+
+			// Guardrail: never overwrite event manifests after any tickets are sold.
+			// FEB manifest state becomes immutable for pricing sync updates once sales exist.
+			if (!existingManifestDoc) {
+				existingManifestDoc = await EventManifest.findOne({ eventId: String(eventMongoId) });
+				if (existingManifestDoc && !existingManifestId) {
+					existingManifestId = existingManifestDoc._id;
+				}
+			}
+
+			if (existingManifestDoc && hasManifestSales(existingManifestDoc)) {
+				const soldCount = Array.isArray(existingManifestDoc?.availability?.sold) ? existingManifestDoc.availability.sold.length : 0;
+				const areaSoldTotal = getAreaSoldTotal(existingManifestDoc?.availability?.areaSoldCounts);
+				info(`[PricingManifestSyncService] Skipping pricing manifest overwrite for event ${externalEventId} because sales exist`, {
+					eventMongoId,
+					manifestId: existingManifestDoc._id,
+					soldCount,
+					areaSoldTotal
+				});
+
+				// Ensure the event points to the protected manifest.
+				if (existingEvent && String(existingEvent?.venue?.lockedManifestId || '') !== String(existingManifestDoc._id)) {
+					await Event.updateEventById(existingEvent._id, {
+						'venue.lockedManifestId': existingManifestDoc._id
+					}).catch(() => {
+						// Do not fail sync flow for a linkage repair failure.
+					});
+				}
+
+				return existingManifestDoc;
 			}
 
 			if (existingManifestId) {

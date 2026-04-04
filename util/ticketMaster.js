@@ -203,6 +203,38 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
         // Get quantity (number of tickets) - needed to determine if stored values are per-unit or total
         const quantity = parseInt(getValue(ticketInfoData, 'quantity') || '1', 10) || 1;
 
+        let childQRCodes = [];
+        if (quantity > 1) {
+            for (let childIndex = 1; childIndex <= quantity; childIndex++) {
+                const childQrCodeValue = `${ticketId}#${childIndex}`;
+
+                await Ticket.upsertChildTicketQR({
+                    parentTicketId: ticketId,
+                    childIndex,
+                    childQrCodeValue,
+                    event: ticket.event,
+                    merchant: ticket.merchant,
+                    externalMerchantId: ticket.externalMerchantId
+                });
+
+                childQRCodes.push({
+                    childIndex,
+                    childQrCodeValue
+                });
+            }
+        } else {
+            childQRCodes = [];
+        }
+
+        if (ticketInfoData && typeof ticketInfoData === 'object') {
+            const updatedTicketInfo = {
+                ...ticketInfoData,
+                childQRCodes
+            };
+            await Ticket.updateTicketById(ticketId, { ticketInfo: updatedTicketInfo });
+            ticketInfoData = updatedTicketInfo;
+        }
+
         // Check if we have seatTickets (for seated events with different ticket types per seat)
         let seatTickets = getValue(ticketInfoData, 'seatTickets');
         if (typeof seatTickets === 'string') {

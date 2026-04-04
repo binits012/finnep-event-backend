@@ -43,6 +43,10 @@ router.route('/sendFeedback')
 router.route('/sendCareerApplication')
     .post(front.sendCareerApplication)
 
+// Public GDPR-style personal data request (no login required)
+router.route('/request-data')
+    .post(front.submitPersonalDataRequest)
+
 router.route('/free-event-register')
     .post(front.handleFreeEventRegistration)
 

@@ -5,6 +5,7 @@ class RabbitMQConnection {
     constructor() {
         this.connection = null;
         this.channels = new Set(); // Track multiple channels
+        this.reconnectCallbacks = new Set();
         this.config = {
             hostname: process.env.RABBITMQ_HOST || 'localhost',
             port: parseInt(process.env.RABBITMQ_PORT || '5672', 10),
@@ -62,6 +63,13 @@ class RabbitMQConnection {
             });
 
             info('Successfully connected to RabbitMQ');
+            for (const callback of this.reconnectCallbacks) {
+                try {
+                    await callback();
+                } catch (callbackError) {
+                    error('RabbitMQ reconnect callback failed', { error: callbackError.message, stack: callbackError.stack });
+                }
+            }
             this.isConnecting = false;
             return this.connection;
         } catch (err) {
@@ -149,6 +157,12 @@ class RabbitMQConnection {
 
     async disconnect() {
         await this.close();
+    }
+
+    onReconnect(callback) {
+        if (typeof callback !== 'function') return () => {};
+        this.reconnectCallbacks.add(callback);
+        return () => this.reconnectCallbacks.delete(callback);
     }
 }
 

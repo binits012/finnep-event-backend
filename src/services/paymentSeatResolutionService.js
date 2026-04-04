@@ -1,6 +1,6 @@
 import { EventManifest } from '../../model/mongoModel.js';
 import { seatReservationService } from './seatReservationService.js';
-import { downloadPricingFromS3 } from '../../util/aws.js';
+import { loadVenueSectionContext } from './venueSectionContextService.js';
 import { error, info } from '../../model/logger.js';
 
 const resolveSectionMode = (section) => {
@@ -45,6 +45,26 @@ const normalizeSectionSelections = (input) => {
 		.filter((item) => (item.sectionId || item.sectionName) && item.quantity > 0);
 };
 
+/** Match seat.controller / Mongo Map or plain object */
+const readAreaSoldCount = (areaSoldCounts, key) => {
+	if (!key) return 0;
+	if (typeof areaSoldCounts?.get === 'function') {
+		const v = areaSoldCounts.get(String(key));
+		return Number(v || 0) || 0;
+	}
+	const v = areaSoldCounts?.[String(key)];
+	return Number(v || 0) || 0;
+};
+
+const stringifySectionKey = (k) => {
+	if (k === null || k === undefined) return '';
+	if (typeof k === 'object' && typeof k.toString === 'function') {
+		const s = k.toString();
+		if (s && s !== '[object Object]') return s.trim();
+	}
+	return String(k).trim();
+};
+
 export async function resolveSoldPlaceIdsForPayment({
 	eventId,
 	sessionId,
@@ -65,8 +85,8 @@ export async function resolveSoldPlaceIdsForPayment({
 
 	try {
 		const eventManifest = await EventManifest.findOne({ eventId: String(eventId) }).lean();
-		if (!eventManifest?.s3Key) {
-			error(`[resolveSoldPlaceIdsForPayment] Missing manifest/s3Key for event ${eventId}`);
+		if (!eventManifest?.venue) {
+			error(`[resolveSoldPlaceIdsForPayment] Missing manifest or venue ref for event ${eventId}`);
 			return {
 				placeIds: explicitPlaceIds,
 				resolvedFromSections: [],
@@ -79,14 +99,28 @@ export async function resolveSoldPlaceIdsForPayment({
 			};
 		}
 
-		const fullManifest = await downloadPricingFromS3(eventManifest.s3Key);
-		const sections = Array.isArray(fullManifest?.sections) ? fullManifest.sections : [];
-		const places = Array.isArray(fullManifest?.places) ? fullManifest.places : [];
+		const { venue, sections, places } = await loadVenueSectionContext({
+			venueId: eventManifest.venue,
+			s3Key: eventManifest.s3Key
+		});
+		if (!venue || !Array.isArray(venue.sections) || venue.sections.length === 0) {
+			error(`[resolveSoldPlaceIdsForPayment] Venue or venue.sections missing for event ${eventId}`);
+			return {
+				placeIds: explicitPlaceIds,
+				resolvedFromSections: [],
+				areaSoldIncrements: [],
+				unresolvedSelections: normalizedSelections.map((sel) => ({
+					...sel,
+					resolved: 0,
+					reason: 'venue_missing'
+				}))
+			};
+		}
 		const sectionsById = new Map();
 		for (const s of sections) {
 			const keys = [
 				s?.id,
-				s?._id,
+				s?._id?.toString(),
 				s?.name,
 				typeof s?.name === 'string' ? s.name.toLowerCase() : null
 			]
@@ -97,6 +131,7 @@ export async function resolveSoldPlaceIdsForPayment({
 				if (!sectionsById.has(k)) sectionsById.set(k, s);
 			}
 		}
+		info(`[resolveSoldPlaceIdsForPayment] venue sections: ${sections.map((s) => JSON.stringify({ id: s.id, name: s.name, sectionType: s.sectionType, selectionMode: s.selectionMode })).join(', ')}`);
 		const soldSet = new Set(eventManifest?.availability?.sold || []);
 		const areaSoldCounts = eventManifest?.availability?.areaSoldCounts || {};
 		const reservedMap = await seatReservationService.getReservedSeats(String(eventId));
@@ -115,23 +150,56 @@ export async function resolveSoldPlaceIdsForPayment({
 				(sectionNameKey
 					? sectionsById.get(sectionNameKey) || sectionsById.get(sectionNameKey.toLowerCase())
 					: null);
-			if (!section || resolveSectionMode(section) !== 'area') {
+			if (section && resolveSectionMode(section) !== 'area') {
 				unresolvedSelections.push({ ...selection, resolved: 0, reason: 'invalid_section' });
 				continue;
 			}
 
+			// Same canonical key as seat map (normalizeAreaSections). If section lookup fails due id drift,
+			// fallback to client keys so standing counters can still be persisted.
+			const areaCounterKey = String(
+				section?.id ||
+					(typeof section?._id?.toString === 'function' ? section._id.toString() : section?._id) ||
+					section?.name ||
+					selection.sectionId ||
+					selection.sectionName ||
+					''
+			).trim();
+
 			const sectionPlaceIds = places
-				.filter((p) => (p.section === section.name || p.section === selection.sectionId) && p.placeId)
+				.filter((p) => {
+					if (!p?.placeId) return false;
+					const ps = String(p.section || '').trim();
+					if (!ps) return false;
+					const candidateKeys = [
+						section?.name,
+						section?.id,
+						section?._id,
+						selection.sectionId,
+						selection.sectionName
+					]
+						.map((k) => stringifySectionKey(k))
+						.filter((k) => k.length > 0);
+					return candidateKeys.includes(ps);
+				})
 				.map((p) => p.placeId)
 				.filter((placeId) => !soldSet.has(placeId) && !usedSet.has(placeId));
 
-			const inferredCapacity = Number(section.capacity || sectionPlaceIds.length || 0);
+			const inferredCapacity = Number(section?.capacity || sectionPlaceIds.length || 0);
 			const currentAreaSold =
-				Number(areaSoldCounts?.[String(selection.sectionId)] ?? areaSoldCounts?.[String(section.name)] ?? 0) || 0;
+				readAreaSoldCount(areaSoldCounts, areaCounterKey) ||
+				readAreaSoldCount(areaSoldCounts, section?.name) ||
+				readAreaSoldCount(areaSoldCounts, selection.sectionId) ||
+				readAreaSoldCount(areaSoldCounts, selection.sectionName) ||
+				0;
 			const availableForSection = Math.max(0, inferredCapacity - currentAreaSold);
 			const quantityToSell = Math.min(selection.quantity, availableForSection);
-			if (quantityToSell > 0) {
-				areaSoldIncrements.push({ sectionId: selection.sectionId, quantity: quantityToSell });
+			if (!section && sectionPlaceIds.length === 0) {
+				unresolvedSelections.push({ ...selection, resolved: 0, reason: 'invalid_section' });
+				continue;
+			}
+			if (quantityToSell > 0 && areaCounterKey) {
+				areaSoldIncrements.push({ sectionId: areaCounterKey, quantity: quantityToSell });
 			}
 
 			// Prefer reservations owned by this payment session, but if reservation TTL expired
@@ -176,7 +244,8 @@ export async function resolveSoldPlaceIdsForPayment({
 		info(
 			`[resolveSoldPlaceIdsForPayment] event=${eventId} explicit=${explicitPlaceIds.length} ` +
 			`fromSections=${resolvedFromSections.length} total=${finalPlaceIds.length} ` +
-			`sessionId=${sessionId ? 'yes' : 'no'} unresolved=${unresolvedSelections.length}`
+			`sessionId=${sessionId ? 'yes' : 'no'} unresolved=${unresolvedSelections.length} ` +
+			`requestedAreas=${normalizedSelections.length} areaIncrements=${areaSoldIncrements.length}`
 		);
 
 		return {

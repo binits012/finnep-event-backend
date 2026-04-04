@@ -25,9 +25,11 @@ import { SETTINGS_CACHE_KEY } from '../const.js'
 import { manifestUpdateService } from '../src/services/manifestUpdateService.js'
 import { seatReservationService } from '../src/services/seatReservationService.js'
 import { resolveSoldPlaceIdsForPayment } from '../src/services/paymentSeatResolutionService.js'
+import { loadVenueSectionContext } from '../src/services/venueSectionContextService.js'
 import * as seatController from './seat.controller.js'
 import { EventManifest, Manifest, PlatformMarketingConsent, Survey, SurveyResponse } from '../model/mongoModel.js';
 import { Venue } from '../model/mongoModel.js'
+import { PersonalDataRequest } from '../model/personalDataRequest.js'
 import { getPresalePayload, consumePresaleToken } from '../util/presaleToken.js'
 import { getSurveyTokenPayload, consumeSurveyToken } from '../util/surveyToken.js'
 
@@ -67,7 +69,7 @@ export const getDataForFront = async (req, res, next) => {
     // Fetch all data in parallel (country lookup runs alongside)
     const [photo, notification, event, setting] = await Promise.all([
         Photo.listPhoto(),
-        Notification.getAllNotification(),
+        Notification.getActiveNotificationsForFront(),
         Event.getEventsWithTicketCounts(),
         (async () => {
             let setting = await commonUtil.getCacheByKey(redisClient, SETTINGS_CACHE_KEY);
@@ -117,9 +119,13 @@ export const getDataForFront = async (req, res, next) => {
     }
 
 
+    const notificationList = Array.isArray(notification)
+        ? notification
+        : []
+
     const data = {
         photo: photosWithCloudFrontUrls?.filter(e => e.publish),
-        notification: notification,
+        notification: notificationList,
         event: filteredEvents,
         setting: setting
     }
@@ -563,6 +569,9 @@ const validatePaymentRequest = (reqBody) => {
     }
     if (metadata.sectionSelections) {
         sanitizedMetadata.sectionSelections = metadata.sectionSelections;
+    }
+    if (metadata.sessionId) {
+        sanitizedMetadata.sessionId = sanitizeString(metadata.sessionId, 100);
     }
 
     // Preserve pricing fields for pricing_configuration model
@@ -2071,6 +2080,8 @@ export const verifyPaytrailPayment = async (req, res, next) => {
             fullName,
             seatTickets, // Array of {placeId, ticketId, ticketName} for multiple ticket types
             placeIds, // Explicit placeIds array (may be sent separately from seats)
+            sectionSelections, // Standing/area: [{ sectionId?, sectionName?, quantity }] — must reach createTicketFromPaytrailPayment
+            sessionId, // Seat reservation session (optional; stored in Redis at create time when sent)
             nonce, // Nonce for duplicate submission protection,
             locale // Locale for the payment
         } = req.body;
@@ -2509,6 +2520,32 @@ export const verifyPaytrailPayment = async (req, res, next) => {
         // 5. BUILD PAYMENT DATA - prefer Redis (trusted), fallback to client data
         console.log(`[verifyPaytrailPayment] Creating ticket for event=${finalEventId}`);
 
+        const normalizePaytrailSectionSelections = (raw) => {
+            if (!raw) return [];
+            if (Array.isArray(raw)) return raw;
+            if (typeof raw === 'string') {
+                const t = raw.trim();
+                if (!t || t === '[]') return [];
+                try {
+                    const p = JSON.parse(t);
+                    return Array.isArray(p) ? p : [];
+                } catch {
+                    return [];
+                }
+            }
+            return [];
+        };
+
+        // Redis already holds sectionSelections from createPaytrailPayment; verify must forward them to
+        // createTicketFromPaytrailPayment or areaSoldCounts / sold manifest never updates.
+        const finalSectionSelections = useRedisData
+            ? normalizePaytrailSectionSelections(redisData.sectionSelections)
+            : normalizePaytrailSectionSelections(sectionSelections);
+
+        const finalSessionId = useRedisData
+            ? (redisData.sessionId && String(redisData.sessionId).trim()) || null
+            : (sessionId && String(sessionId).trim()) || null;
+
         // Get ticket type info for ticket name (already found above)
         const defaultTicketName = ticketType?.name || 'Standard Ticket';
 
@@ -2548,7 +2585,9 @@ export const verifyPaytrailPayment = async (req, res, next) => {
             fullName: useRedisData ? (redisData.fullName || fullName) : (fullName || undefined),
             placeIds: useRedisData ? (redisData.placeIds || []) : (placeIds || seats || []),
             // Include seatTickets for proper display (has ticketName with human-readable format)
-            seatTickets: useRedisData ? (redisData.seatTickets || []) : (parsedSeatTickets || [])
+            seatTickets: useRedisData ? (redisData.seatTickets || []) : (parsedSeatTickets || []),
+            sectionSelections: finalSectionSelections,
+            sessionId: finalSessionId
         };
 
         console.log('[verifyPaytrailPayment] Payment data being passed to createTicketFromPaytrailPayment:', {
@@ -2559,7 +2598,9 @@ export const verifyPaytrailPayment = async (req, res, next) => {
             finalPlaceIds: paymentData.placeIds,
             finalSeats: paymentData.seats,
             eventId: paymentData.eventId,
-            hasSeatTickets: !!(paymentData.seatTickets && paymentData.seatTickets.length > 0)
+            hasSeatTickets: !!(paymentData.seatTickets && paymentData.seatTickets.length > 0),
+            sectionSelectionsCount: finalSectionSelections.length,
+            hasSessionId: !!finalSessionId
         });
 
         const paytrailWebhook = await import('./paytrail.webhook.js');
@@ -3134,6 +3175,55 @@ export const publishTicketCreationEvent = async (ticket, event, metadata, paymen
             }
         }
 
+        // Ensure childQRCodes are present for group/multi-ticket orders.
+        // The EMS consumer persists `ticket.ticketInfo.childQRCodes` as-is, and some flows
+        // publish the ticket-created event before ticketMaster later populates them.
+        // Deterministically generate them from ticket id + quantity when missing.
+        try {
+            const ticketIdString = ticket?._id?.toString?.() || String(ticket?._id || '');
+            const ticketInfo = cleanTicket?.ticketInfo;
+            if (ticketInfo && typeof ticketInfo === 'object') {
+                const rawQty = ticketInfo.quantity ?? ticketInfo.qty ?? 1;
+                const quantity = parseInt(String(rawQty), 10);
+                const existingChildQRCodes = Array.isArray(ticketInfo.childQRCodes)
+                    ? ticketInfo.childQRCodes
+                    : [];
+
+                const enrichChild = (child, idx) => {
+                    const childIndex = Number(child?.childIndex ?? (idx + 1));
+                    const childValue = String(child?.childQrCodeValue || `${ticketIdString}#${childIndex}`);
+                    return {
+                        childIndex,
+                        childQrCodeValue: childValue,
+                        parentTicketId: ticketIdString,
+                        eventId: String(event?._id || event?.id || ''),
+                        merchantId: String(metadata?.merchantId || ''),
+                        externalMerchantId: String(metadata?.externalMerchantId || ''),
+                        active: child?.active !== false,
+                        isRead: false,
+                        createdAt: new Date().toISOString()
+                    };
+                };
+
+                const shouldPopulate =
+                    Number.isFinite(quantity) && quantity > 1 && existingChildQRCodes.length === 0 && ticketIdString;
+
+                if (shouldPopulate) {
+                    ticketInfo.childQRCodes = Array.from({ length: quantity }, (_, idx) => enrichChild({}, idx));
+
+                    // Persist to FEB so any local reads (e.g. ticket display / scanning)
+                    // don't depend on later email/ticketMaster flows to populate child QR codes.
+                    await Ticket.updateTicketById(ticket._id, { ticketInfo });
+                } else if (existingChildQRCodes.length > 0) {
+                    // Backfill required child metadata if older records only have index + QR value.
+                    ticketInfo.childQRCodes = existingChildQRCodes.map((child, idx) => enrichChild(child, idx));
+                    await Ticket.updateTicketById(ticket._id, { ticketInfo });
+                }
+            }
+        } catch (childQrError) {
+            error('Failed to populate childQRCodes in publishTicketCreationEvent:', childQrError?.message || childQrError);
+        }
+
         // Platform marketing consent (per-email, default opt-in for new emails)
         const ticketForId = ticket.ticketFor?._id || ticket.ticketFor;
         const platformConsent = ticketForId ? await PlatformMarketingConsent.getOrCreatePlatformConsent(ticketForId) : null;
@@ -3150,6 +3240,9 @@ export const publishTicketCreationEvent = async (ticket, event, metadata, paymen
                 externalEventId: event.externalEventId,
                 externalMerchantId: metadata.externalMerchantId,
                 merchantId: metadata.merchantId,
+                // Optional push tokens captured during free registration.
+                androidFcmToken: metadata?.androidFcmToken ?? null,
+                iosApnsToken: metadata?.iosApnsToken ?? null,
                 // Timestamps
                 createdAt: new Date(),
                 eventCreatedAt: event.createdAt
@@ -3296,6 +3389,141 @@ export const sendFeedback = async (req, res, next) => {
             message: 'Failed to send feedback. Please try again.'
         });
     }
+};
+
+// Public: GDPR-style personal data request (no login required)
+export const submitPersonalDataRequest = async (req, res, next) => {
+	try {
+		const {
+			firstName,
+			lastName,
+			email,
+			phone,
+			address,
+			requestType,
+			message,
+			consent
+		} = req.body || {};
+
+		const normalizedRequestType = typeof requestType === 'string' ? requestType.trim().toLowerCase() : '';
+
+		if (!firstName || !lastName || !email || !normalizedRequestType || !message) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+				success: false,
+				message: 'All required fields must be provided.'
+			});
+		}
+
+		const allowedTypes = ['access', 'deletion', 'correction', 'other'];
+		if (!allowedTypes.includes(normalizedRequestType)) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+				success: false,
+				message: 'Invalid requestType.'
+			});
+		}
+
+		const consentBool = consent === true || consent === 'true' || consent === 1 || consent === '1';
+		if (!consentBool) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+				success: false,
+				message: 'Consent is required.'
+			});
+		}
+
+		const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+		if (!emailRegex.test(email)) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+				success: false,
+				message: 'Invalid email format.'
+			});
+		}
+
+		const requesterFullName = `${String(firstName).trim()} ${String(lastName).trim()}`.trim();
+		const requestId = uuidv4();
+
+		await PersonalDataRequest.create({
+			requestId,
+			status: 'received',
+			requester: {
+				firstName: String(firstName).trim(),
+				lastName: String(lastName).trim(),
+				email: String(email).trim().toLowerCase(),
+				phone: phone ? String(phone).trim() : '',
+				address: address ? String(address).trim() : ''
+			},
+			requestType: normalizedRequestType,
+			message: String(message).trim(),
+			consent: consentBool
+		});
+
+		// Send acknowledgement to requester + notify privacy inbox
+		const acknowledgementHtml = `
+			<div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 650px; margin: 0 auto;">
+				<h2 style="margin: 0 0 12px 0;">Personal data request received</h2>
+				<p style="margin: 0 0 12px 0;">Hi ${requesterFullName},</p>
+				<p style="margin: 0 0 12px 0;">
+					We received your request (${normalizedRequestType}). Your reference id is <strong>${requestId}</strong>.
+				</p>
+				<p style="margin: 0 0 12px 0;">
+					We will review your request and get back to you as required by law.
+				</p>
+				<p style="margin: 24px 0 0 0; font-size: 12px; color: #666;">
+					This is an automated email. Please do not reply directly.
+				</p>
+			</div>
+		`;
+
+		const internalTo = process.env.REPORTING_EMAIL || process.env.EMAIL_USERNAME;
+
+		// Do not fail the API if email sending fails; DB record is already created.
+		(async () => {
+			try {
+				await sendMail.forward({
+					from: process.env.EMAIL_USERNAME,
+					to: String(email).trim(),
+					subject: 'Personal data request received - Finnep',
+					html: acknowledgementHtml
+				});
+			} catch (mailErr) {
+				error('[submitPersonalDataRequest] Failed to send acknowledgement:', mailErr);
+			}
+
+			try {
+				await sendMail.forward({
+					from: process.env.EMAIL_USERNAME,
+					to: internalTo,
+					subject: `New personal data request (${normalizedRequestType}) - ${requestId}`,
+					html: `
+						<div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 650px;">
+							<h2 style="margin: 0 0 12px 0;">New personal data request</h2>
+							<p><strong>Reference:</strong> ${requestId}</p>
+							<p><strong>Type:</strong> ${normalizedRequestType}</p>
+							<p><strong>Name:</strong> ${requesterFullName || 'N/A'}</p>
+							<p><strong>Email:</strong> ${String(email).trim()}</p>
+							${phone ? `<p><strong>Phone:</strong> ${String(phone).trim()}</p>` : ''}
+							${address ? `<p><strong>Address:</strong> ${String(address).trim()}</p>` : ''}
+							<p><strong>Message:</strong></p>
+							<pre style="white-space: pre-wrap; word-break: break-word; background: #f5f5f5; padding: 12px; border-radius: 6px;">${String(message).trim()}</pre>
+						</div>
+					`
+				});
+			} catch (mailErr) {
+				error('[submitPersonalDataRequest] Failed to notify internal inbox:', mailErr);
+			}
+		})();
+
+		return res.status(consts.HTTP_STATUS_OK).json({
+			success: true,
+			message: 'Request received.',
+			requestId
+		});
+	} catch (err) {
+		error('Error submitting personal data request:', err);
+		return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
+			success: false,
+			message: 'Failed to submit request. Please try again later.'
+		});
+	}
 };
 
 // Send career application handler
@@ -3482,7 +3710,7 @@ export const handleFreeEventRegistration = async (req, res, next) => {
         // Security Layer 1: Request size validation
         validateRequestSize(req.body);
 
-        const { email, quantity, eventId, ticketId, merchantId, externalMerchantId, eventName, ticketName, marketingOptIn, sectionSelections } = req.body;
+        const { email, quantity, eventId, ticketId, merchantId, externalMerchantId, eventName, ticketName, marketingOptIn, sectionSelections, androidFcmToken, iosApnsToken } = req.body;
 
         // Security Layer 2: Validate required fields
         if (!email || !quantity || !eventId || !merchantId || !externalMerchantId || !eventName || !ticketName) {
@@ -3500,6 +3728,8 @@ export const handleFreeEventRegistration = async (req, res, next) => {
             eventName: sanitizeString(eventName, 200),
             ticketName: sanitizeString(ticketName, 200),
             marketingOptIn: sanitizeBoolean(marketingOptIn || false),
+            androidFcmToken: androidFcmToken ? sanitizeString(androidFcmToken, 2048) : null,
+            iosApnsToken: iosApnsToken ? sanitizeString(iosApnsToken, 2048) : null,
             sectionSelections: Array.isArray(sectionSelections) ? sectionSelections : []
         };
 
@@ -3939,7 +4169,14 @@ export const getEventSeatsPublic = async (req, res, next) => {
 		const reservedPlaceIds = Array.from(reservedMap.keys());
 
 		// 6. Format sections from venue (contains polygon and spacingConfig)
-		const venuePlaces = Array.isArray(venueManifest.places) ? venueManifest.places : [];
+		let venuePlaces = Array.isArray(venueManifest.places) ? venueManifest.places : [];
+		if (venuePlaces.length === 0) {
+			const { places: placesFallback } = await loadVenueSectionContext({
+				venueId: encodedManifest.venue._id,
+				s3Key: encodedManifest.s3Key
+			});
+			venuePlaces = placesFallback;
+		}
 		const formattedSections = (venue.sections || []).map(section => {
 			const sectionId = section.id || section._id?.toString() || section.name;
 			const sectionPlaces = venuePlaces.filter((p) => p.section === section.name || p.section === sectionId);
@@ -3964,13 +4201,20 @@ export const getEventSeatsPublic = async (req, res, next) => {
 		};
 		});
 
-		const soldSet = new Set(encodedManifest.availability?.sold || []);
 		const reservedSet = new Set(reservedPlaceIds);
+		const areaSoldCounts = encodedManifest.availability?.areaSoldCounts || {};
+		const readAreaSoldCount = (key) => {
+			if (!key) return 0;
+			if (typeof areaSoldCounts?.get === 'function') {
+				return Number(areaSoldCounts.get(String(key)) || 0) || 0;
+			}
+			return Number(areaSoldCounts[String(key)] || 0) || 0;
+		};
 		const areaSections = formattedSections
 			.filter(section => section.selectionMode === 'area')
 			.map((section) => {
 				const sectionPlaces = venuePlaces.filter((p) => p.section === section.name || p.section === section.id);
-				const soldCount = sectionPlaces.filter((p) => soldSet.has(p.placeId)).length;
+				const soldCount = readAreaSoldCount(section.id) || readAreaSoldCount(section.name);
 				const reservedCount = sectionPlaces.filter((p) => reservedSet.has(p.placeId)).length;
 				const inferredCapacity = sectionPlaces.length;
 				const capacity = Number(section.capacity || inferredCapacity || 0);
@@ -4063,20 +4307,36 @@ export const reserveSeatsPublic = async (req, res, next) => {
 			}
 			const eventMongoId = String(event._id);
 			const encodedManifest = await EventManifest.findOne({ eventId: eventMongoId }).lean();
-			const venueManifest = await Manifest.findOne({ venue: event.venue?.venueId }).sort({ createdAt: -1 }).lean();
+			const { sections: venueSections, places } = await loadVenueSectionContext({
+				venueId: event.venue?.venueId,
+				s3Key: encodedManifest?.s3Key
+			});
 			const soldSet = new Set(encodedManifest?.availability?.sold || []);
 			const reservedMap = await seatReservationService.getReservedSeats(eventId);
 			const reservedSet = new Set(reservedMap.keys());
-			const venueSections = Array.isArray(event?.venue?.sections) ? event.venue.sections : [];
-			const sectionsById = new Map(venueSections.map((s) => [String(s.id || s._id || s.name), s]));
-			const places = Array.isArray(venueManifest?.places) ? venueManifest.places : [];
+			const sectionsById = new Map();
+			for (const s of venueSections) {
+				const keys = [
+					s?.id,
+					s?._id?.toString(),
+					s?.name,
+					typeof s?.name === 'string' ? s.name.toLowerCase() : null
+				]
+					.filter((k) => k !== null && k !== undefined)
+					.map((k) => String(k).trim())
+					.filter((k) => k.length > 0);
+				for (const k of keys) {
+					if (!sectionsById.has(k)) sectionsById.set(k, s);
+				}
+			}
 
 			for (const selection of sectionSelections) {
 				const sectionId = String(selection.sectionId || '');
 				const requestedSectionName = typeof selection.sectionName === 'string' ? selection.sectionName : null;
 				const quantity = Number(selection.quantity || 0);
 				if (!sectionId || quantity <= 0) continue;
-				const section = sectionsById.get(sectionId);
+				const section =
+					sectionsById.get(sectionId) || sectionsById.get(sectionId.toLowerCase());
 				const sectionName = requestedSectionName || section?.name;
 				// Best-effort match: places may reference section by `name` or by `id`.
 				const sectionPlaces = places.filter((p) => {

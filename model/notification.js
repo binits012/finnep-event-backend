@@ -1,5 +1,4 @@
 import * as model from '../model/mongoModel.js'
-import moment from 'moment' 
 import {error} from './logger.js'
 
 export class Notification {
@@ -45,14 +44,30 @@ export const updateNotificationById = async function (id, obj) {
 	}, { new: true }).catch(err=>{return {error:err.stack}})
 }
 
-export const getAllNotificationForWebsite = async () => {
-	const today = moment().startOf('day')
+/** Published English (or legacy unset) notifications whose date range includes now. */
+export const getActiveNotificationsForFront = async () => {
+	const now = new Date()
 	return await model.Notification
-		.find({ 'publish': true })
-		.where({ 'startDate': { $gte:  today.toDate() } })
-		.sort({ 'startDate': -1 })
+		.find({
+			publish: true,
+			startDate: { $lte: now },
+			endDate: { $gte: now },
+			$or: [
+				{ lang: 'en' },
+				{ lang: { $exists: false } },
+				{ lang: null },
+				{ lang: '' },
+			],
+		})
+		.sort({ startDate: -1 })
 		.populate('notificationType')
-		.limit(50).catch(err=>{return {error:err.stack}})
+		.limit(50)
+		.exec()
+		.catch((err) => ({ error: err.stack }))
+}
+
+export const getAllNotificationForWebsite = async () => {
+	return getActiveNotificationsForFront()
 }
 export const getNotificationByIdAndDate = async (notification, startDate, endDate) => {
 	return await model.Notification.findOne({ 'notification': notification, 'startDate': startDate, 'endDate': endDate }).exec().catch(err=>{return {error:err.stack}})

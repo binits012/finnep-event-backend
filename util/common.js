@@ -158,7 +158,7 @@ export  const generateQRCode = async(ticketId) =>{
 export  const generateICS = async(event, ticketId)=>{
     const eventDate = event.eventDate
     const eventTimezone = event.eventTimezone || 'UTC' // Use event timezone, fallback to UTC
-    const start = moment(eventDate).tz(eventTimezone).format('YYYY-MM-DD-HH-mm-ss').split("-").map((a) => parseInt(a))
+    const start = moment(eventDate).tz(eventTimezone).format('YYYY-MM-DD-HH-mm-ss').split("-").map((a) => parseInt(a, 10))
     const eventGeoCode = event.eventLocationGeoCode.split(',')
     const icsData = {
         title: event.eventTitle,

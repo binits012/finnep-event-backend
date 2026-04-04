@@ -15,14 +15,17 @@ let isSetupComplete = false;
 // Queue configuration - prefetch controls how many messages are processed concurrently
 export const QUEUE_PREFETCH = 20;
 
-const setupQueues = async () => {
+const setupQueues = async (force = false) => {
     // Prevent duplicate queue setup
-    if (isSetupComplete) {
+    if (isSetupComplete && !force) {
         warn('Queue setup already completed, skipping duplicate setup');
         return;
     }
 
     try {
+        if (force) {
+            warn('Force queue setup requested - reinitializing queue consumers');
+        }
         info('Starting queue setup...');
         await messageConsumer.initialize();
 

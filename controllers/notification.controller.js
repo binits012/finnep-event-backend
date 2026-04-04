@@ -10,19 +10,17 @@ export const createNotification = async (req, res, next) => {
     const notification = req.body.notification
     const startDate = req.body.startDate
     const endDate = req.body.endDate
-    let lang = req.body.lang
+    const lang = 'en'
     const notificationType = req.body.notificationType
     const publish = req.body.publish
-    if(lang === 'undefined' || lang === ""){
-        lang = 'en'
-    }  
+    const publishBool = publish === true || publish === 'true'
     const notificationObj = {
         notification: notification,
         startDate: new Date(startDate.replace('T',' ')),
         endDate: new Date(endDate.replace('T',' ')),
         notificationType: notificationType,
         lang: lang,
-        publish: publish === 'true' ? true :false
+        publish: publishBool
     } 
     await jwtToken.verifyJWT(token, async (err, data) => {
         if (err || data === null) { 
@@ -122,11 +120,8 @@ export const updateNotificationById = async (req, res, next) => {
     const publish = req.body.publish
     const notificationId = req.params.id
     const notificationType = req.body.notificationType
-    let lang = req.body.lang
-    if(lang === 'undefined' || lang === ""){
-        lang = 'en'
-    }
-    
+    const lang = 'en'
+
     const notificationObj = {
         notification: notification,
         startDate: new Date(startDate.replace('T',' ')),

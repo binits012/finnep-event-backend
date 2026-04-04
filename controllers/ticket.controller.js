@@ -12,8 +12,28 @@ import * as  fs from 'fs/promises'
 import * as OrderTicket from '../model/orderTicket.js'
 import crypto from 'crypto'
 import { dirname } from 'path'
-import {manipulatePhoneNumber} from '../util/common.js'
+import {manipulatePhoneNumber, generateQRCode} from '../util/common.js'
 const __dirname = dirname(import.meta.url).slice(7)
+
+const childQrPattern = /^([a-fA-F0-9]{24})#([1-9]\d*)$/
+
+const parseChildQrValue = (value = '') => {
+    const match = decodeURIComponent(value).match(childQrPattern)
+    if (!match) return null
+    return {
+        parentTicketId: match[1],
+        childIndex: Number(match[2]),
+        childQrCodeValue: decodeURIComponent(value)
+    }
+}
+
+const mapTicketInfoForScanner = (ticketInfo) => {
+    if (!ticketInfo || typeof ticketInfo !== 'object') return {}
+    if (ticketInfo instanceof Map) {
+        return Object.fromEntries(ticketInfo.entries())
+    }
+    return ticketInfo
+}
 
 export const createSingleTicket = async(req,res,next) =>{
     const token = req.headers.authorization
@@ -419,6 +439,196 @@ export const ticketCheckIn = async(req, res, next) =>{
         if(!res.headersSent){
             return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
                 message: 'Sorry, update ticket by id failed.', error: appText.INTERNAL_SERVER_ERROR
+            })
+        }
+    }
+}
+
+export const getTicketByChildQrValue = async (req, res, next) => {
+    const token = req.headers.authorization
+    const rawQrValue = req.params.qrValue
+    const parsed = parseChildQrValue(rawQrValue)
+    if (!parsed) {
+        return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            message: 'Invalid child QR value format', error: appText.INVALID_ID
+        })
+    }
+
+    try {
+        const childTicket = await Ticket.getChildTicketQRByValue(parsed.childQrCodeValue)
+        const parentFallback = childTicket?.parentTicketId
+            ? null
+            : await Ticket.getTicketById(parsed.parentTicketId, false)
+        const parentFromFallback = parentFallback
+            && mapTicketInfoForScanner(parentFallback.ticketInfo)?.childQRCodes
+            && Array.isArray(mapTicketInfoForScanner(parentFallback.ticketInfo).childQRCodes)
+            ? mapTicketInfoForScanner(parentFallback.ticketInfo).childQRCodes.find(
+                (item) => Number(item?.childIndex) === parsed.childIndex && item?.value === parsed.childQrCodeValue
+            )
+            : null
+        if ((!childTicket || !childTicket.parentTicketId) && !parentFromFallback) {
+            return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+                message: 'Sorry, child ticket not found.', error: appText.RESOURCE_NOT_FOUND
+            })
+        }
+
+        await jwtToken.verifyJWT(token, async (err, data) => {
+            if (err || data === null) {
+                return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({
+                    message: 'Please, provide valid token', error: appText.TOKEN_NOT_VALID
+                })
+            }
+
+            const userRoleFromToken = data.role
+            if (consts.ROLE_MEMBER === userRoleFromToken) {
+                return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
+                    message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
+                })
+            }
+
+            const parent = childTicket?.parentTicketId || parentFallback
+            const ticketInfo = mapTicketInfoForScanner(parent.ticketInfo)
+            const quantity = parseInt(ticketInfo?.quantity || '1', 10) || 1
+            const childCheckins = ticketInfo?.childCheckins && typeof ticketInfo.childCheckins === 'object'
+                ? ticketInfo.childCheckins
+                : {}
+            const fallbackStatus = childCheckins[parsed.childQrCodeValue] || {}
+            const isRead = childTicket ? childTicket.isRead : !!fallbackStatus.is_read
+            const readAt = childTicket ? childTicket.readAt : (fallbackStatus.read_at || null)
+            const checkedInQuantity = isRead ? 1 : 0
+            const remainingQuantity = isRead ? 0 : 1
+            const childQrImage = await generateQRCode(parsed.childQrCodeValue)
+
+            return res.status(consts.HTTP_STATUS_OK).json({
+                data: {
+                    id: String(parent._id),
+                    child_ticket_id: childTicket?._id ? String(childTicket._id) : null,
+                    child_qr_code_value: parsed.childQrCodeValue,
+                    child_index: parsed.childIndex,
+                    is_child_qr: true,
+                    qr_code: childQrImage,
+                    event_id: String(parent.event?._id || parent.event || ''),
+                    event_name: parent.event?.eventTitle || '',
+                    event_date: parent.event?.eventDate || null,
+                    event_timezone: parent.event?.eventTimezone || null,
+                    event_status: parent.event?.status || null,
+                    event_active: parent.event?.active ?? true,
+                    ticket_info: {
+                        ...ticketInfo,
+                        quantity: '1',
+                        parent_quantity: String(quantity)
+                    },
+                    type: parent.type || 'normal',
+                    active: childTicket ? childTicket.active : parent.active,
+                    is_read: isRead,
+                    read_by: childTicket?.readBy?.name || null,
+                    read_at: readAt,
+                    created_at: childTicket?.createdAt || parent.createdAt,
+                    checked_in_quantity: checkedInQuantity,
+                    remaining_quantity: remainingQuantity
+                }
+            })
+        })
+    } catch (err) {
+        error('error', err.stack)
+        if (!res.headersSent) {
+            return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
+                message: 'Sorry, get child ticket by qr failed.', error: appText.INTERNAL_SERVER_ERROR
+            })
+        }
+    }
+}
+
+export const childTicketCheckIn = async (req, res, next) => {
+    const token = req.headers.authorization
+    const rawQrValue = req.params.qrValue
+    const parsed = parseChildQrValue(rawQrValue)
+    if (!parsed) {
+        return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            message: 'Invalid child QR value format', error: appText.INVALID_ID
+        })
+    }
+
+    try {
+        const childTicket = await Ticket.getChildTicketQRByValue(parsed.childQrCodeValue)
+        const parentFallback = childTicket?.parentTicketId
+            ? null
+            : await Ticket.getTicketById(parsed.parentTicketId, false)
+        const parent = childTicket?.parentTicketId || parentFallback
+        const ticketInfo = parent ? mapTicketInfoForScanner(parent.ticketInfo) : {}
+        const childQRCodes = Array.isArray(ticketInfo?.childQRCodes) ? ticketInfo.childQRCodes : []
+        const childEntry = childQRCodes.find(
+            (item) => Number(item?.childIndex) === parsed.childIndex && item?.value === parsed.childQrCodeValue
+        )
+        if ((!childTicket || !childTicket.parentTicketId) && !childEntry) {
+            return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+                message: 'Sorry, child ticket not found.', error: appText.RESOURCE_NOT_FOUND
+            })
+        }
+
+        const eventIdFromRequest = req.body.eventId || req.body.event
+        const parentEventId = String(childTicket?.event?._id || parent?.event?._id || parent?.event || '')
+        if (eventIdFromRequest && String(eventIdFromRequest) !== parentEventId) {
+            return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+                message: 'Sorry, child ticket not found. Could be ticket is not for this event.', error: appText.RESOURCE_NOT_FOUND
+            })
+        }
+
+        if (childTicket?.isRead) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                message: 'Child ticket already checked in', error: appText.BAD_REQUEST
+            })
+        }
+
+        const childCheckins = ticketInfo?.childCheckins && typeof ticketInfo.childCheckins === 'object'
+            ? { ...ticketInfo.childCheckins }
+            : {}
+        if (!childTicket && childCheckins[parsed.childQrCodeValue]?.is_read) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                message: 'Child ticket already checked in', error: appText.BAD_REQUEST
+            })
+        }
+
+        await jwtToken.verifyJWT(token, async (err, data) => {
+            if (err || data === null) {
+                return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({
+                    message: 'Please, provide valid token', error: appText.TOKEN_NOT_VALID
+                })
+            }
+            const userRoleFromToken = data.role
+            if (consts.ROLE_MEMBER === userRoleFromToken) {
+                return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
+                    message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
+                })
+            }
+
+            if (childTicket) {
+                const updated = await Ticket.updateChildTicketQRByValue(parsed.childQrCodeValue, {
+                    isRead: true,
+                    readBy: data.id,
+                    readAt: new Date()
+                })
+                return res.status(consts.HTTP_STATUS_OK).json({ data: updated })
+            }
+
+            childCheckins[parsed.childQrCodeValue] = {
+                is_read: true,
+                read_by: data.id,
+                read_at: new Date().toISOString()
+            }
+            const updatedParent = await Ticket.updateTicketById(parent.id, {
+                ticketInfo: {
+                    ...ticketInfo,
+                    childCheckins
+                }
+            })
+            return res.status(consts.HTTP_STATUS_OK).json({ data: updatedParent })
+        })
+    } catch (err) {
+        error('error', err.stack)
+        if (!res.headersSent) {
+            return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
+                message: 'Sorry, update child ticket check-in failed.', error: appText.INTERNAL_SERVER_ERROR
             })
         }
     }

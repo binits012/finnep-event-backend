@@ -1,6 +1,7 @@
 import { inboxModel } from '../../model/inboxMessage.js';
 import * as Event from '../../model/event.js';
 import { getMerchantByMerchantId } from '../../model/merchant.js';
+import { EventManifest } from '../../model/mongoModel.js';
 import { error, info } from '../../model/logger.js';
 import { pricingManifestSyncService } from '../../src/services/pricingManifestSyncService.js';
 import { sendPricingSyncErrorEmail } from '../../util/sendMail.js';
@@ -35,6 +36,36 @@ function resolveIsSeatedEvent({ message, existingEvent, venue }) {
     if (typeof venue?.hasSeatSelection === 'boolean') return venue.hasSeatSelection;
     if (typeof existingEvent?.venue?.hasSeatSelection === 'boolean') return existingEvent.venue.hasSeatSelection;
     return false;
+}
+
+function sanitizeVenuePatchForManifestGuard(venuePatch = {}) {
+    if (!venuePatch || typeof venuePatch !== 'object') return venuePatch;
+    const sanitized = { ...venuePatch };
+    // Manifest linkage fields are owned by FEB backend; never trust inbound EMS event payload for them.
+    delete sanitized.lockedManifestId;
+    delete sanitized.manifestS3Key;
+    return sanitized;
+}
+
+function getAreaSoldTotal(areaSoldCounts) {
+    if (!areaSoldCounts) return 0;
+    if (typeof areaSoldCounts?.values === 'function') {
+        let total = 0;
+        for (const value of areaSoldCounts.values()) {
+            total += Number(value || 0) || 0;
+        }
+        return total;
+    }
+    return Object.values(areaSoldCounts).reduce((sum, value) => sum + (Number(value || 0) || 0), 0);
+}
+
+async function hasManifestSalesForEvent(eventMongoId) {
+    if (!eventMongoId) return false;
+    const manifest = await EventManifest.findOne({ eventId: String(eventMongoId) }).lean();
+    if (!manifest) return false;
+    const soldCount = Array.isArray(manifest?.availability?.sold) ? manifest.availability.sold.length : 0;
+    const areaSoldTotal = getAreaSoldTotal(manifest?.availability?.areaSoldCounts);
+    return soldCount > 0 || areaSoldTotal > 0;
 }
 
 export const handleEventMessage = async (message) => {
@@ -235,16 +266,28 @@ async function handleEventUpdated(message) {
         found: !!existingEvent
     });
 
+    const manifestHasSales = existingEvent?._id
+        ? await hasManifestSalesForEvent(existingEvent._id)
+        : false;
+
     // When venue is explicitly cleared (venueId null/empty or venue null), clear venue in MongoDB
     const venueCleared = message?.venueId == null || message?.venueId === '' || message?.venue === null;
     let venue;
-    if (venueCleared) {
+    if (manifestHasSales && existingEvent) {
+        // Guardrail: once tickets are sold, keep FEB venue/manifest linkage untouched.
+        venue = existingEvent?.venue;
+        info(`[handleEventUpdated] Preserving existing venue because manifest has sold seats`, {
+            eventId: existingEvent?._id,
+            externalEventId
+        });
+    } else if (venueCleared) {
         venue = null;
     } else if (message?.venue && typeof message.venue === 'object') {
+        const safeVenuePatch = sanitizeVenuePatchForManifestGuard(message.venue);
         // Merge venue data from message with existing venue
         venue = {
             ...(existingEvent?.venue || {}),
-            ...message.venue,
+            ...safeVenuePatch,
         };
     } else {
         venue = existingEvent?.venue;
@@ -298,6 +341,15 @@ async function handleEventUpdated(message) {
     // 3. pricingConfiguration.needsSync is true
     if (pricingConfiguration?.needsSync === true && hasSeatSelection === true && pricingModel === 'pricing_configuration') {
         try {
+            if (manifestHasSales) {
+                info(`[handleEventUpdated] Skipping pricing manifest sync because manifest has sold seats`, {
+                    eventId: existingEvent?._id,
+                    externalEventId
+                });
+                await inboxModel.markProcessed(message?.metaData?.causationId);
+                return;
+            }
+
             info(`[handleEventUpdated] Starting pricing manifest sync for event ${externalEventId}`, {
                 eventId: existingEvent?._id,
                 pricingConfigurationId: pricingConfiguration.pricingConfigurationId,

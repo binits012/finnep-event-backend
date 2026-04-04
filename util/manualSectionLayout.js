@@ -255,7 +255,11 @@ const generateSeatsWithRowConfig = (section, placeIds, spacing, bounds) => {
 
 	// Get spacing configuration from section (with defaults)
 	const spacingConfig = section.spacingConfig || {}
-	const configTopPadding = spacingConfig.topPadding !== undefined ? spacingConfig.topPadding : 40
+	const configInnerPadding = spacingConfig.innerPadding !== undefined ? spacingConfig.innerPadding : null
+	const normalizedInnerPadding = configInnerPadding !== null ? Math.max(0, Number(configInnerPadding) || 0) : null
+	const configTopPadding = spacingConfig.topPadding !== undefined
+		? spacingConfig.topPadding
+		: (normalizedInnerPadding !== null ? normalizedInnerPadding : 40)
 	const configSeatSpacingMultiplier = spacingConfig.seatSpacingMultiplier !== undefined ? spacingConfig.seatSpacingMultiplier :
 		(presentationStyle === 'cone' ? 0.75 : 0.65) // More generous spacing for cone
 	const configRowSpacingMultiplier = spacingConfig.rowSpacingMultiplier !== undefined ? spacingConfig.rowSpacingMultiplier : 0.75
@@ -264,7 +268,9 @@ const generateSeatsWithRowConfig = (section, placeIds, spacing, bounds) => {
 	// Fixed seat spacing based on the widest row
 	// This ensures vertical alignment across all rows
 	// Reduce marginX when using very small multipliers to allow tighter spacing
-	const marginX = configSeatSpacingMultiplier < 0.3 ? 5 : (seatSpacing > 1 ? seatSpacing : 20)
+	const marginX = normalizedInnerPadding !== null
+		? normalizedInnerPadding
+		: (configSeatSpacingMultiplier < 0.3 ? 5 : (seatSpacing > 1 ? seatSpacing : 20))
 	const availableWidth = sectionWidth - (marginX * 2)
 	// Use section-specific seat spacing multiplier
 	// IMPORTANT: Clamp multiplier to max 1.0 to ensure seats don't exceed section bounds
@@ -279,7 +285,8 @@ const generateSeatsWithRowConfig = (section, placeIds, spacing, bounds) => {
 	// Use section-specific row spacing multiplier
 	// IMPORTANT: Clamp multiplier to max 1.0 to ensure rows don't exceed section bounds
 	const clampedRowSpacingMultiplier = Math.min(1.0, configRowSpacingMultiplier)
-	const calculatedRowSpacing = totalRows > 1 ? ((sectionHeight - topPadding - (rowSpacing * 2)) / (totalRows - 1)) * clampedRowSpacingMultiplier : 0
+	const baseVerticalInset = normalizedInnerPadding !== null ? normalizedInnerPadding : rowSpacing
+	const calculatedRowSpacing = totalRows > 1 ? ((sectionHeight - topPadding - (baseVerticalInset * 2)) / (totalRows - 1)) * clampedRowSpacingMultiplier : 0
 
 	// Get presentation style from section configuration
 	const presentationStyle = section.presentationStyle || 'flat'
@@ -385,7 +392,9 @@ const generateSeatsWithRowConfig = (section, placeIds, spacing, bounds) => {
 			curveDepth = Math.max(15, calculatedRowSpacing * configCurveDepthMultiplier) // At least 15px or configured percentage of row spacing
 
 		} else if (presentationStyle === 'left_fixed') {
-			rowStartX = x1 + marginX
+			// Left fixed should be truly anchored to the section's left edge.
+			// Apply inset only when unified innerPadding is explicitly configured.
+			rowStartX = x1 + (normalizedInnerPadding !== null ? marginX : 0)
 			curveDepth = 0 // No curve for left_fixed
 		} else if (presentationStyle === 'right_fixed') {
 			// Right fixed: align all rows to right edge
@@ -651,7 +660,11 @@ const generateSeatsInPolygonWithRowConfig = (section, placeIds, spacing, seatOff
 	// Get presentation style FIRST (needed for curve direction default)
 	const presentationStyle = section.presentationStyle || 'flat'
 
-	const configTopPadding = spacingConfig.topPadding !== undefined ? spacingConfig.topPadding : 5
+	const configInnerPadding = spacingConfig.innerPadding !== undefined ? spacingConfig.innerPadding : null
+	const normalizedInnerPadding = configInnerPadding !== null ? Math.max(0, Number(configInnerPadding) || 0) : null
+	const configTopPadding = spacingConfig.topPadding !== undefined
+		? spacingConfig.topPadding
+		: (normalizedInnerPadding !== null ? normalizedInnerPadding : 5)
 	const configSeatSpacingMultiplier = spacingConfig.seatSpacingMultiplier !== undefined ? spacingConfig.seatSpacingMultiplier : 1.0
 	const configRowSpacingMultiplier = spacingConfig.rowSpacingMultiplier !== undefined ? spacingConfig.rowSpacingMultiplier : 1.0
 	const configCurveDepthMultiplier = spacingConfig.curveDepthMultiplier !== undefined ? spacingConfig.curveDepthMultiplier : 0.7
@@ -684,15 +697,19 @@ const generateSeatsInPolygonWithRowConfig = (section, placeIds, spacing, seatOff
 
 	// Top/Bottom margin for rows - gives space for curves (especially for frown direction)
 	// Default 10px for cone style (needs room to curve up), 5px for others
-	const configTopMarginY = spacingConfig.topMarginY !== undefined ? spacingConfig.topMarginY : (presentationStyle === 'cone' ? 10 : 5)
-	const configBottomMarginY = spacingConfig.bottomMarginY !== undefined ? spacingConfig.bottomMarginY : (presentationStyle === 'cone' ? 10 : 5)
+	const configTopMarginY = spacingConfig.topMarginY !== undefined
+		? spacingConfig.topMarginY
+		: (normalizedInnerPadding !== null ? normalizedInnerPadding : (presentationStyle === 'cone' ? 10 : 5))
+	const configBottomMarginY = spacingConfig.bottomMarginY !== undefined
+		? spacingConfig.bottomMarginY
+		: (normalizedInnerPadding !== null ? normalizedInnerPadding : (presentationStyle === 'cone' ? 10 : 5))
 
 	// Sort rowConfig by rowNumber
 	const sortedRows = [...(section.rowConfig || [])].sort((a, b) => (a.rowNumber || 0) - (b.rowNumber || 0))
 	const totalRows = sortedRows.length
 
 	// Margins for X (sides) - 2% of section width, minimum 2px
-	const marginX = Math.max(2, sectionWidth * 0.02)
+	const marginX = normalizedInnerPadding !== null ? normalizedInnerPadding : Math.max(2, sectionWidth * 0.02)
 	// Use configurable top/bottom margins for Y
 	const marginY = Math.max(configTopMarginY, configBottomMarginY) // Use larger of the two for general calculations
 
@@ -749,10 +766,14 @@ const generateSeatsInPolygonWithRowConfig = (section, placeIds, spacing, seatOff
 	const curveReserveBottom = (presentationStyle === 'cone' && configCurveDirection === 'smile') ? estimatedMaxCurveDepth : 0
 
 	// For fixed alignments, start rows from top without margins
+	const fixedTopInset = normalizedInnerPadding !== null ? normalizedInnerPadding : 0
+	const fixedBottomInset = normalizedInnerPadding !== null ? normalizedInnerPadding : 0
 	const firstRowY = (presentationStyle === 'left_fixed' || presentationStyle === 'right_fixed' || presentationStyle === 'flat')
-		? minY + curveReserveTop  // No margins for fixed alignments and flat
+		? minY + fixedTopInset + curveReserveTop
 		: minY + configTopMarginY + topPadding + curveReserveTop
-	const lastRowY = maxY - configBottomMarginY - curveReserveBottom
+	const lastRowY = (presentationStyle === 'left_fixed' || presentationStyle === 'right_fixed' || presentationStyle === 'flat')
+		? maxY - fixedBottomInset - curveReserveBottom
+		: maxY - configBottomMarginY - curveReserveBottom
 	const availableHeightForRows = lastRowY - firstRowY
 	const rowSpacingForAllRows = totalRows > 1 ? availableHeightForRows / (totalRows - 1) : 0
 
@@ -871,8 +892,10 @@ const generateSeatsInPolygonWithRowConfig = (section, placeIds, spacing, seatOff
 			return // Skip this row entirely - no seats can be placed
 		}
 
-		// Use polygon bounds if available, otherwise fall back to bounding box
-		const rowLeftBound = polygonBounds.leftX + marginX
+		// Use polygon bounds if available, otherwise fall back to bounding box.
+		// For left_fixed, keep rows truly anchored to the polygon's left edge (no implicit left inset).
+		const leftInset = (presentationStyle === 'left_fixed' && normalizedInnerPadding === null) ? 0 : marginX
+		const rowLeftBound = polygonBounds.leftX + leftInset
 		const rowRightBound = polygonBounds.rightX - marginX
 		const rowAvailableWidth = rowRightBound - rowLeftBound
 		const rowCenterX = (rowLeftBound + rowRightBound) / 2

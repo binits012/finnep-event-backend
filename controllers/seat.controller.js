@@ -1,9 +1,11 @@
 import * as jwtToken from '../util/jwtToken.js';
 import * as consts from '../const.js';
 import * as appText from '../applicationTexts.js';
-import { Event } from '../model/mongoModel.js';
+import { Event, EventManifest } from '../model/mongoModel.js';
 import { manifestUpdateService } from '../src/services/manifestUpdateService.js';
 import { seatReservationService } from '../src/services/seatReservationService.js';
+import { loadVenueSectionContext } from '../src/services/venueSectionContextService.js';
+import { resolveSoldPlaceIdsForPayment } from '../src/services/paymentSeatResolutionService.js';
 import { error, info } from '../model/logger.js';
 
 const resolveSectionMode = (section) => {
@@ -15,7 +17,19 @@ const resolveSectionMode = (section) => {
 	return section.sectionType === 'Seating' ? 'seat' : 'area';
 };
 
-const normalizeAreaSections = (fullManifest, soldSet, reservedSet, areaSoldCounts = {}) => {
+const placeHasSeatCoordinates = (place) => {
+	if (!place) return false;
+	return (
+		place.row !== null &&
+		place.row !== undefined &&
+		String(place.row).trim() !== '' &&
+		place.seat !== null &&
+		place.seat !== undefined &&
+		String(place.seat).trim() !== ''
+	);
+};
+
+const normalizeAreaSections = (fullManifest, reservedSet, areaSoldCounts = {}) => {
 	const readAreaSoldCount = (key) => {
 		if (!key) return 0;
 		// Handle both plain objects and Mongoose Map/JS Map.
@@ -41,17 +55,30 @@ const normalizeAreaSections = (fullManifest, soldSet, reservedSet, areaSoldCount
 		}
 		const sectionPlaces = places.filter((p) => p.section === section.name || p.section === sectionId);
 		const areaSoldByCounter = readAreaSoldCount(sectionId) || readAreaSoldCount(section.name);
-		const soldCountByPlaceId = sectionPlaces.filter((p) => soldSet.has(p.placeId)).length;
-		const soldCount = Math.max(areaSoldByCounter, soldCountByPlaceId);
+		// availability.sold[] is seat-level (assigned seat placeIds). Standing/area quantity sold is tracked
+		// in availability.areaSoldCounts keyed by section id/name — do not infer area soldCount from sold[].
+		const soldCount = areaSoldByCounter;
 		const reservedCount = sectionPlaces.filter((p) => reservedSet.has(p.placeId)).length;
 		const inferredCapacity = sectionPlaces.length;
-		const capacity = Number(section.capacity || inferredCapacity || 0);
+		const hasExplicitCapacity = section.capacity !== undefined && section.capacity !== null;
+		const declaredNum = hasExplicitCapacity ? Number(section.capacity) : null;
+		const declaredCapacity =
+			hasExplicitCapacity && !Number.isNaN(declaredNum) ? declaredNum : undefined;
+		// CMS explicit capacity 0 on area sections = not for sale; do not infer from seat dots.
+		const isExplicitZeroArea =
+			selectionMode === 'area' && declaredCapacity === 0;
+		const capacity = isExplicitZeroArea
+			? 0
+			: hasExplicitCapacity && !Number.isNaN(declaredNum) && declaredNum > 0
+				? declaredNum
+				: inferredCapacity;
 		areaSections.push({
 			id: sectionId,
 			name: section.name,
 			sectionType: section.sectionType || 'Custom',
 			selectionMode: 'area',
 			capacity,
+			...(declaredCapacity !== undefined ? { declaredCapacity } : {}),
 			soldCount,
 			reservedCount,
 			availableCount: Math.max(0, capacity - soldCount - reservedCount),
@@ -124,6 +151,13 @@ export const getEventSeats = async (req, res, next) => {
 					});
 				}
 
+				const ctx = await loadVenueSectionContext({
+					venueId: encodedManifest.venue,
+					s3Key: encodedManifest.s3Key
+				});
+				const areaPlaces = ctx.places.length > 0 ? ctx.places : fullManifest.places;
+				const fullManifestForAreas = { sections: ctx.sections, places: areaPlaces };
+
 				// 4. Get Redis reservations for event
 				const reservedMap = await seatReservationService.getReservedSeats(eventId);
 
@@ -170,29 +204,29 @@ export const getEventSeats = async (req, res, next) => {
 					seats.push(seat);
 				}
 
-				// 6. Extract sections from full manifest (venue configuration)
-				// Format sections for client display (similar to CMS)
-				const sections = [];
-				if (fullManifest.sections && Array.isArray(fullManifest.sections)) {
-					for (const section of fullManifest.sections) {
-						sections.push({
-							id: section.id || section._id || section.name,
-							name: section.name,
-							color: section.color || '#2196F3',
-							bounds: section.bounds || null,
-							polygon: section.polygon || null
-						});
-					}
-				}
+				// 6. Sections come from Venue (S3 pricing JSON usually has sections: [])
+				const sections = (ctx.sections || []).map((section) => ({
+					id: section.id || section._id?.toString() || section.name,
+					name: section.name,
+					color: section.color || '#2196F3',
+					bounds: section.bounds || null,
+					polygon: section.polygon
+						? section.polygon.map((point) => ({ x: point.x, y: point.y }))
+						: null
+				}));
 
 				const areaSoldCounts = encodedManifest?.availability?.areaSoldCounts || {};
-				const { seatSections, areaSections } = normalizeAreaSections(fullManifest, soldSet, reservedSet, areaSoldCounts);
+				const { seatSections, areaSections } = normalizeAreaSections(
+					fullManifestForAreas,
+					reservedSet,
+					areaSoldCounts
+				);
 
 				// 7. Return merged data
 				// backgroundSvg and sections come from full manifest (venue configuration), not encoded manifest
 				return res.status(consts.HTTP_STATUS_OK).json({
 					data: {
-						backgroundSvg: fullManifest.backgroundSvg || null, // From venue manifest
+						backgroundSvg: ctx.venue?.backgroundSvg || fullManifest.backgroundSvg || null,
 						sections: sections, // From venue manifest
 						seatSections,
 						areaSections,
@@ -246,25 +280,47 @@ export const reserveSeats = async (req, res, next) => {
 
 				if ((!resolvedPlaceIds || resolvedPlaceIds.length === 0) && Array.isArray(sectionSelections) && sectionSelections.length > 0) {
 					const encodedManifest = await manifestUpdateService.getEventManifest(eventId);
-					const { downloadPricingFromS3 } = await import('../../util/aws.js');
-					const fullManifest = await downloadPricingFromS3(encodedManifest.s3Key);
+					const { sections: venueSections, places } = await loadVenueSectionContext({
+						venueId: encodedManifest.venue,
+						s3Key: encodedManifest.s3Key
+					});
 					const soldSet = new Set(encodedManifest.availability?.sold || []);
 					const reservedMap = await seatReservationService.getReservedSeats(eventId);
 					const reservedSet = new Set(reservedMap.keys());
-					const sectionsById = new Map((fullManifest.sections || []).map((s) => [String(s.id || s._id || s.name), s]));
-					const places = Array.isArray(fullManifest.places) ? fullManifest.places : [];
+					const sectionsById = new Map();
+					for (const s of venueSections) {
+						const keys = [
+							s?.id,
+							s?._id?.toString(),
+							s?.name,
+							typeof s?.name === 'string' ? s.name.toLowerCase() : null
+						]
+							.filter((k) => k !== null && k !== undefined)
+							.map((k) => String(k).trim())
+							.filter((k) => k.length > 0);
+						for (const k of keys) {
+							if (!sectionsById.has(k)) sectionsById.set(k, s);
+						}
+					}
 
 					for (const selection of sectionSelections) {
 						const sectionId = String(selection.sectionId || '');
+						const requestedSectionName = typeof selection.sectionName === 'string' ? selection.sectionName : null;
 						const quantity = Number(selection.quantity || 0);
 						if (!sectionId || quantity <= 0) continue;
-						const section = sectionsById.get(sectionId);
-						if (!section || resolveSectionMode(section) !== 'area') continue;
+						const section = sectionsById.get(sectionId) || sectionsById.get(sectionId.toLowerCase());
+						const sectionName = requestedSectionName || section?.name;
+						const sectionPlaces = places.filter((p) => {
+							if (!p?.section) return false;
+							if (sectionName && p.section === sectionName) return true;
+							return p.section === sectionId;
+						});
+						const hasSeatLikePlaces = sectionPlaces.some(placeHasSeatCoordinates);
+						const selectionMode = hasSeatLikePlaces ? 'seat' : section ? resolveSectionMode(section) : 'area';
+						if (selectionMode !== 'area') continue;
 
-						const candidates = places.filter((p) =>
-							(p.section === section.name || p.section === sectionId) &&
-							!soldSet.has(p.placeId) &&
-							!reservedSet.has(p.placeId)
+						const candidates = sectionPlaces.filter(
+							(p) => !soldSet.has(p.placeId) && !reservedSet.has(p.placeId)
 						);
 						resolvedPlaceIds.push(...candidates.slice(0, quantity).map((p) => p.placeId));
 					}
@@ -347,35 +403,12 @@ export const confirmSeats = async (req, res, next) => {
 					});
 				}
 
-				let resolvedPlaceIds = Array.isArray(placeIds) ? [...placeIds] : [];
-
-				if ((!resolvedPlaceIds || resolvedPlaceIds.length === 0) && Array.isArray(sectionSelections) && sectionSelections.length > 0) {
-					const encodedManifest = await manifestUpdateService.getEventManifest(eventId);
-					const { downloadPricingFromS3 } = await import('../../util/aws.js');
-					const fullManifest = await downloadPricingFromS3(encodedManifest.s3Key);
-					const sectionsById = new Map((fullManifest.sections || []).map((s) => [String(s.id || s._id || s.name), s]));
-					const places = Array.isArray(fullManifest.places) ? fullManifest.places : [];
-
-					for (const selection of sectionSelections) {
-						const sectionId = String(selection.sectionId || '');
-						const quantity = Number(selection.quantity || 0);
-						if (!sectionId || quantity <= 0) continue;
-						const section = sectionsById.get(sectionId);
-						if (!section || resolveSectionMode(section) !== 'area') continue;
-						const sectionPlaces = places
-							.filter((p) => p.section === section.name || p.section === sectionId)
-							.map((p) => p.placeId);
-						const chosen = [];
-						for (const candidate of sectionPlaces) {
-							const reservationSessionId = await seatReservationService.getReservation(eventId, candidate);
-							if (!sessionId || reservationSessionId === sessionId) {
-								chosen.push(candidate);
-							}
-							if (chosen.length >= quantity) break;
-						}
-						resolvedPlaceIds.push(...chosen);
-					}
-				}
+				const { placeIds: resolvedPlaceIds, areaSoldIncrements } = await resolveSoldPlaceIdsForPayment({
+					eventId,
+					sessionId: sessionId || null,
+					placeIds: Array.isArray(placeIds) ? placeIds : [],
+					sectionSelections: Array.isArray(sectionSelections) ? sectionSelections : []
+				});
 
 				if (!resolvedPlaceIds || resolvedPlaceIds.length === 0) {
 					return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -397,8 +430,20 @@ export const confirmSeats = async (req, res, next) => {
 					}
 				}
 
-				// Mark seats as sold in manifest
-				await manifestUpdateService.markSeatsAsSold(event.venue.lockedManifestId, resolvedPlaceIds);
+				const eventManifest = await EventManifest.findOne({ eventId: String(event._id) });
+				if (!eventManifest) {
+					return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+						message: 'Event manifest not found for this event',
+						error: appText.RESOURCE_NOT_FOUND
+					});
+				}
+				const eventManifestId = eventManifest._id.toString();
+
+				if (areaSoldIncrements.length > 0) {
+					await manifestUpdateService.markAreaSelectionsSold(eventManifestId, areaSoldIncrements);
+				}
+
+				await manifestUpdateService.markSeatsAsSold(eventManifestId, resolvedPlaceIds);
 
 				// Release Redis reservations
 				await seatReservationService.releaseReservations(eventId, resolvedPlaceIds);
