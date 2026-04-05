@@ -461,6 +461,7 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
         // Get currency
         const currency = getValue(ticketInfoData, 'currency')?.toUpperCase() || process.env.PAYMENT_CURRENCY?.toUpperCase() || 'EUR';
         const currencySymbol = getCurrencySymbol(currency);
+        const formatMoney = (amount) => `${formatCurrency(amount)} ${currencySymbol}`;
 
         // Extract venue information
         const venueName = venue.name || venueInfo.name || event.eventLocationAddress || 'TBA';
@@ -568,23 +569,23 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
             // Total values for display with "(x3)" in template
             // basePrice and serviceFee are per-unit, so we multiply by quantity
             // serviceTaxAmount and vatAmount from DB are already totals (from frontend metadata)
-            basePrice: `${currencySymbol}${formatCurrency(totalBasePrice)}`,
-            ticketPrice: `${currencySymbol}${formatCurrency(totalBasePrice)}`, // Keep for backward compatibility
-            subtotal: `${currencySymbol}${formatCurrency(totalBasePrice + totalEntertainmentTaxAmount)}`,
-            serviceFee: `${currencySymbol}${formatCurrency(totalServiceFee)}`,
+            basePrice: formatMoney(totalBasePrice),
+            ticketPrice: formatMoney(totalBasePrice), // Keep for backward compatibility
+            subtotal: formatMoney(totalBasePrice + totalEntertainmentTaxAmount),
+            serviceFee: formatMoney(totalServiceFee),
             serviceTaxRate: serviceTax > 0 ? serviceTax.toString() : null,
             // serviceTaxAmount from DB is already total (perUnitServiceTax * quantity from frontend)
-            serviceTaxAmount: totalServiceTaxAmount > 0 ? `${currencySymbol}${formatCurrency(totalServiceTaxAmount)}` : null,
+            serviceTaxAmount: totalServiceTaxAmount > 0 ? formatMoney(totalServiceTaxAmount) : null,
             entertainmentTaxRate: entertainmentTax > 0 ? entertainmentTax.toString() : null,
             // entertainmentTaxAmount is calculated from individual seat tickets or stored total
-            entertainmentTaxAmount: totalEntertainmentTaxAmount > 0 ? `${currencySymbol}${formatCurrency(totalEntertainmentTaxAmount)}` : null,
+            entertainmentTaxAmount: totalEntertainmentTaxAmount > 0 ? formatMoney(totalEntertainmentTaxAmount) : null,
             vatRate: vatRate > 0 ? vatRate.toString() : null, // Use vatRate (not vat) - vatRate might be different from vat
             // vatAmount from DB is already total (perUnitVat * quantity from frontend)
-            vatAmount: totalVatAmount > 0 ? `${currencySymbol}${formatCurrency(totalVatAmount)}` : null,
-            orderFee: orderFee > 0 ? `${currencySymbol}${formatCurrency(orderFee)}` : null,
-            orderFeeServiceTax: orderFeeServiceTax > 0 ? `${currencySymbol}${formatCurrency(orderFeeServiceTax)}` : null,
-            tax: `${currencySymbol}${formatCurrency(totalEntertainmentTaxAmount + totalServiceTaxAmount)}`, // Keep for backward compatibility
-            totalAmount: `${currencySymbol}${formatCurrency(totalAmount)}`,
+            vatAmount: totalVatAmount > 0 ? formatMoney(totalVatAmount) : null,
+            orderFee: orderFee > 0 ? formatMoney(orderFee) : null,
+            orderFeeServiceTax: orderFeeServiceTax > 0 ? formatMoney(orderFeeServiceTax) : null,
+            tax: formatMoney(totalEntertainmentTaxAmount + totalServiceTaxAmount), // Keep for backward compatibility
+            totalAmount: formatMoney(totalAmount),
 
             // Transportation
             publicTransportLink: publicTransportLink,
