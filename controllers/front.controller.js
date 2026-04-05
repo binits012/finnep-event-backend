@@ -33,6 +33,30 @@ import { PersonalDataRequest } from '../model/personalDataRequest.js'
 import { getPresalePayload, consumePresaleToken } from '../util/presaleToken.js'
 import { getSurveyTokenPayload, consumeSurveyToken } from '../util/surveyToken.js'
 
+/** ISO 3166-1 alpha-3 (or other mistaken 3-letter codes) → ISO 4217 for Stripe */
+const STRIPE_CURRENCY_ALIASES = {
+    che: 'chf',
+    gbr: 'gbp',
+    deu: 'eur',
+    fra: 'eur',
+    ita: 'eur',
+    esp: 'eur',
+    usa: 'usd',
+    fin: 'eur',
+    swe: 'sek',
+    nor: 'nok',
+    dnk: 'dkk',
+};
+
+const normalizeStripeCurrency = (raw) => {
+    let c = String(raw ?? '')
+        .normalize('NFKC')
+        .replace(/[\u200B-\u200D\uFEFF]/g, '')
+        .trim()
+        .toLowerCase();
+    return STRIPE_CURRENCY_ALIASES[c] || c;
+};
+
 const resolveSectionMode = (section) => {
 	if (!section) return 'seat';
 	// Hard guard: Seating sections are always seat-based.
@@ -266,7 +290,7 @@ export const createCheckoutSession = async (req, res, next) => {
                     line_items: [
                         {
                             price_data: {
-                                currency: process.env.PAYMENT_CURRENCY,
+                                currency: normalizeStripeCurrency(process.env.PAYMENT_CURRENCY || 'eur'),
                                 product_data: {
                                     name: eventName,
                                     metadata: {
@@ -511,10 +535,11 @@ const sanitizeBoolean = (bool) => {
 };
 
 const validatePaymentRequest = (reqBody) => {
-    const { amount, currency, metadata = {} } = reqBody;
+    const { amount, metadata = {} } = reqBody;
+    let currency = normalizeStripeCurrency(reqBody.currency);
     console.log('reqBody', reqBody);
     // Validate required fields
-    if (!amount || !currency) {
+    if (!amount || !reqBody.currency) {
         throw new Error('Missing required fields: amount and currency are required');
     }
 
