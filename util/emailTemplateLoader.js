@@ -23,12 +23,15 @@ export const compileMjmlTemplate = async (templatePath, variables = {}) => {
     // - html-minifier has REDoS vulnerability (CVE-2022-37620) but is overridden with html-minifier-terser@7.2.0
     // - Even if override fails, minify: false ensures vulnerable code path is never executed
     // - This is safe for production use
-    const { html, errors } = mjml(mjmlWithVariables, {
-      minify: false, // CRITICAL: Must remain false - prevents execution of any minification code
-      validationLevel: 'soft', // Use 'soft' to allow some warnings without failing
-      keepComments: false,
-      beautify: false
-    });
+    const mjmlResult = await Promise.resolve(
+      mjml(mjmlWithVariables, {
+        minify: false, // CRITICAL: Must remain false - prevents execution of any minification code
+        validationLevel: 'soft', // Use 'soft' to allow some warnings without failing
+        keepComments: false,
+        beautify: false
+      })
+    );
+    const { html, errors } = mjmlResult;
 
     // Log warnings if any (but don't fail)
     if (errors && errors.length > 0) {
