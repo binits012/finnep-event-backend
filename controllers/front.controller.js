@@ -86,6 +86,14 @@ const isEventCurrentlyValid = (event, now = new Date()) => {
     return endDate >= now;
 };
 
+const isExternalEvent = (event) => {
+    if (!event) return false;
+    if (event?.otherInfo?.isExternalEvent === true) return true;
+    if (event?.externalEventId != null && String(event.externalEventId).trim() !== '') return true;
+    if (event?.externalMerchantId != null && String(event.externalMerchantId).trim() !== '') return true;
+    return false;
+};
+
 export const getDataForFront = async (req, res, next) => {
     // Get client IP (fast), then run country detection in parallel with main data fetch
     const clientIP = await getClientIdentifier(req);
@@ -135,6 +143,9 @@ export const getDataForFront = async (req, res, next) => {
     const detectedCountry = await countryPromise;
     if (filteredEvents.length > 0) {
         filteredEvents = filteredEvents.filter(e => {
+            if (isExternalEvent(e)) {
+                return true;
+            }
             // Show event if:
             // 1. Event has no country set (available to all)
             // 2. Event country matches detected country
@@ -151,7 +162,8 @@ export const getDataForFront = async (req, res, next) => {
         photo: photosWithCloudFrontUrls?.filter(e => e.publish),
         notification: notificationList,
         event: filteredEvents,
-        setting: setting
+        setting: setting,
+        companyTitle: process.env.COMPANY_TITLE || 'Okazzo'
     }
     res.status(consts.HTTP_STATUS_OK).json(data)
 }
