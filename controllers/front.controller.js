@@ -3903,6 +3903,9 @@ export const handleFreeEventRegistration = async (req, res, next) => {
         // Extract locale from request
         const locale = commonUtil.extractLocaleFromRequest(req);
         const emailPayload = await ticketMaster.createEmailPayload(event, ticket, sanitizedData.email, otp, locale);
+        if (!emailPayload?.to) {
+            throw new Error('Ticket email recipient is missing');
+        }
         await new Promise(resolve => setTimeout(resolve, 100)); // intentional delay
         await sendMail.forward(emailPayload).then(async data => {
             // Update the ticket to mark as sent

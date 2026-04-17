@@ -620,12 +620,19 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
             loadedData = await loadEmailTemplate(fileLocation, templateVariables, null, null, null, locale);
         }
 
+        if (!loadedData) {
+            throw new Error('Email template payload is empty');
+        }
+        if (!ticketFor) {
+            throw new Error('Ticket recipient is missing');
+        }
+
         const qrBase64 = qrData.split(',')[1]; // Remove the data URI prefix
         const message = {
             from: process.env.EMAIL_USERNAME,
             to: ticketFor,
             subject: event.eventTitle,
-            html: loadedData.toString(),
+            html: typeof loadedData === 'string' ? loadedData : loadedData.toString(),
             attachDataUrls: true,
             icalEvent: {
                 filename: 'event-ticket.ics',
@@ -643,7 +650,7 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
         return message;
 
     } catch (err) {
-        error('error creating ticket email payload %s', err);
-        return err;
+        error('error creating ticket email payload %s', err?.stack || err?.message || String(err));
+        throw err;
     }
 };

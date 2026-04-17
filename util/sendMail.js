@@ -34,11 +34,11 @@ export const forward = async (emailData) =>{
                         }
                         const reporting = TicketReport(msg)
                         await reporting.save()
-                        error('error sending email %s', err)
-                        reject(err)
+                        error('error sending email %s', err?.stack || err?.message || String(err))
+                        return reject(err)
                     }
                     info('email sent %s', data)
-                    resolve(data)
+                    return resolve(data)
                 })
             })
         }catch(err){
@@ -64,11 +64,11 @@ export const retryForward = async (id, emailData, retryCount) => {
                 }
                 await TicketReport.findByIdAndUpdate(id, { $set:  msg },
                     { new: true }).catch(err=>{return {error:err.stack}})
-                    error('error sending email %s', err)
-                reject(err)
+                    error('error sending email %s', err?.stack || err?.message || String(err))
+                return reject(err)
             }
             info('email sent %s', data)
-            resolve(data)
+            return resolve(data)
         })
     })
 
