@@ -37,12 +37,14 @@ export const createPhoto = async (req, res, next) => {
             if(photoTypeObj.length > 0 ){
                 const photoTypeName = photoTypeObj[0].name
                 const imageName = photoTypeName+"/"+  crypto.randomUUID()+'.'+imageType.substring(6,9)
-                await uploadToS3Bucket(imageType, base64Data, imageName).catch(err=>{
-                    error('error',err.stack)
+                try {
+                    await uploadToS3Bucket(imageType, base64Data, imageName)
+                } catch (err) {
+                    error('Photo upload failed: %s', err?.stack || err?.message || String(err))
                     return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
-                        message: 'Sorry, something went wrong', error: err
+                        message: 'Sorry, something went wrong', error: err?.message || err
                     })
-                })
+                }
                 //dateLessThan, dateGreaterThan, url, keyPairId, privateKey, ipAddress, policy, passphrase, 
                 const signedUrl = getSignedUrl({dateLessThan: Math.floor(Date.now() / 1000) + 3600*24, // Expires in 24 hour,
                     dateGreaterThan:Date.now(),
@@ -51,7 +53,7 @@ export const createPhoto = async (req, res, next) => {
                     privateKey
                 });
                 const linkToFile = "https://"+process.env.BUCKET_NAME+".s3."+process.env.BUCKET_REGION+".amazonaws.com/" +imageName
-                await Photo.uploadPhoto(linkToFile, true, position, photoType).then(data => { 
+                await Photo.uploadPhoto(linkToFile, true, position, photoType).then(async data => { 
                     const cacheKey = `signedUrl:${data.id}`;
                     const cached = commonUtil.getCacheByKey(redisClient, cacheKey);
 
@@ -61,11 +63,7 @@ export const createPhoto = async (req, res, next) => {
                     } else {
                         // Generate new signed URL
                         const expiresInSeconds = 7 * 24 * 60 * 60; // e.g., 7 days
-                        const signedUrl = getSignedUrl({  
-                            keyPairId, 
-                            privateKey,
-                            policy:policyString
-                        });
+                        const signedUrl = await commonUtil.getCloudFrontUrl(data.photoLink)
                         const expiresAt = Date.now() + expiresInSeconds * 1000;
 
                         // Store in cache

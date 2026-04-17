@@ -13,7 +13,6 @@ const s3Client = new S3Client({
 })
 
 export const uploadToS3Bucket = async (fileType, fileContent, pathToS3) =>{
-
     await s3Client.send(
         new PutObjectCommand({
             Bucket:process.env.BUCKET_NAME,
@@ -22,7 +21,8 @@ export const uploadToS3Bucket = async (fileType, fileContent, pathToS3) =>{
             Body:fileContent
         })
     ).catch(err=>{
-        error('error',err.stack)
+        error('S3 upload failed: %s', err?.stack || err?.message || String(err))
+        throw err
     })
     info( "sending %s photo to bucket end at %s",pathToS3 ,new Date())
   }
