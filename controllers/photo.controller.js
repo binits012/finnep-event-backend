@@ -76,7 +76,7 @@ export const createPhoto = async (req, res, next) => {
                     }
                     return res.status(consts.HTTP_STATUS_CREATED).json({ data: data })
                 }).catch(err => {
-                    logger.error(err) 
+                    error('error', err.stack) 
                     return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
                         message: 'Sorry, something went wrong', error: err
                     })
@@ -174,7 +174,7 @@ export const getPhotoById = async (req, res, next) => {
                 data.photoLink = signedUrl
                 return res.status(consts.HTTP_STATUS_OK).json({ data: data })
             }).catch(err => {
-                logger.error(err)
+                error('error', err.stack)
                 return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
                     message: 'Sorry, something went wrong', error: err
                 })
@@ -209,7 +209,7 @@ export const updatePhotoById = async (req, res, next) => {
                 
                     return res.status(consts.HTTP_STATUS_OK).json({ data: data })
                 }).catch(err => {
-                    logger.error(err) 
+                    error('error', err.stack) 
                     return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
                         message: 'Sorry, something went wrong', error: err
                     })
@@ -250,7 +250,7 @@ export const deletePhotoById = async (req, res, next) => {
                     data.photoLink = signedUrl 
                     return res.status(consts.HTTP_STATUS_OK).send()
                 }).catch(err => {
-                    logger.error(err) 
+                    error('error', err.stack) 
                     return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
                         message: 'Sorry, something went wrong', error: err
                     })
