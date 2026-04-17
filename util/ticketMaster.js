@@ -4,8 +4,9 @@ import {error} from '../model/logger.js'
 import dotenv from 'dotenv'
 import moment from 'moment-timezone'
 dotenv.config()
-import { dirname } from 'path'
-const __dirname = dirname(import.meta.url).slice(7)
+import path, { dirname } from 'path'
+import { fileURLToPath } from 'url'
+const __dirname = dirname(fileURLToPath(import.meta.url))
 
 /**
  * Format currency amount
@@ -616,12 +617,21 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
                 .replace(/\$ticketCode/g, templateVariables.ticketCode);
         } else {
             // Use MJML template
-            const fileLocation = __dirname.replace('util', '') + '/emailTemplates/ticket_template.html';
+            const fileLocation = path.join(__dirname, '..', 'emailTemplates', 'ticket_template.html');
             loadedData = await loadEmailTemplate(fileLocation, templateVariables, null, null, null, locale);
         }
 
-        if (!loadedData) {
-            throw new Error('Email template payload is empty');
+        if (!loadedData || (typeof loadedData === 'string' && loadedData.trim().length === 0)) {
+            // Fallback template to avoid blocking ticket delivery when template rendering fails silently.
+            loadedData = `
+                <html>
+                  <body>
+                    <h2>${templateVariables.eventTitle || 'Your Event Ticket'}</h2>
+                    <p>Your ticket code: <strong>${templateVariables.ticketCode || ''}</strong></p>
+                    <p>Please keep this email for event entry.</p>
+                  </body>
+                </html>
+            `;
         }
         if (!ticketFor) {
             throw new Error('Ticket recipient is missing');

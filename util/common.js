@@ -238,7 +238,7 @@ export const loadEmailTemplateForMerchant = async (fileLocation, orgName, dashbo
 }
 
 export const loadFeedbackTemplate = async (name, email, subject, message) => {
-    const fileLocation = './emailTemplates/feedback_acknowledgement.mjml';
+    const fileLocation = path.join(__dirname, '..', 'emailTemplates', 'feedback_acknowledgement.mjml');
     const variables = {
       name,
       email,
@@ -256,7 +256,7 @@ export const loadFeedbackTemplate = async (name, email, subject, message) => {
 }
 
 export const loadCareerTemplate = async (name, email, phone, position, experience, availability) => {
-    const fileLocation = './emailTemplates/career_acknowledgement.mjml';
+    const fileLocation = path.join(__dirname, '..', 'emailTemplates', 'career_acknowledgement.mjml');
     const variables = {
       name,
       email,

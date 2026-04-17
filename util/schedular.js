@@ -9,7 +9,8 @@ import { error, info } from '../model/logger.js';
 import { getUsersByRole } from '../model/users.js';
 import { getContactById } from '../model/contact.js';
 import { ROLE_ADMIN } from '../const.js';
-import { dirname } from 'path';
+import path, { dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { getOutboxMessagesForRetry, updateOutboxMessageById, createOutboxMessagesBatch } from '../model/outboxMessage.js';
 import { messageConsumer } from '../rabbitMQ/services/messageConsumer.js';
 import { Event, OutboxMessage } from '../model/mongoModel.js';
@@ -18,8 +19,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { compileMjmlTemplate } from './emailTemplateLoader.js';
 
 dotenv.config();
-const __dirname = dirname(import.meta.url).slice(7);
-console.log(__dirname);
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 
 // Connection options for MongoDB
@@ -388,7 +388,7 @@ function defineJobs() {
         let email = contact.contact[0].data;
 
         if (email && email !== 'undefined') {
-          const fileLocation = __dirname.replace('util', '') + '/emailTemplates/failure_report.html';
+          const fileLocation = path.join(__dirname, '..', 'emailTemplates', 'failure_report.html');
           const emailData = await loadEmailTemplate(fileLocation, username, emailRows);
 
           if (emailRows) {
