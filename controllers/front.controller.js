@@ -3378,6 +3378,7 @@ export const sendFeedback = async (req, res, next) => {
         }
 
         const fullName = `${firstName} ${lastName}`;
+        const companyTitle = process.env.COMPANY_TITLE || 'Finnep';
 
         // Load acknowledgement template
         const acknowledgementHtml = await commonUtil.loadFeedbackTemplate(fullName, email, subject, message);
@@ -3386,7 +3387,7 @@ export const sendFeedback = async (req, res, next) => {
         const acknowledgementEmail = {
             from: process.env.EMAIL_USERNAME,
             to: email,
-            subject: 'Thank you for your feedback - Finnep',
+            subject: `Thank you for your feedback - ${companyTitle}`,
             html: acknowledgementHtml
         };
 
@@ -3476,6 +3477,7 @@ export const submitPersonalDataRequest = async (req, res, next) => {
 
 		const requesterFullName = `${String(firstName).trim()} ${String(lastName).trim()}`.trim();
 		const requestId = uuidv4();
+		const companyTitle = process.env.COMPANY_TITLE || 'Finnep';
 
 		await PersonalDataRequest.create({
 			requestId,
@@ -3517,7 +3519,7 @@ export const submitPersonalDataRequest = async (req, res, next) => {
 				await sendMail.forward({
 					from: process.env.EMAIL_USERNAME,
 					to: String(email).trim(),
-					subject: 'Personal data request received - Finnep',
+					subject: `Personal data request received - ${companyTitle}`,
 					html: acknowledgementHtml
 				});
 			} catch (mailErr) {
@@ -3625,6 +3627,7 @@ export const sendCareerApplication = async (req, res, next) => {
                     }
 
                     const fullName = `${firstName} ${lastName}`;
+                    const companyTitle = process.env.COMPANY_TITLE || 'Finnep';
 
                     // Load acknowledgement template
                     const acknowledgementHtml = await commonUtil.loadCareerTemplate(fullName, email, phone, position, experience, availability);
@@ -3633,7 +3636,7 @@ export const sendCareerApplication = async (req, res, next) => {
                     const acknowledgementEmail = {
                         from: process.env.EMAIL_USERNAME,
                         to: email,
-                        subject: 'Thank you for your application - Finnep',
+                        subject: `Thank you for your application - ${companyTitle}`,
                         html: acknowledgementHtml
                     };
 
