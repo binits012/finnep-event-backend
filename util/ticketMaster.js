@@ -1,4 +1,4 @@
-import { generateICS,generateQRCode, loadEmailTemplate } from './common.js'
+import { generateICS, generateQRCode, loadEmailTemplate, resolveBrandingContactEmail } from './common.js'
 import * as Ticket from '../model/ticket.js'
 import {error} from '../model/logger.js'
 import dotenv from 'dotenv'
@@ -533,7 +533,7 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
         // Platform/Company information
         const companyName = process.env.COMPANY_TITLE || 'Finnep';
         const companyLogo = process.env.COMPANY_LOGO || 'https://finnep.s3.eu-central-1.amazonaws.com/Other/finnep_logo.png';
-        const platformMailTo = process.env.PLATFORM_EMAIL || process.env.EMAIL_USERNAME || 'info@finnep.fi';
+        const brandingContactEmail = resolveBrandingContactEmail();
         const businessId = process.env.BUSINESS_ID || '3579764-6';
         const socialMedidFB = process.env.SOCIAL_MEDIA_FB || event.socialMedia?.facebook || 'https://www.facebook.com/profile.php?id=61565375592900';
         const socialMedidLN = process.env.SOCIAL_MEDIA_LN || event.socialMedia?.linkedin || 'https://www.linkedin.com/company/105069196/admin/dashboard/';
@@ -598,7 +598,7 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
             organizerPhone: organizerPhone,
 
             // Platform & Footer
-            platformMailTo: platformMailTo,
+            brandingContactEmail,
             businessId: businessId,
             socialMedidFB: socialMedidFB,
             socialMedidLN: socialMedidLN

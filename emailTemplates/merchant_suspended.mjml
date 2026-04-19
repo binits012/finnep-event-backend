@@ -83,7 +83,7 @@
           <mj-text color="#D1D5DB" font-size="16px" line-height="1.6" padding-bottom="30px">
             {{t.body2}}
           </mj-text>
-          <mj-button background-color="#3B82F6" color="#FFFFFF" font-size="16px" font-weight="600" border-radius="25px" href="mailto:{{contactEmail}}">
+          <mj-button background-color="#3B82F6" color="#FFFFFF" font-size="16px" font-weight="600" border-radius="25px" href="mailto:{{brandingContactEmail}}">
             {{t.contactButton}}
           </mj-button>
           <mj-divider border-color="rgba(255, 255, 255, 0.1)" border-width="1px" padding="30px 0 20px 0" />
@@ -94,7 +94,7 @@
             {{platformTeamSignature}}
           </mj-text>
           <mj-text padding="0">
-            <a href="mailto:{{contactEmail}}" style="color: #60A5FA; text-decoration: none; font-size: 16px;">{{contactEmail}}</a>
+            <a href="mailto:{{brandingContactEmail}}" style="color: #60A5FA; text-decoration: none; font-size: 16px;">{{brandingContactEmail}}</a>
           </mj-text>
         </mj-column>
       </mj-section>

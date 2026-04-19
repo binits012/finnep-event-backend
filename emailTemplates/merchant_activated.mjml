@@ -94,7 +94,7 @@
             {{platformTeamSignature}}
           </mj-text>
           <mj-text padding="0">
-            <a href="mailto:{{contactEmail}}" style="color: #60A5FA; text-decoration: none; font-size: 16px;">{{contactEmail}}</a>
+            <a href="mailto:{{brandingContactEmail}}" style="color: #60A5FA; text-decoration: none; font-size: 16px;">{{brandingContactEmail}}</a>
           </mj-text>
         </mj-column>
       </mj-section>

@@ -101,7 +101,7 @@
                 <td style="padding: 8px 0; vertical-align: top;">
                   <p style="margin: 0 0 4px 0; color: #64748b; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">{{t.questionsOrHelp}}</p>
                   <p style="margin: 0 0 8px 0; color: #0f172a; font-size: 16px; font-weight: 600;">{{companyName}}</p>
-                  <p style="margin: 0;"><a href="mailto:{{platformMailTo}}" style="display: inline-block; background-color: #6366F1; color: #ffffff; font-size: 14px; font-weight: 700; padding: 12px 24px; border-radius: 50px; text-decoration: none;">{{platformMailTo}}</a></p>
+                  <p style="margin: 0;"><a href="mailto:{{brandingContactEmail}}" style="display: inline-block; background-color: #6366F1; color: #ffffff; font-size: 14px; font-weight: 700; padding: 12px 24px; border-radius: 50px; text-decoration: none;">{{brandingContactEmail}}</a></p>
                 </td>
               </tr>
             </table>

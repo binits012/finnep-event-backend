@@ -76,7 +76,7 @@
             © {{currentYear}} {{companyName}}. {{t.copyright}}
           </mj-text>
           <mj-text align="center" color="#9CA3AF" font-size="11px" line-height="1.5">
-            {{t.help}} <a href="mailto:{{contactEmail}}" style="color: #4F46E5; text-decoration: none;">{{contactEmail}}</a>
+            {{t.help}} <a href="mailto:{{brandingContactEmail}}" style="color: #4F46E5; text-decoration: none;">{{brandingContactEmail}}</a>
           </mj-text>
         </mj-column>
       </mj-section>

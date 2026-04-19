@@ -43,9 +43,13 @@ const emailFooterBusinessFromEnv = (options = {}) => ({
   socialMedidLN: options.socialMedidLN ?? process.env.SOCIAL_MEDIA_LN ?? 'https://www.linkedin.com/company/105069196/admin/dashboard/'
 });
 
+/** Public "contact us" / support address for footers and buttons (PLATFORM_EMAIL), not SMTP/from (EMAIL_USERNAME). */
+export const resolveBrandingContactEmail = () =>
+  process.env.PLATFORM_EMAIL || process.env.EMAIL_USERNAME || 'info@finnep.fi';
+
 const acknowledgementBrandingFromEnv = () => {
   const companyName = process.env.COMPANY_TITLE || 'Finnep';
-  const contactEmail = process.env.PLATFORM_EMAIL || process.env.EMAIL_USERNAME || 'info@finnep.fi';
+  const brandingContactEmail = resolveBrandingContactEmail();
   const companyWebsiteUrl = process.env.COMPANY_WEBSITE_URL || 'https://finnep.fi';
   const companyWebsiteLabel = process.env.COMPANY_WEBSITE_LABEL || websiteHostLabel(companyWebsiteUrl);
   const careersUrl = process.env.COMPANY_CAREERS_URL || `${companyWebsiteUrl.replace(/\/$/, '')}/careers`;
@@ -54,7 +58,7 @@ const acknowledgementBrandingFromEnv = () => {
   const hiringTeamSignature = process.env.COMPANY_HIRING_TEAM_SIGNATURE || `The ${companyName} Hiring Team`;
   return {
     companyName,
-    contactEmail,
+    brandingContactEmail,
     companyWebsiteUrl,
     companyWebsiteLabel,
     careersUrl,
@@ -277,7 +281,8 @@ export const loadEmailTemplateForMerchant = async (fileLocation, orgName, dashbo
 
     const companyLogo = options.companyLogo || process.env.COMPANY_LOGO || 'https://finnep.s3.eu-central-1.amazonaws.com/Other/finnep_logo.png';
     const companyName = options.companyName || process.env.COMPANY_TITLE || 'Finnep';
-    const contactEmail = options.contactEmail || process.env.PLATFORM_EMAIL || process.env.EMAIL_USERNAME || 'info@finnep.fi';
+    const brandingContactEmail =
+      options.brandingContactEmail || options.contactEmail || resolveBrandingContactEmail();
     const platformTeamSignature = options.platformTeamSignature || process.env.COMPANY_TEAM_SIGNATURE || `The ${companyName} Team`;
     const closingRegards = translations?.closingRegards || 'Best regards,';
 
@@ -286,7 +291,7 @@ export const loadEmailTemplateForMerchant = async (fileLocation, orgName, dashbo
       dashboardUrl,
       companyLogo,
       companyName,
-      contactEmail,
+      brandingContactEmail,
       platformTeamSignature,
       closingRegards,
       ...emailFooterBusinessFromEnv(options),
@@ -339,7 +344,6 @@ export const loadVerificationCodeTemplate = async (code, locale = 'en-US') => {
     const fileLocation = path.join(__dirname, '..', 'emailTemplates', 'verification_code.mjml');
     const currentYear = new Date().getFullYear();
     const companyName = process.env.COMPANY_TITLE || 'Finnep';
-    const contactEmail = process.env.EMAIL_USERNAME || 'info@finnep.fi';
 
     // Normalize locale
     const normalizedLocale = normalizeLocale(locale);
@@ -351,7 +355,7 @@ export const loadVerificationCodeTemplate = async (code, locale = 'en-US') => {
       verificationCode: code,
       currentYear,
       companyName,
-      contactEmail,
+      brandingContactEmail: resolveBrandingContactEmail(),
       t: translations // Pass translations as 't' object for Handlebars {{t.key}} access
     };
     return await compileMjmlTemplate(fileLocation, variables);
@@ -363,10 +367,8 @@ export const loadWaitlistJoinedTemplate = async (eventTitle, locale = 'en-US', o
     const fileLocation = path.join(__dirname, '..', 'emailTemplates', 'waitlist_joined.mjml');
     const currentYear = new Date().getFullYear();
     const companyName = process.env.COMPANY_TITLE || 'Finnep';
-    const contactEmail = process.env.EMAIL_USERNAME || 'info@finnep.fi';
     const companyLogo = options.companyLogo || process.env.COMPANY_LOGO || 'https://finnep.s3.eu-central-1.amazonaws.com/Other/finnep_logo.png';
     const eventPromotionalPhoto = options.eventPromotionalPhoto || DEFAULT_EVENT_IMAGE;
-    const platformMailTo = process.env.PLATFORM_EMAIL || process.env.EMAIL_USERNAME || 'info@finnep.fi';
 
     const normalizedLocale = normalizeLocale(locale);
     const translations = await loadTranslations('waitlist_joined', normalizedLocale);
@@ -375,10 +377,9 @@ export const loadWaitlistJoinedTemplate = async (eventTitle, locale = 'en-US', o
         eventTitle: eventTitle || 'Event',
         currentYear,
         companyName,
-        contactEmail,
         companyLogo,
         eventPromotionalPhoto,
-        platformMailTo,
+        brandingContactEmail: resolveBrandingContactEmail(),
         t: translations
     };
     return await compileMjmlTemplate(fileLocation, variables);
@@ -398,7 +399,6 @@ export const loadPresaleLinkTemplate = async (eventTitle, presaleLink, validHour
     const companyName = process.env.COMPANY_TITLE || 'Finnep';
     const companyLogo = options.companyLogo || process.env.COMPANY_LOGO || 'https://finnep.s3.eu-central-1.amazonaws.com/Other/finnep_logo.png';
     const eventPromotionalPhoto = options.eventPromotionalPhoto || DEFAULT_EVENT_IMAGE;
-    const platformMailTo = process.env.PLATFORM_EMAIL || process.env.EMAIL_USERNAME || 'info@finnep.fi';
 
     const normalizedLocale = normalizeLocale(locale);
     const translations = await loadTranslations('presale_link', normalizedLocale);
@@ -411,7 +411,7 @@ export const loadPresaleLinkTemplate = async (eventTitle, presaleLink, validHour
         companyName,
         companyLogo,
         eventPromotionalPhoto,
-        platformMailTo,
+        brandingContactEmail: resolveBrandingContactEmail(),
         t: translations
     };
     return await compileMjmlTemplate(fileLocation, variables);
@@ -430,7 +430,6 @@ export const loadSoldOutAvailableTemplate = async (eventTitle, eventUrl, locale 
     const companyName = process.env.COMPANY_TITLE || 'Finnep';
     const companyLogo = options.companyLogo || process.env.COMPANY_LOGO || 'https://finnep.s3.eu-central-1.amazonaws.com/Other/finnep_logo.png';
     const eventPromotionalPhoto = options.eventPromotionalPhoto || DEFAULT_EVENT_IMAGE;
-    const platformMailTo = process.env.PLATFORM_EMAIL || process.env.EMAIL_USERNAME || 'info@finnep.fi';
 
     const normalizedLocale = normalizeLocale(locale);
     const translations = await loadTranslations('sold_out_available', normalizedLocale);
@@ -442,7 +441,7 @@ export const loadSoldOutAvailableTemplate = async (eventTitle, eventUrl, locale 
         companyName,
         companyLogo,
         eventPromotionalPhoto,
-        platformMailTo,
+        brandingContactEmail: resolveBrandingContactEmail(),
         t: translations
     };
     return await compileMjmlTemplate(fileLocation, variables);

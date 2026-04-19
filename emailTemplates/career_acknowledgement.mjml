@@ -115,7 +115,7 @@
             Best regards,<br /><strong>{{hiringTeamSignature}}</strong>
           </mj-text>
           <mj-text align="center" color="#6b7280" font-size="14px" padding-bottom="10px">
-            📧 Email: <a href="mailto:{{contactEmail}}" style="color: #4f46e5; text-decoration: none;">{{contactEmail}}</a>
+            📧 Email: <a href="mailto:{{brandingContactEmail}}" style="color: #4f46e5; text-decoration: none;">{{brandingContactEmail}}</a>
           </mj-text>
           <mj-text align="center" color="#6b7280" font-size="14px" padding-bottom="10px">
             🌐 Website: <a href="{{companyWebsiteUrl}}" style="color: #4f46e5; text-decoration: none;">{{companyWebsiteLabel}}</a>

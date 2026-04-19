@@ -38,7 +38,7 @@ const sampleHiringTeamSignature = process.env.COMPANY_HIRING_TEAM_SIGNATURE || `
 
 const sampleAckBranding = {
   companyName: sampleCompanyName,
-  contactEmail: sampleContactEmail,
+  brandingContactEmail: sampleContactEmail,
   companyWebsiteUrl: sampleCompanyWebsiteUrl,
   companyWebsiteLabel: sampleCompanyWebsiteLabel,
   careersUrl: sampleCareersUrl,
@@ -79,7 +79,7 @@ const sampleDataMap = {
     organizerName: 'Event Organizers Inc.',
     organizerEmail: 'contact@eventorganizers.com',
     organizerPhone: '+1 (555) 123-4567',
-    platformMailTo: sampleContactEmail,
+    brandingContactEmail: sampleContactEmail,
     businessId: sampleBusinessId,
     socialMedidFB: sampleSocialMedidFB,
     socialMedidLN: sampleSocialMedidLN
@@ -87,7 +87,7 @@ const sampleDataMap = {
   verification_code: {
     companyName: sampleCompanyName,
     verificationCode: '123456',
-    contactEmail: sampleContactEmail,
+    brandingContactEmail: sampleContactEmail,
     currentYear: new Date().getFullYear()
   },
   career_acknowledgement: {
@@ -113,7 +113,7 @@ const sampleDataMap = {
     dashboardUrl: 'https://eventapp.finnep.fi/merchant/dashboard',
     companyLogo: process.env.COMPANY_LOGO || 'https://finnep.s3.eu-central-1.amazonaws.com/Other/finnep_logo.png',
     companyName: sampleCompanyName,
-    contactEmail: sampleContactEmail,
+    brandingContactEmail: sampleContactEmail,
     platformTeamSignature: samplePlatformTeamSignature,
     closingRegards: 'Best regards,',
     businessId: sampleBusinessId,
@@ -125,7 +125,7 @@ const sampleDataMap = {
     dashboardUrl: 'https://eventapp.finnep.fi/merchant/dashboard',
     companyLogo: process.env.COMPANY_LOGO || 'https://finnep.s3.eu-central-1.amazonaws.com/Other/finnep_logo.png',
     companyName: sampleCompanyName,
-    contactEmail: sampleContactEmail,
+    brandingContactEmail: sampleContactEmail,
     platformTeamSignature: samplePlatformTeamSignature,
     closingRegards: 'Best regards,',
     businessId: sampleBusinessId,
@@ -136,7 +136,7 @@ const sampleDataMap = {
     orgName: 'Okazzo Oy Events',
     companyLogo: process.env.COMPANY_LOGO || 'https://finnep.s3.eu-central-1.amazonaws.com/Other/finnep_logo.png',
     companyName: sampleCompanyName,
-    contactEmail: sampleContactEmail,
+    brandingContactEmail: sampleContactEmail,
     platformTeamSignature: samplePlatformTeamSignature,
     closingRegards: 'Best regards,',
     businessId: sampleBusinessId,
