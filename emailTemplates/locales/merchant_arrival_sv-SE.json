@@ -1,5 +1,5 @@
 {
-  "subject": "Välkommen till Okazzo Oy - Ditt Event-Imperium Väntar!",
+  "subject": "Välkommen — ditt eventimperium väntar!",
   "title": "Välkommen till Ditt Event-Imperium!",
   "greeting": "Hej",
   "body1": "Välkommen till den mest",
@@ -10,7 +10,6 @@
   "launchButton": "Starta Ditt Första Event →",
   "body4": "Vi är inte bara en plattform – vi är dina",
   "body4Highlight": "framgångspartners",
-  "signature": "Med oändliga möjligheter,",
-  "teamName": "Okazzo-teamet"
+  "signature": "Med oändliga möjligheter,"
 }
 

@@ -86,7 +86,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <div class="logo">Finnep</div>
+            <div class="logo">{{companyName}}</div>
             <h1 class="title">Thank You for Your Feedback!</h1>
         </div>
 
@@ -126,11 +126,11 @@
         </div>
 
         <div class="footer">
-            <p>Best regards,<br><strong>The Okazzo Oy Team</strong></p>
+            <p>Best regards,<br><strong>{{platformTeamSignature}}</strong></p>
 
             <div class="contact-info">
-                <p>📧 Email: info@finnep.fi</p>
-                <p>🌐 Website: <a href="https://finnep.fi">finnep.fi</a></p>
+                <p>📧 Email: <a href="mailto:{{contactEmail}}">{{contactEmail}}</a></p>
+                <p>🌐 Website: <a href="{{companyWebsiteUrl}}">{{companyWebsiteLabel}}</a></p>
                 <p>📱 Follow us on social media for updates and news</p>
             </div>
 

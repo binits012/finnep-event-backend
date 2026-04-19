@@ -7,13 +7,53 @@ import { dirname } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+const sampleCompanyName = process.env.COMPANY_TITLE || 'Finnep';
+const sampleContactEmail = process.env.PLATFORM_EMAIL || process.env.EMAIL_USERNAME || 'info@finnep.fi';
+const samplePlatformTeamSignature = process.env.COMPANY_TEAM_SIGNATURE || `The ${sampleCompanyName} Team`;
+const sampleBusinessId = process.env.BUSINESS_ID || '3579764-6';
+const sampleSocialMedidFB = process.env.SOCIAL_MEDIA_FB || 'https://www.facebook.com/profile.php?id=61565375592900';
+const sampleSocialMedidLN = process.env.SOCIAL_MEDIA_LN || 'https://www.linkedin.com/company/105069196/admin/dashboard/';
+const sampleCompanyWebsiteUrl = process.env.COMPANY_WEBSITE_URL || 'https://finnep.fi';
+let sampleCompanyWebsiteLabel = process.env.COMPANY_WEBSITE_LABEL;
+if (!sampleCompanyWebsiteLabel) {
+  try {
+    sampleCompanyWebsiteLabel = new URL(sampleCompanyWebsiteUrl).hostname.replace(/^www\./i, '');
+  } catch {
+    sampleCompanyWebsiteLabel = 'finnep.fi';
+  }
+}
+const sampleCareersUrl = process.env.COMPANY_CAREERS_URL || `${sampleCompanyWebsiteUrl.replace(/\/$/, '')}/careers`;
+let sampleCareersLabel = process.env.COMPANY_CAREERS_LABEL;
+if (!sampleCareersLabel) {
+  try {
+    const u = new URL(sampleCareersUrl);
+    const host = u.hostname.replace(/^www\./i, '');
+    const p = u.pathname && u.pathname !== '/' ? u.pathname.replace(/\/$/, '') : '';
+    sampleCareersLabel = p ? `${host}${p}` : host;
+  } catch {
+    sampleCareersLabel = 'finnep.fi/careers';
+  }
+}
+const sampleHiringTeamSignature = process.env.COMPANY_HIRING_TEAM_SIGNATURE || `The ${sampleCompanyName} Hiring Team`;
+
+const sampleAckBranding = {
+  companyName: sampleCompanyName,
+  contactEmail: sampleContactEmail,
+  companyWebsiteUrl: sampleCompanyWebsiteUrl,
+  companyWebsiteLabel: sampleCompanyWebsiteLabel,
+  careersUrl: sampleCareersUrl,
+  careersLabel: sampleCareersLabel,
+  platformTeamSignature: samplePlatformTeamSignature,
+  hiringTeamSignature: sampleHiringTeamSignature
+};
+
 // Sample data for different templates
 const sampleDataMap = {
   ticket_template: {
     companyLogo: 'https://finnep.s3.eu-central-1.amazonaws.com/Other/finnep_logo.png',
     eventPromotionalPhoto: 'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=800',
     eventTitle: 'Summer Music Festival 2024',
-    companyName: 'Finnep',
+    companyName: sampleCompanyName,
     attendeeName: 'John Doe',
     ticketCode: 'ABC123XYZ',
     eventDate: 'Saturday, July 15, 2024',
@@ -39,15 +79,15 @@ const sampleDataMap = {
     organizerName: 'Event Organizers Inc.',
     organizerEmail: 'contact@eventorganizers.com',
     organizerPhone: '+1 (555) 123-4567',
-    platformMailTo: 'info@finnep.fi',
-    businessId: '3579764-6',
-    socialMedidFB: 'https://www.facebook.com/profile.php?id=61565375592900',
-    socialMedidLN: 'https://www.linkedin.com/company/105069196/admin/dashboard/'
+    platformMailTo: sampleContactEmail,
+    businessId: sampleBusinessId,
+    socialMedidFB: sampleSocialMedidFB,
+    socialMedidLN: sampleSocialMedidLN
   },
   verification_code: {
-    companyName: 'Finnep',
+    companyName: sampleCompanyName,
     verificationCode: '123456',
-    contactEmail: 'info@finnep.fi',
+    contactEmail: sampleContactEmail,
     currentYear: new Date().getFullYear()
   },
   career_acknowledgement: {
@@ -57,25 +97,51 @@ const sampleDataMap = {
     email: 'jane.smith@example.com',
     phone: '+358 50 123 4567',
     experience: '5+ years in full-stack development',
-    availability: 'Available immediately'
+    availability: 'Available immediately',
+    ...sampleAckBranding
   },
   feedback_acknowledgement: {
     name: 'John Doe',
     email: 'john.doe@example.com',
     subject: 'Feature Request - Dark Mode',
     message: 'I would love to see a dark mode option in the mobile app. It would be great for evening browsing!',
-    date: 'January 15, 2024'
+    date: 'January 15, 2024',
+    ...sampleAckBranding
   },
   merchant_activated: {
     orgName: 'Okazzo Oy Events',
-    dashboardUrl: 'https://eventapp.finnep.fi/merchant/dashboard'
+    dashboardUrl: 'https://eventapp.finnep.fi/merchant/dashboard',
+    companyLogo: process.env.COMPANY_LOGO || 'https://finnep.s3.eu-central-1.amazonaws.com/Other/finnep_logo.png',
+    companyName: sampleCompanyName,
+    contactEmail: sampleContactEmail,
+    platformTeamSignature: samplePlatformTeamSignature,
+    closingRegards: 'Best regards,',
+    businessId: sampleBusinessId,
+    socialMedidFB: sampleSocialMedidFB,
+    socialMedidLN: sampleSocialMedidLN
   },
   merchant_arrival: {
     orgName: 'Okazzo Oy Events',
-    dashboardUrl: 'https://eventapp.finnep.fi/merchant/dashboard'
+    dashboardUrl: 'https://eventapp.finnep.fi/merchant/dashboard',
+    companyLogo: process.env.COMPANY_LOGO || 'https://finnep.s3.eu-central-1.amazonaws.com/Other/finnep_logo.png',
+    companyName: sampleCompanyName,
+    contactEmail: sampleContactEmail,
+    platformTeamSignature: samplePlatformTeamSignature,
+    closingRegards: 'Best regards,',
+    businessId: sampleBusinessId,
+    socialMedidFB: sampleSocialMedidFB,
+    socialMedidLN: sampleSocialMedidLN
   },
   merchant_suspended: {
-    orgName: 'Okazzo Oy Events'
+    orgName: 'Okazzo Oy Events',
+    companyLogo: process.env.COMPANY_LOGO || 'https://finnep.s3.eu-central-1.amazonaws.com/Other/finnep_logo.png',
+    companyName: sampleCompanyName,
+    contactEmail: sampleContactEmail,
+    platformTeamSignature: samplePlatformTeamSignature,
+    closingRegards: 'Best regards,',
+    businessId: sampleBusinessId,
+    socialMedidFB: sampleSocialMedidFB,
+    socialMedidLN: sampleSocialMedidLN
   },
   failure_report: {
     adminName: 'Admin User',

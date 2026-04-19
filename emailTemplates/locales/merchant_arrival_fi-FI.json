@@ -1,5 +1,5 @@
 {
-  "subject": "Tervetuloa Okazzo Oy:hyn - Tapahtumaimperiumisi Odottaa!",
+  "subject": "Tervetuloa — tapahtuma-alustasi odottaa!",
   "title": "Tervetuloa Tapahtumaimperiumisi!",
   "greeting": "Hei",
   "body1": "Tervetuloa maailman",
@@ -10,7 +10,6 @@
   "launchButton": "Käynnistä Ensimmäinen Tapahtumasi →",
   "body4": "Emme ole vain alusta – olemme sinun",
   "body4Highlight": "menestyksen kumppanisi",
-  "signature": "Äärettömillä mahdollisuuksilla,",
-  "teamName": "Okazzo-tiimi"
+  "signature": "Äärettömillä mahdollisuuksilla,"
 }
 

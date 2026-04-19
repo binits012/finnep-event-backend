@@ -17,6 +17,52 @@ const privateKey = process.env.CLOUDFRONT_PRIVATE_KEY
 const keyPairId = process.env.CLOUDFRONT_KEY_PAIR
 dotenv.config()
 const CHARACTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz123456789';
+
+const websiteHostLabel = (url) => {
+  try {
+    return new URL(url).hostname.replace(/^www\./i, '');
+  } catch {
+    return 'finnep.fi';
+  }
+};
+
+const websiteLinkLabel = (url) => {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./i, '');
+    const path = u.pathname && u.pathname !== '/' ? u.pathname.replace(/\/$/, '') : '';
+    return path ? `${host}${path}` : host;
+  } catch {
+    return String(url);
+  }
+};
+
+const emailFooterBusinessFromEnv = (options = {}) => ({
+  businessId: options.businessId ?? process.env.BUSINESS_ID ?? '3579764-6',
+  socialMedidFB: options.socialMedidFB ?? process.env.SOCIAL_MEDIA_FB ?? 'https://www.facebook.com/profile.php?id=61565375592900',
+  socialMedidLN: options.socialMedidLN ?? process.env.SOCIAL_MEDIA_LN ?? 'https://www.linkedin.com/company/105069196/admin/dashboard/'
+});
+
+const acknowledgementBrandingFromEnv = () => {
+  const companyName = process.env.COMPANY_TITLE || 'Finnep';
+  const contactEmail = process.env.PLATFORM_EMAIL || process.env.EMAIL_USERNAME || 'info@finnep.fi';
+  const companyWebsiteUrl = process.env.COMPANY_WEBSITE_URL || 'https://finnep.fi';
+  const companyWebsiteLabel = process.env.COMPANY_WEBSITE_LABEL || websiteHostLabel(companyWebsiteUrl);
+  const careersUrl = process.env.COMPANY_CAREERS_URL || `${companyWebsiteUrl.replace(/\/$/, '')}/careers`;
+  const careersLabel = process.env.COMPANY_CAREERS_LABEL || websiteLinkLabel(careersUrl);
+  const platformTeamSignature = process.env.COMPANY_TEAM_SIGNATURE || `The ${companyName} Team`;
+  const hiringTeamSignature = process.env.COMPANY_HIRING_TEAM_SIGNATURE || `The ${companyName} Hiring Team`;
+  return {
+    companyName,
+    contactEmail,
+    companyWebsiteUrl,
+    companyWebsiteLabel,
+    careersUrl,
+    careersLabel,
+    platformTeamSignature,
+    hiringTeamSignature
+  };
+};
 export const manipulatePhoneNumber = async (phoneNumber) =>{
     if(/[aA-zZ].*/.test(phoneNumber)){
         return null
@@ -216,7 +262,7 @@ export  const loadEmailTemplate = async (fileLocation, variablesOrEventTitle, ev
     return await compileMjmlTemplate(mjmlPath, variables);
   }
 
-export const loadEmailTemplateForMerchant = async (fileLocation, orgName, dashboardUrl, locale = 'en-US') => {
+export const loadEmailTemplateForMerchant = async (fileLocation, orgName, dashboardUrl, locale = 'en-US', options = {}) => {
     // Replace .html with .mjml in file path
     const mjmlPath = fileLocation.replace('.html', '.mjml');
 
@@ -229,9 +275,21 @@ export const loadEmailTemplateForMerchant = async (fileLocation, orgName, dashbo
     // Load translations for this template and locale
     const translations = await loadTranslations(templateName, normalizedLocale);
 
+    const companyLogo = options.companyLogo || process.env.COMPANY_LOGO || 'https://finnep.s3.eu-central-1.amazonaws.com/Other/finnep_logo.png';
+    const companyName = options.companyName || process.env.COMPANY_TITLE || 'Finnep';
+    const contactEmail = options.contactEmail || process.env.PLATFORM_EMAIL || process.env.EMAIL_USERNAME || 'info@finnep.fi';
+    const platformTeamSignature = options.platformTeamSignature || process.env.COMPANY_TEAM_SIGNATURE || `The ${companyName} Team`;
+    const closingRegards = translations?.closingRegards || 'Best regards,';
+
     const variables = {
       orgName,
       dashboardUrl,
+      companyLogo,
+      companyName,
+      contactEmail,
+      platformTeamSignature,
+      closingRegards,
+      ...emailFooterBusinessFromEnv(options),
       t: translations // Pass translations as 't' object for Handlebars {{t.key}} access
     };
     return await compileMjmlTemplate(mjmlPath, variables);
@@ -250,7 +308,8 @@ export const loadFeedbackTemplate = async (name, email, subject, message) => {
         day: 'numeric',
         hour: '2-digit',
         minute: '2-digit'
-      })
+      }),
+      ...acknowledgementBrandingFromEnv()
     };
     return await compileMjmlTemplate(fileLocation, variables);
 }
@@ -270,7 +329,8 @@ export const loadCareerTemplate = async (name, email, phone, position, experienc
         day: 'numeric',
         hour: '2-digit',
         minute: '2-digit'
-      })
+      }),
+      ...acknowledgementBrandingFromEnv()
     };
     return await compileMjmlTemplate(fileLocation, variables);
 }

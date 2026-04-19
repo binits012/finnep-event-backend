@@ -105,14 +105,14 @@
 <body>
     <div class="container">
         <div class="header">
-            <div class="logo">Finnep</div>
+            <div class="logo">{{companyName}}</div>
             <h1 class="title">Thank You for Your Application!</h1>
         </div>
 
         <div class="content">
             <p>Dear $name,</p>
 
-            <p>Thank you for your interest in joining The Okazzo Oy Team! We have successfully received your job application and are excited to learn more about your background and experience.</p>
+            <p>Thank you for your interest in joining {{companyName}}! We have successfully received your job application and are excited to learn more about your background and experience.</p>
 
             <div class="application-box">
                 <p><strong>Position Applied For:</strong> $position</p>
@@ -163,12 +163,12 @@
         </div>
 
         <div class="footer">
-            <p>Best regards,<br><strong>The Finnep Hiring Team</strong></p>
+            <p>Best regards,<br><strong>{{hiringTeamSignature}}</strong></p>
 
             <div class="contact-info">
-                <p>📧 Email: info@finnep.fi</p>
-                <p>🌐 Website: <a href="https://finnep.fi">finnep.fi</a></p>
-                <p>💼 Careers: <a href="https://finnep.fi/careers">finnep.fi/careers</a></p>
+                <p>📧 Email: <a href="mailto:{{contactEmail}}">{{contactEmail}}</a></p>
+                <p>🌐 Website: <a href="{{companyWebsiteUrl}}">{{companyWebsiteLabel}}</a></p>
+                <p>💼 Careers: <a href="{{careersUrl}}">{{careersLabel}}</a></p>
             </div>
 
             <p style="margin-top: 20px; font-size: 12px; color: #9ca3af;">

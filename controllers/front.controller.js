@@ -86,12 +86,11 @@ const isEventCurrentlyValid = (event, now = new Date()) => {
     return endDate >= now;
 };
 
+// Only otherInfo.isExternalEvent marks a listing as "external" for UI/geo rules.
+// externalEventId / externalMerchantId are set on all merchant-service–synced events.
 const isExternalEvent = (event) => {
     if (!event) return false;
-    if (event?.otherInfo?.isExternalEvent === true) return true;
-    if (event?.externalEventId != null && String(event.externalEventId).trim() !== '') return true;
-    if (event?.externalMerchantId != null && String(event.externalMerchantId).trim() !== '') return true;
-    return false;
+    return event?.otherInfo?.isExternalEvent === true;
 };
 
 export const getDataForFront = async (req, res, next) => {

@@ -27,7 +27,7 @@
       <mj-section padding="40px">
         <mj-column>
           <mj-text align="center" padding="0 0 30px 0">
-            <div style="font-size: 28px; font-weight: bold; color: #4f46e5; margin-bottom: 10px;">Finnep</div>
+            <div style="font-size: 28px; font-weight: bold; color: #4f46e5; margin-bottom: 10px;">{{companyName}}</div>
             <h1 style="font-size: 24px; color: #1f2937; margin: 0;">Thank You for Your Application!</h1>
           </mj-text>
         </mj-column>
@@ -39,7 +39,7 @@
             Dear {{name}},
           </mj-text>
           <mj-text padding-bottom="20px">
-            Thank you for your interest in joining The Okazzo Oy Team! We have successfully received your job application and are excited to learn more about your background and experience.
+            Thank you for your interest in joining {{companyName}}! We have successfully received your job application and are excited to learn more about your background and experience.
           </mj-text>
 
           <mj-section background-color="#f0f9ff" border-left="4px solid #0ea5e9" border-radius="5px" padding="20px">
@@ -112,16 +112,16 @@
       <mj-section border-top="1px solid #e5e7eb" padding="40px">
         <mj-column>
           <mj-text align="center" padding="0 0 20px 0">
-            Best regards,<br /><strong>The Finnep Hiring Team</strong>
+            Best regards,<br /><strong>{{hiringTeamSignature}}</strong>
           </mj-text>
           <mj-text align="center" color="#6b7280" font-size="14px" padding-bottom="10px">
-            📧 Email: <a href="mailto:info@finnep.fi" style="color: #4f46e5; text-decoration: none;">info@finnep.fi</a>
+            📧 Email: <a href="mailto:{{contactEmail}}" style="color: #4f46e5; text-decoration: none;">{{contactEmail}}</a>
           </mj-text>
           <mj-text align="center" color="#6b7280" font-size="14px" padding-bottom="10px">
-            🌐 Website: <a href="https://finnep.fi" style="color: #4f46e5; text-decoration: none;">finnep.fi</a>
+            🌐 Website: <a href="{{companyWebsiteUrl}}" style="color: #4f46e5; text-decoration: none;">{{companyWebsiteLabel}}</a>
           </mj-text>
           <mj-text align="center" color="#6b7280" font-size="14px" padding-bottom="10px">
-            💼 Careers: <a href="https://finnep.fi/careers" style="color: #4f46e5; text-decoration: none;">finnep.fi/careers</a>
+            💼 Careers: <a href="{{careersUrl}}" style="color: #4f46e5; text-decoration: none;">{{careersLabel}}</a>
           </mj-text>
           <mj-text align="center" color="#9ca3af" font-size="12px" padding-top="20px">
             This is an automated confirmation email. Please do not reply to this message.
