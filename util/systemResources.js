@@ -1,6 +1,7 @@
 import os from 'os';
 import * as consts from '../const.js';
 import * as appText from '../applicationTexts.js';
+import { getHttpMetricsSnapshot } from './httpRequestMetrics.js';
 
 // Cache for calculating CPU usage delta
 let lastCpuUsage = null;
@@ -65,7 +66,8 @@ export const getSystemMetrics = async (req, res, next) => {
 			responseTime: 0,
 			errorRate: 0,
 			connections: 0,
-			loadAverage: [0, 0, 0]
+			loadAverage: [0, 0, 0],
+			loadPerCore: 0
 		};
 
 		// CPU usage - accurate delta calculation
@@ -106,29 +108,28 @@ export const getSystemMetrics = async (req, res, next) => {
 		// System load average
 		metrics.loadAverage = os.loadavg().map(v => parseFloat(v.toFixed(2)));
 
-		// Get actual active connections
+		const numCpus = Math.max(1, os.cpus().length);
+		metrics.loadPerCore = parseFloat((metrics.loadAverage[0] / numCpus).toFixed(4));
+
+		// Get actual active connections (requires app.locals.server set after listen)
 		metrics.connections = await getActiveConnections(req.app.locals.server);
 
-		// Response time based on actual system load
-		// Load average is normalized per CPU core
-		const numCpus = os.cpus().length;
-		const normalizedLoad = metrics.loadAverage[0] / numCpus; // Load per core
-
-		// Calculate pressure factors (0-1 scale)
-		const cpuPressure = metrics.cpu / 100;
-		const memPressure = Math.min(metrics.memory / 80, 1); // 80% memory is high pressure
-		const loadPressure = Math.min(normalizedLoad, 1); // Load > 1.0 per core is pressure
-
-		// Weighted resource pressure
-		const resourcePressure = (cpuPressure * 0.35) + (memPressure * 0.35) + (loadPressure * 0.30);
-
-		// Response time: 50ms baseline, up to 500ms under full load
-		metrics.responseTime = parseFloat((50 + (resourcePressure * 450)).toFixed(2));
-
-		// Error rate: baseline 0.01%, up to 0.5% under severe pressure
-		// Only starts increasing significantly above 60% resource pressure
-		const errorPressure = Math.max(0, resourcePressure - 0.6) / 0.4;
-		metrics.errorRate = parseFloat((0.01 + (Math.pow(errorPressure, 2) * 0.49)).toFixed(4));
+		// Real HTTP latency & error % from rolling window (see httpRequestMetrics.js)
+		const http = getHttpMetricsSnapshot();
+		if (http.sampleCount > 0) {
+			metrics.responseTime = parseFloat(http.avgResponseTime.toFixed(2));
+			metrics.errorRate = parseFloat(http.errorRate.toFixed(4));
+		} else {
+			// No samples yet (cold start): expose resource-derived estimates so queue can still react to CPU/mem/load
+			const normalizedLoad = metrics.loadPerCore;
+			const cpuPressure = metrics.cpu / 100;
+			const memPressure = Math.min(metrics.memory / 80, 1);
+			const loadPressure = Math.min(normalizedLoad, 1);
+			const resourcePressure = (cpuPressure * 0.35) + (memPressure * 0.35) + (loadPressure * 0.30);
+			metrics.responseTime = parseFloat((50 + (resourcePressure * 4950)).toFixed(2));
+			const errorPressure = Math.max(0, resourcePressure - 0.5) / 0.5;
+			metrics.errorRate = parseFloat((0.01 + (Math.pow(errorPressure, 2) * 9.99)).toFixed(4));
+		}
 
 		res.status(consts.HTTP_STATUS_OK).json({
 			success: true,

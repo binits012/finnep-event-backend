@@ -16,6 +16,7 @@ import { setupQueues } from './rabbitMQ/services/queueSetup.js';
 import { messageConsumer } from './rabbitMQ/services/messageConsumer.js';
 import { rabbitMQ } from './util/rabbitmq.js';
 import redisClient from './model/redisConnect.js'; // Ensure Redis client is imported early
+import { httpMetricsMiddleware } from './util/httpRequestMetrics.js';
 const stripe = new Stripe(process.env.STRIPE_KEY)
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET
 var app = express();
@@ -176,6 +177,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (request, 
 
 app.use(express.json({ limit: '300mb', extended: false }))
 app.use(express.urlencoded({ extended: false }))
+app.use(httpMetricsMiddleware)
 //app.use(cookieParser())
 
 // Swagger API Documentation (optional - only if packages are installed)
@@ -260,6 +262,7 @@ if (process.env.NODE_ENV !== 'test') {
     var server = app.listen(app.get('port'), async function () {
         console.log('Express server listening on port ' + server.address().port);
     })
+    app.locals.server = server
 }
 // Only run initialization if not in test mode
 if (process.env.NODE_ENV !== 'test') {
