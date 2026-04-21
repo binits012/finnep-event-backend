@@ -18,6 +18,8 @@ const SUPPORTED_LOCALES = [
   'pt-PT'  // Portuguese
 ];
 
+const TAX_LABEL_OVERRIDE = process.env.TAX_LABEL?.trim() || 'VAT';
+
 /**
  * Normalizes BCP 47 locale format
  * Handles variations like 'en', 'en-US', 'en_US' → 'en-US'
@@ -81,7 +83,11 @@ export const loadTranslations = async (templateName, locale = 'en-US') => {
 
   try {
     const content = await fs.readFile(translationFile, 'utf8');
-    return JSON.parse(content);
+    const parsed = JSON.parse(content);
+    if (TAX_LABEL_OVERRIDE && typeof parsed === 'object' && parsed !== null && 'vatPrefix' in parsed) {
+      parsed.vatPrefix = `${TAX_LABEL_OVERRIDE} (`;
+    }
+    return parsed;
   } catch (error) {
     // Fallback to en-US if locale file not found
     if (normalizedLocale !== 'en-US') {
@@ -89,7 +95,11 @@ export const loadTranslations = async (templateName, locale = 'en-US') => {
       const fallbackFile = path.join(translationsDir, `${templateName}_en-US.json`);
       try {
         const content = await fs.readFile(fallbackFile, 'utf8');
-        return JSON.parse(content);
+        const parsed = JSON.parse(content);
+        if (TAX_LABEL_OVERRIDE && typeof parsed === 'object' && parsed !== null && 'vatPrefix' in parsed) {
+          parsed.vatPrefix = `${TAX_LABEL_OVERRIDE} (`;
+        }
+        return parsed;
       } catch (fallbackError) {
         console.error(`Failed to load fallback translation for ${templateName}:`, fallbackError);
         return {}; // Return empty object if even fallback fails

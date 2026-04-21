@@ -118,7 +118,9 @@ export const getEvents = async(page = 1, limit = 10, filters = {}) =>{
     const skip = (page - 1) * limit
 
     // Build query filter object
-    const queryFilter = {}
+    const queryFilter = {
+        active: true
+    }
 
     if (filters.country) {
         queryFilter.country = new RegExp(`^${escapeRegExp(String(filters.country).trim())}$`, 'i')
@@ -267,6 +269,7 @@ export const listEvent = async(filter) =>{
     // Return events that are still valid.
     const now = new Date();
     return await model.Event.find({
+        active: true,
         $or: buildValidityWindowFilter(now)
     }).populate('merchant').sort({'position':-1}).lean()
 }
@@ -286,7 +289,9 @@ async function getTicketCountsByEventIds(eventIds) {
 }
 
 export const listEventFiltered = async({ city, country, page = 1, limit = 1000 } = {}) => {
-    const q = {}
+    const q = {
+        active: true
+    }
     if (city) {
         q.city = city
     }
@@ -324,6 +329,7 @@ export const getFeaturedEvents = async() => {
     try {
         const now = new Date();
         const featuredEvents = await model.Event.find({
+            active: true,
             'featured.isFeatured': true,
             $or: [
                 { 'featured.featuredType': 'sticky' },
@@ -356,6 +362,7 @@ export const getRegularEvents = async(skipFeaturedIds = []) => {
     try {
         const now = new Date();
         const regularEvents = await model.Event.find({
+            active: true,
             $or: [
                 { 'featured.isFeatured': false },
                 { 'featured.isFeatured': { $exists: false } }
