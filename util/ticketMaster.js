@@ -637,7 +637,49 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
             throw new Error('Ticket recipient is missing');
         }
 
-        const qrBase64 = qrData.split(',')[1]; // Remove the data URI prefix
+        const toQrAttachment = (dataUrl, filename) => {
+            const base64 = String(dataUrl || '').split('base64,')[1];
+            if (!base64) {
+                throw new Error(`Invalid QR data for attachment: ${filename}`);
+            }
+            return {
+                filename,
+                content: base64,
+                encoding: 'base64',
+            };
+        };
+
+        const childQREntriesRaw = getValue(ticketInfoData, 'childQRCodes', []);
+        const childQREntries = Array.isArray(childQREntriesRaw)
+            ? childQREntriesRaw
+                .map((child, idx) => {
+                    const childIndex = Number(child?.childIndex ?? (idx + 1));
+                    const childQrCodeValue = String(child?.childQrCodeValue || child?.value || `${ticketId}#${childIndex}`);
+                    return {
+                        childIndex,
+                        childQrCodeValue
+                    };
+                })
+                .filter((child) => child.childQrCodeValue)
+            : [];
+
+        const shouldAttachChildQRCodes = quantity > 1 && childQREntries.length > 0;
+        const attachments = [];
+
+        if (shouldAttachChildQRCodes) {
+            for (const child of childQREntries) {
+                const childQrData = await generateQRCode(child.childQrCodeValue);
+                attachments.push(
+                    toQrAttachment(
+                        childQrData,
+                        `ticket-qrcode-guest-${child.childIndex}.png`
+                    )
+                );
+            }
+        } else {
+            attachments.push(toQrAttachment(qrData, 'ticket-qrcode.png'));
+        }
+
         const message = {
             from: process.env.EMAIL_USERNAME,
             to: ticketFor,
@@ -649,13 +691,7 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
                 method: 'request',
                 content: icsData
             },
-            attachments: [
-                {
-                    filename: 'ticket-qrcode.png',
-                    content: qrBase64,
-                    encoding: 'base64',
-                }
-            ]
+            attachments
         };
         return message;
 

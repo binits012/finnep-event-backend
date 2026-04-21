@@ -14,13 +14,15 @@ const __dirname = dirname(__filename);
 
 // Mock dependencies
 const mockTicket = {
-  updateTicketById: jest.fn()
+  updateTicketById: jest.fn(),
+  upsertChildTicketQR: jest.fn()
 };
 
 const mockCommon = {
   generateICS: jest.fn(),
   generateQRCode: jest.fn(),
-  loadEmailTemplate: jest.fn()
+  loadEmailTemplate: jest.fn(),
+  resolveBrandingContactEmail: jest.fn()
 };
 
 const mockLogger = {
@@ -38,14 +40,16 @@ beforeAll(async () => {
 
   jest.unstable_mockModule(ticketPath, () => ({
     default: mockTicket,
-    updateTicketById: mockTicket.updateTicketById
+    updateTicketById: mockTicket.updateTicketById,
+    upsertChildTicketQR: mockTicket.upsertChildTicketQR
   }));
 
   jest.unstable_mockModule(commonPath, () => ({
     default: mockCommon,
     generateICS: mockCommon.generateICS,
     generateQRCode: mockCommon.generateQRCode,
-    loadEmailTemplate: mockCommon.loadEmailTemplate
+    loadEmailTemplate: mockCommon.loadEmailTemplate,
+    resolveBrandingContactEmail: mockCommon.resolveBrandingContactEmail
   }));
 
   jest.unstable_mockModule(loggerPath, () => ({
@@ -62,9 +66,12 @@ describe('Ticket Master', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockTicket.updateTicketById.mockClear();
+    mockTicket.upsertChildTicketQR.mockClear();
     mockCommon.generateICS.mockClear();
     mockCommon.generateQRCode.mockClear();
     mockCommon.loadEmailTemplate.mockClear();
+    mockCommon.resolveBrandingContactEmail.mockClear();
+    mockCommon.resolveBrandingContactEmail.mockReturnValue('support@example.com');
     mockLogger.error.mockClear();
   });
 
@@ -192,6 +199,53 @@ describe('Ticket Master', () => {
 
       // Assert
       expect(result).toBe(mockError);
+    });
+
+    it('should attach guest QR codes for multi-ticket orders', async () => {
+      const mockEvent = {
+        _id: 'event_123',
+        eventTitle: 'Group Event',
+        eventPromotionPhoto: 'https://example.com/photo.jpg',
+        otherInfo: {}
+      };
+
+      const mockTicketInfo = {
+        id: 'ticket_group_123',
+        ticketInfo: {
+          quantity: '3'
+        }
+      };
+
+      const ticketFor = 'group@example.com';
+      const otp = 'GROUP123';
+      const mockICS = 'BEGIN:VCALENDAR...';
+      const mockQRCode = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA...';
+      const mockTemplate = '<html>Default Template</html>';
+
+      mockCommon.generateICS.mockResolvedValue(mockICS);
+      mockCommon.generateQRCode.mockResolvedValue(mockQRCode);
+      mockCommon.loadEmailTemplate.mockResolvedValue(mockTemplate);
+      mockTicket.updateTicketById.mockResolvedValue({});
+      mockTicket.upsertChildTicketQR.mockResolvedValue({});
+
+      const result = await ticketMaster.createEmailPayload(
+        mockEvent,
+        mockTicketInfo,
+        ticketFor,
+        otp
+      );
+
+      expect(mockTicket.upsertChildTicketQR).toHaveBeenCalledTimes(3);
+      expect(mockCommon.generateQRCode).toHaveBeenCalledWith('ticket_group_123');
+      expect(mockCommon.generateQRCode).toHaveBeenCalledWith('ticket_group_123#1');
+      expect(mockCommon.generateQRCode).toHaveBeenCalledWith('ticket_group_123#2');
+      expect(mockCommon.generateQRCode).toHaveBeenCalledWith('ticket_group_123#3');
+      expect(result.attachments).toHaveLength(3);
+      expect(result.attachments.map((a) => a.filename)).toEqual([
+        'ticket-qrcode-guest-1.png',
+        'ticket-qrcode-guest-2.png',
+        'ticket-qrcode-guest-3.png'
+      ]);
     });
   });
 });
