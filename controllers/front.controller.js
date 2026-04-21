@@ -450,10 +450,11 @@ export const listEvent = async (req, res, next) => {
 
         // Delegate to model for filtered, paginated query
         const { items, total } = await Event.listEventFiltered({ city, country, page: pageNum, limit: limitNum });
+        const activeItems = Array.isArray(items) ? items.filter((item) => item?.active !== false) : [];
         const totalPages = Math.max(Math.ceil(total / limitNum), 1);
 
         res.status(consts.HTTP_STATUS_OK).json({
-            items,
+            items: activeItems,
             page: pageNum,
             limit: limitNum,
             total,
