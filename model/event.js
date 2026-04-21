@@ -118,9 +118,7 @@ export const getEvents = async(page = 1, limit = 10, filters = {}) =>{
     const skip = (page - 1) * limit
 
     // Build query filter object
-    const queryFilter = {
-        active: true
-    }
+    const queryFilter = {}
 
     if (filters.country) {
         queryFilter.country = new RegExp(`^${escapeRegExp(String(filters.country).trim())}$`, 'i')
@@ -134,9 +132,7 @@ export const getEvents = async(page = 1, limit = 10, filters = {}) =>{
         queryFilter['otherInfo.categoryName'] = filters.category
     }
 
-    // Event is listable while its validity window has not ended.
-    const now = new Date()
-    queryFilter.$or = buildValidityWindowFilter(now)
+    // CMS listing must include full lifecycle events (active/inactive/past).
 
     // Get total count for pagination metadata with filters
     const total = await model.Event.countDocuments(queryFilter).exec()
