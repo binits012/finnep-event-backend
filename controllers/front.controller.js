@@ -134,9 +134,9 @@ export const getDataForFront = async (req, res, next) => {
         return el
     }));
 
-    // Public visibility should follow validity window, not legacy active/status flags.
+    // Keep validity-window behavior, but still hard-exclude explicitly inactive events.
     const now = new Date();
-    let filteredEvents = event ? event.filter(e => isEventCurrentlyValid(e, now)) : [];
+    let filteredEvents = event ? event.filter(e => e?.active !== false && isEventCurrentlyValid(e, now)) : [];
 
     // Await country detection only when needed for filtering
     const detectedCountry = await countryPromise;
