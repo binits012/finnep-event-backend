@@ -1306,9 +1306,9 @@ export const createPaymentIntent = async (req, res, next) => {
             throw new Error(`Invalid Stripe account format: ${merchant.stripeAccount}. Expected format: acct_xxxxxxxxxx`);
         }
 
-        // Calculate fees
         const baseAmount = Math.round(amount);
         let stripePaymentIntentPayload;
+        let stripePaymentIntentOptions;
 
         // Exclude large arrays from Stripe metadata (seatTickets and placeIds can exceed 500 char limit)
         // These are stored in the database and passed in request body, so they don't need to be in Stripe metadata
@@ -1320,17 +1320,19 @@ export const createPaymentIntent = async (req, res, next) => {
         // Only apply connected account logic if merchant is NOT the platform account
         if(merchant.stripeAccount !== process.env.STRIPE_PLATFORM_ACCOUNT_ID) {
 
-            // Calculate country-specific Stripe processing fee (fetched from Settings)
-            const country = metadata.country || event?.country || '';
-            const stripeProcessingFeeEstimate = await calculateStripeProcessingFee(
-                baseAmount,
-                currency,
-                country,
-                merchant?.otherInfo?.get("stripe") || 30
-            );
+            const configuredPlatformFee = typeof merchant?.otherInfo?.get === 'function'
+                ? merchant.otherInfo.get("stripe")
+                : merchant?.otherInfo?.stripe;
+            const platformFee = Math.round(Number(configuredPlatformFee ?? 30));
+            if (!Number.isFinite(platformFee) || platformFee < 0) {
+                throw new Error('Invalid Stripe platform fee configuration');
+            }
+            if (platformFee > baseAmount) {
+                throw new Error('Stripe platform fee cannot exceed payment amount');
+            }
 
             stripePaymentIntentPayload = {
-                amount: baseAmount, // Customer pays base + application fee + Stripe fee
+                amount: baseAmount,
                 currency: currency.toLowerCase(),
                 metadata: {
                     ...stripeMetadata,
@@ -1342,20 +1344,20 @@ export const createPaymentIntent = async (req, res, next) => {
                     serverCalculatedTotal: expectedPrice.totalAmount.toString(),
                     clientId: clientId, // Track client for monitoring
                     baseAmount: baseAmount.toString(),
-                    stripeProcessingFee: stripeProcessingFeeEstimate .toString(),
+                    platformFee: platformFee.toString(),
+                    chargeType: 'direct',
                     locale: locale // Store locale for email templates
                 },
 
                 automatic_payment_methods: {
                     enabled: true,
                 },
-
-                on_behalf_of: merchant.stripeAccount,
-                transfer_data: {
-                    destination: merchant.stripeAccount, // Connected account ID
-                },
-                application_fee_amount: stripeProcessingFeeEstimate
-
+            };
+            if (platformFee > 0) {
+                stripePaymentIntentPayload.application_fee_amount = platformFee;
+            }
+            stripePaymentIntentOptions = {
+                stripeAccount: merchant.stripeAccount
             };
         } else {
             // Platform account - no fees
@@ -1379,9 +1381,9 @@ export const createPaymentIntent = async (req, res, next) => {
             };
         }
         console.log('stripePaymentIntentPayload', stripePaymentIntentPayload, '\n', merchant.stripeAccount);
-        const stripePromise = stripe.paymentIntents.create(
-            stripePaymentIntentPayload
-        );
+        const stripePromise = stripePaymentIntentOptions
+            ? stripe.paymentIntents.create(stripePaymentIntentPayload, stripePaymentIntentOptions)
+            : stripe.paymentIntents.create(stripePaymentIntentPayload);
         // Race between Stripe API and timeout
         const paymentIntent = await Promise.race([stripePromise, stripeTimeout]);
 
@@ -1399,7 +1401,8 @@ export const createPaymentIntent = async (req, res, next) => {
         res.status(consts.HTTP_STATUS_OK).json({
             clientSecret: paymentIntent.client_secret,
             paymentIntentId: paymentIntent.id,
-            status: paymentIntent.status
+            status: paymentIntent.status,
+            stripeAccount: stripePaymentIntentOptions?.stripeAccount || null
         });
 
     } catch (error) {
@@ -2725,7 +2728,18 @@ export const handlePaymentSuccess = async (req, res, next) => {
             setTimeout(() => reject(new Error('Stripe API timeout')), 10000);
         });
 
-        const stripePromise = stripe.paymentIntents.retrieve(paymentIntentId);
+        let stripePaymentIntentOptions;
+        const merchants = await Merchant.genericSearchMerchant(metadata.merchantId, metadata.externalMerchantId);
+        const merchant = merchants.length > 0 ? merchants[0] : null;
+        if (merchant?.stripeAccount && merchant.stripeAccount !== process.env.STRIPE_PLATFORM_ACCOUNT_ID) {
+            stripePaymentIntentOptions = {
+                stripeAccount: merchant.stripeAccount
+            };
+        }
+
+        const stripePromise = stripePaymentIntentOptions
+            ? stripe.paymentIntents.retrieve(paymentIntentId, stripePaymentIntentOptions)
+            : stripe.paymentIntents.retrieve(paymentIntentId);
         const paymentIntent = await Promise.race([stripePromise, stripeTimeout]);
 
         if (paymentIntent.status !== 'succeeded') {
