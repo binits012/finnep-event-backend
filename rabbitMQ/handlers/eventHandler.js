@@ -2,7 +2,7 @@ import { inboxModel } from '../../model/inboxMessage.js';
 import * as Event from '../../model/event.js';
 import { getMerchantByMerchantId } from '../../model/merchant.js';
 import { EventManifest } from '../../model/mongoModel.js';
-import { error, info } from '../../model/logger.js';
+import { error, info, warn } from '../../model/logger.js';
 import { pricingManifestSyncService } from '../../src/services/pricingManifestSyncService.js';
 import { sendPricingSyncErrorEmail } from '../../util/sendMail.js';
 import moment from 'moment-timezone';
@@ -81,9 +81,22 @@ export const handleEventMessage = async (message) => {
     }
 
     const messageId = message?.metaData?.causationId;
+    if (!messageId) {
+        error('Event message missing metaData.causationId (required for idempotency)', {
+            routingKey: message?.routingKey,
+            type: message?.type
+        });
+        throw new Error('Event message must include metaData.causationId');
+    }
+
+    const routingKey = message.routingKey || message.type;
+    if (!routingKey || String(routingKey).trim() === '') {
+        error('Event message missing routingKey and type', { messageId });
+        throw new Error('Event message must include routingKey or type');
+    }
 
     // Check if message has already been processed (idempotency)
-    if (messageId && await inboxModel.isProcessed(messageId)) {
+    if (await inboxModel.isProcessed(messageId)) {
         console.log(`Message ${messageId} already processed, skipping...`);
         return;
     }
@@ -92,7 +105,7 @@ export const handleEventMessage = async (message) => {
     try {
         await inboxModel.saveMessage({
             messageId,
-            eventType: message.type || message.routingKey,
+            eventType: message.type || routingKey,
             aggregateId: message.merchantId,
             data: message,
             metadata: message?.metaData || { receivedAt: new Date() }
@@ -111,7 +124,7 @@ export const handleEventMessage = async (message) => {
     }
 
     try {
-        switch (message.routingKey) {
+        switch (routingKey) {
             case 'event.created':
                 await handleEventCreated(message);
                 break;
@@ -122,11 +135,16 @@ export const handleEventMessage = async (message) => {
                 await handleEventDeleted(message);
                 break;
             default:
-                console.log(`Unknown event message type: ${message.type}`);
+                warn('Unknown event routing key — not applying handlers (no synthetic routes)', {
+                    routingKey,
+                    messageId,
+                    merchantId: message?.merchantId
+                });
+                throw new Error(`Unknown event routing key: ${routingKey}`);
         }
     } catch (err) {
         console.error('Error handling event message:', {
-            routingKey: message?.routingKey,
+            routingKey,
             type: message?.type,
             id: message?.id,
             merchantId: message?.merchantId,

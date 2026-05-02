@@ -212,6 +212,59 @@ describe('Event Handler', () => {
       expect(mockEvent.deleteEventById).toHaveBeenCalledWith(existingEvent._id);
     });
 
+    it('should throw when metaData.causationId is missing', async () => {
+      const message = {
+        routingKey: 'event.created',
+        id: 'ext_event_123',
+        merchantId: 'merchant_123'
+      };
+
+      await expect(eventHandler.handleEventMessage(message)).rejects.toThrow(
+        'Event message must include metaData.causationId'
+      );
+      expect(mockInbox.saveMessage).not.toHaveBeenCalled();
+    });
+
+    it('should throw on unknown routing key (no silent ack)', async () => {
+      const message = {
+        routingKey: 'event.published',
+        id: 'ext_event_123',
+        merchantId: 'merchant_123',
+        metaData: { causationId: 'msg_unknown' }
+      };
+
+      mockInbox.isProcessed.mockResolvedValue(false);
+      mockInbox.saveMessage.mockResolvedValue({});
+
+      await expect(eventHandler.handleEventMessage(message)).rejects.toThrow(
+        'Unknown event routing key: event.published'
+      );
+      expect(mockEvent.createEvent).not.toHaveBeenCalled();
+    });
+
+    it('should dispatch using type when routingKey is absent', async () => {
+      const message = {
+        type: 'event.created',
+        id: 'ext_event_123',
+        merchantId: 'merchant_123',
+        title: 'Test Event',
+        metaData: { causationId: 'msg_type_only' }
+      };
+
+      mockInbox.isProcessed.mockResolvedValue(false);
+      mockInbox.saveMessage.mockResolvedValue({});
+      mockMerchant.getMerchantByMerchantId.mockResolvedValue({
+        _id: '507f1f77bcf86cd799439012',
+        merchantId: 'merchant_123'
+      });
+      mockEvent.createEvent.mockResolvedValue({ _id: '507f1f77bcf86cd799439011' });
+      mockInbox.markProcessed.mockResolvedValue(true);
+
+      await eventHandler.handleEventMessage(message);
+
+      expect(mockEvent.createEvent).toHaveBeenCalled();
+    });
+
     it('should skip already processed messages', async () => {
       // Arrange
       const message = {

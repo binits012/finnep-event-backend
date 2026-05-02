@@ -107,10 +107,28 @@ class MessageConsumer {
         const { consumerTag } = await this.consumeChannel.consume(queueName, async (msg) => {
             if (msg) {
                 try {
-                    const content = JSON.parse(msg.content.toString());
-                    info(`Received message from ${queueName}`, { message: content });
+                    const parsed = JSON.parse(msg.content.toString());
+                    // Broker routing key is authoritative for how the message was routed to this queue.
+                    // JSON body can omit or disagree (truncated publish, bad merge, legacy payloads) — that caused intermittent wrong/no handlers while inbox still stored the body.
+                    const envelopeRoutingKey = msg.fields?.routingKey;
+                    const messageForHandler = { ...parsed };
+                    if (envelopeRoutingKey) {
+                        if (
+                            parsed.routingKey != null &&
+                            parsed.routingKey !== '' &&
+                            parsed.routingKey !== envelopeRoutingKey
+                        ) {
+                            warn(`Queue ${queueName}: JSON routingKey differs from AMQP envelope — using AMQP`, {
+                                jsonRoutingKey: parsed.routingKey,
+                                amqpRoutingKey: envelopeRoutingKey
+                            });
+                        }
+                        messageForHandler.routingKey = envelopeRoutingKey;
+                    }
 
-                    await handler(content);
+                    info(`Received message from ${queueName}`, { message: messageForHandler });
+
+                    await handler(messageForHandler);
                     this.consumeChannel.ack(msg);
                 } catch (err) {
                     error(`Error processing message from ${queueName}`, { error: err.message, stack: err.stack });

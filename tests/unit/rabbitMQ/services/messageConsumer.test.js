@@ -190,6 +190,54 @@ describe('Message Consumer', () => {
       expect(mockConsumeChannel.consume).toHaveBeenCalled();
     });
 
+    it('should prefer AMQP envelope routing key when JSON body disagrees', async () => {
+      const queueName = 'event-events-queue-envelope-test';
+      const handler = jest.fn().mockResolvedValue(undefined);
+      let consumeCallback;
+
+      const mockPublishChannel = { connection: { closed: false } };
+      const mockConsumeChannel = {
+        connection: { closed: false },
+        assertQueue: jest.fn().mockResolvedValue({ queue: queueName }),
+        prefetch: jest.fn().mockResolvedValue(undefined),
+        consume: jest.fn().mockImplementation((_queueName, cb) => {
+          consumeCallback = cb;
+          return Promise.resolve({ consumerTag: 'tag_envelope' });
+        }),
+        ack: jest.fn()
+      };
+
+      messageConsumer.messageConsumer.activeConsumers.delete(queueName);
+      messageConsumer.messageConsumer.publishChannel = mockPublishChannel;
+      messageConsumer.messageConsumer.consumeChannel = mockConsumeChannel;
+      messageConsumer.messageConsumer.isInitialized = true;
+
+      await messageConsumer.messageConsumer.consumeQueue(queueName, handler, {
+        durable: true,
+        prefetch: 1
+      });
+
+      const body = { routingKey: 'event.updated', merchantId: '1', id: '99' };
+      const msg = {
+        content: Buffer.from(JSON.stringify(body)),
+        fields: { routingKey: 'event.created' }
+      };
+
+      await consumeCallback(msg);
+
+      expect(handler).toHaveBeenCalledWith(
+        expect.objectContaining({
+          routingKey: 'event.created',
+          merchantId: '1'
+        })
+      );
+      expect(mockConsumeChannel.ack).toHaveBeenCalledWith(msg);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('differs from AMQP envelope'),
+        expect.any(Object)
+      );
+    });
+
     it('should prevent duplicate consumers', async () => {
       // Arrange
       const queueName = 'test-queue';
