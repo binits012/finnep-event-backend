@@ -1233,11 +1233,50 @@ function parseStripeCheckoutDomainHostnames() {
         .filter(Boolean);
 }
 
+function logPaymentMethodDomainWalletStatus(pmd, contextLabel) {
+    if (!pmd) {
+        console.warn(`[Stripe payment method domains] ${contextLabel}: no PaymentMethodDomain record`);
+        return;
+    }
+    const apple = pmd.apple_pay?.status ?? 'n/a';
+    const google = pmd.google_pay?.status ?? 'n/a';
+    console.log('[Stripe payment method domains] wallet eligibility on domain', {
+        context: contextLabel,
+        domain_name: pmd.domain_name,
+        enabled: pmd.enabled,
+        apple_pay: apple,
+        google_pay: google,
+    });
+    if (pmd.enabled === false) {
+        console.warn(
+            `[Stripe] Payment method domain "${pmd.domain_name}" is not enabled — Apple Pay / Google Pay stay hidden in Elements until Stripe marks the domain enabled (finish verification for this ${pmd.livemode ? 'live' : 'test'} domain on the connected account). https://docs.stripe.com/payments/payment-methods/pmd-registration`
+        );
+    } else if (apple !== 'active' || google !== 'active') {
+        console.warn(
+            `[Stripe] Domain "${pmd.domain_name}": apple_pay=${apple}, google_pay=${google}. Both should be "active" for wallets on your checkout origin.`
+        );
+    }
+}
+
+async function fetchPaymentMethodDomainByHostname(domain_name, connectedAccountId) {
+    const opts =
+        typeof connectedAccountId === 'string' && connectedAccountId.startsWith('acct_')
+            ? { stripeAccount: connectedAccountId }
+            : undefined;
+    const list = await stripe.paymentMethodDomains.list({ limit: 100 }, opts);
+    return list.data.find((d) => d.domain_name === domain_name) ?? null;
+}
+
 /**
  * Apple Pay / Google Pay on the web need the checkout domain registered with Stripe.
  * For Connect *direct charges*, register on the **connected account** via API (platform-only
  * Dashboard registration is not enough). Apple Pay on `checkout.stripe.com` can work while your
  * custom domain fails until this succeeds and Stripe shows the domain **Enabled** for that acct_.
+ *
+ * Important: `paymentMethodDomains.create` succeeding does not mean wallets work yet — the
+ * PaymentMethodDomain object can have `enabled: false` or `apple_pay`/`google_pay` status `inactive`
+ * until domain verification completes; Stripe will not show those methods in Elements until then.
+ * @see https://docs.stripe.com/api/payment_method_domains/object
  */
 async function ensurePaymentMethodDomainsForWallets(connectedAccountId) {
     const hostnames = parseStripeCheckoutDomainHostnames();
@@ -1263,7 +1302,8 @@ async function ensurePaymentMethodDomainsForWallets(connectedAccountId) {
     }
 
     for (const domain_name of hostnames) {
-        const cacheKey = `stripe_pmd:${cacheAccountKey}:${domain_name}`;
+        // v2: older cache could mark "success" while domain was never enabled — wallets stayed hidden for 7d with no recheck.
+        const cacheKey = `stripe_pmd_v2:${cacheAccountKey}:${domain_name}`;
         try {
             const cached = await redisClient.get(cacheKey);
             if (cached === '1') {
@@ -1274,20 +1314,27 @@ async function ensurePaymentMethodDomainsForWallets(connectedAccountId) {
             // non-fatal
         }
 
-        let domainRegisteredOrBenign = false;
+        let shouldCache = false;
         try {
+            let pmd;
             if (useConnect) {
-                await stripe.paymentMethodDomains.create(
+                pmd = await stripe.paymentMethodDomains.create(
                     { domain_name },
                     { stripeAccount: connectedAccountId }
                 );
             } else {
-                await stripe.paymentMethodDomains.create({ domain_name });
+                pmd = await stripe.paymentMethodDomains.create({ domain_name });
             }
-            domainRegisteredOrBenign = true;
-            const okMsg = `[Stripe] Registered payment method domain "${domain_name}" for ${cacheAccountKey} (complete Stripe domain verification if wallets still hidden).`;
+            logPaymentMethodDomainWalletStatus(pmd, 'create');
+            const okMsg = `[Stripe] Registered payment method domain "${domain_name}" for ${cacheAccountKey}.`;
             info(okMsg);
             console.log('[Stripe payment method domains]', okMsg);
+            shouldCache = pmd.enabled === true;
+            if (!shouldCache) {
+                console.warn(
+                    `[Stripe payment method domains] Not caching "${domain_name}": enabled=${pmd.enabled} — next checkout will call Stripe again until the domain is enabled.`
+                );
+            }
         } catch (err) {
             const msg = String(err?.message || err);
             const code = err?.code || err?.raw?.code;
@@ -1295,12 +1342,29 @@ async function ensurePaymentMethodDomainsForWallets(connectedAccountId) {
                 code === 'resource_already_exists' ||
                 /already|duplicate|registered/i.test(msg);
             if (benign) {
-                domainRegisteredOrBenign = true;
                 console.log(
-                    '[Stripe payment method domains] already registered (benign):',
+                    '[Stripe payment method domains] create returned duplicate; fetching domain status:',
                     cacheAccountKey,
                     domain_name
                 );
+                try {
+                    const existing = await fetchPaymentMethodDomainByHostname(
+                        domain_name,
+                        useConnect ? connectedAccountId : null
+                    );
+                    logPaymentMethodDomainWalletStatus(existing, 'existing');
+                    shouldCache = existing?.enabled === true;
+                    if (!shouldCache) {
+                        console.warn(
+                            `[Stripe payment method domains] Not caching "${domain_name}": domain missing or enabled=false after duplicate — fix verification in Stripe Dashboard / API.`
+                        );
+                    }
+                } catch (listErr) {
+                    console.warn(
+                        '[Stripe payment method domains] could not list payment method domains:',
+                        String(listErr?.message || listErr)
+                    );
+                }
             } else {
                 console.warn(
                     `[createPaymentIntent] paymentMethodDomains.create (${cacheAccountKey}, ${domain_name}):`,
@@ -1309,8 +1373,7 @@ async function ensurePaymentMethodDomainsForWallets(connectedAccountId) {
             }
         }
 
-        // Never cache success if registration failed — otherwise Apple Pay stays broken for 7 days with no retries.
-        if (domainRegisteredOrBenign) {
+        if (shouldCache) {
             try {
                 await redisClient.set(cacheKey, '1', { EX: 7 * 24 * 3600 });
             } catch {
