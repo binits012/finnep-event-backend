@@ -1233,6 +1233,83 @@ function parseStripeCheckoutDomainHostnames() {
         .filter(Boolean);
 }
 
+function parseHostnameFromOriginOrReferer(req) {
+    if (!req || typeof req.get !== 'function') return null;
+    const raw = req.get('Origin') || req.get('Referer');
+    if (!raw || typeof raw !== 'string') return null;
+    const trimmed = raw.trim();
+    try {
+        const url = new URL(trimmed.includes('://') ? trimmed : `https://${trimmed}`);
+        return url.hostname ? url.hostname.toLowerCase() : null;
+    } catch {
+        return null;
+    }
+}
+
+function sanitizeCheckoutHostnameHint(raw) {
+    if (typeof raw !== 'string') return null;
+    const t = raw.trim().toLowerCase().slice(0, 253);
+    if (!t) return null;
+    if (!/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/.test(t)) return null;
+    return t;
+}
+
+/** Host equals an allowlist entry or is a subdomain of one (e.g. www.okazzo.eu under okazzo.eu). */
+function isCheckoutHostnameAllowedByBaseList(hostname, baseHostnames) {
+    if (!hostname || !Array.isArray(baseHostnames) || baseHostnames.length === 0) return false;
+    const h = hostname.toLowerCase();
+    return baseHostnames.some((entry) => {
+        if (!entry) return false;
+        const e = String(entry).toLowerCase();
+        return h === e || h.endsWith('.' + e);
+    });
+}
+
+/**
+ * STRIPE_WEB_CHECKOUT_DOMAIN lists at least one base host; merge in the exact hostname from
+ * Origin / Referer / body.checkoutHostname when it is a subdomain of (or equal to) an entry.
+ * Wallets require PMD for the hostname in the address bar — only listing okazzo.eu does not cover www.okazzo.eu.
+ */
+function mergeCheckoutHostnamesForPmdRegistration(baseHostnames, req) {
+    const normalizedBase = (baseHostnames || [])
+        .map((s) => String(s).trim().toLowerCase())
+        .filter(Boolean);
+    const merged = new Set(normalizedBase);
+
+    if (!req || typeof req.get !== 'function') {
+        return [...merged];
+    }
+
+    const candidates = [];
+    const fromHeader = parseHostnameFromOriginOrReferer(req);
+    if (fromHeader) candidates.push(fromHeader);
+    const hint = sanitizeCheckoutHostnameHint(req?.body?.checkoutHostname);
+    if (hint) candidates.push(hint);
+
+    const seen = new Set();
+    for (const c of candidates) {
+        if (!c || seen.has(c)) continue;
+        seen.add(c);
+        if (normalizedBase.length === 0) {
+            console.warn(
+                `[Stripe payment method domains] Browser hostname "${c}" ignored — set STRIPE_WEB_CHECKOUT_DOMAIN (e.g. okazzo.eu) so subdomains can be registered on the connected account.`
+            );
+            continue;
+        }
+        if (!isCheckoutHostnameAllowedByBaseList(c, normalizedBase)) {
+            console.warn(
+                `[Stripe payment method domains] Browser hostname "${c}" is not under STRIPE_WEB_CHECKOUT_DOMAIN (${normalizedBase.join(', ')}). Register every hostname you use (www vs apex) or wallets stay hidden.`
+            );
+            continue;
+        }
+        if (!merged.has(c)) {
+            merged.add(c);
+            console.log('[Stripe payment method domains] Merging browser hostname into PMD registration list:', c);
+        }
+    }
+    return [...merged];
+}
+
 function logPaymentMethodDomainWalletStatus(pmd, contextLabel) {
     if (!pmd) {
         console.warn(`[Stripe payment method domains] ${contextLabel}: no PaymentMethodDomain record`);
@@ -1278,8 +1355,8 @@ async function fetchPaymentMethodDomainByHostname(domain_name, connectedAccountI
  * until domain verification completes; Stripe will not show those methods in Elements until then.
  * @see https://docs.stripe.com/api/payment_method_domains/object
  */
-async function ensurePaymentMethodDomainsForWallets(connectedAccountId) {
-    const hostnames = parseStripeCheckoutDomainHostnames();
+async function ensurePaymentMethodDomainsForWallets(connectedAccountId, req) {
+    const hostnames = mergeCheckoutHostnamesForPmdRegistration(parseStripeCheckoutDomainHostnames(), req);
     const useConnect =
         typeof connectedAccountId === 'string' && connectedAccountId.startsWith('acct_');
     const cacheAccountKey = useConnect ? connectedAccountId : 'platform';
@@ -1380,6 +1457,34 @@ async function ensurePaymentMethodDomainsForWallets(connectedAccountId) {
                 // non-fatal
             }
         }
+    }
+}
+
+/** Set STRIPE_LOG_CONNECT_WALLET_PREREQS=1 on the API to log why wallets may stay off (one retrieve per checkout). */
+async function logConnectedAccountWalletPrerequisites(stripeAccountId) {
+    if (process.env.STRIPE_LOG_CONNECT_WALLET_PREREQS !== '1') return;
+    if (!stripeAccountId || !String(stripeAccountId).startsWith('acct_')) return;
+    try {
+        const acct = await stripe.accounts.retrieve(stripeAccountId);
+        const caps = acct.capabilities || {};
+        console.log('[Stripe Connect wallet prereqs]', stripeAccountId, {
+            charges_enabled: acct.charges_enabled,
+            payouts_enabled: acct.payouts_enabled,
+            details_submitted: acct.details_submitted,
+            card_payments: caps.card_payments,
+        });
+        if (caps.card_payments !== 'active') {
+            console.warn(
+                '[Stripe Connect wallet prereqs] `capabilities.card_payments` is not "active" on this connected account. Apple Pay / Google Pay in Elements usually need full card acceptance. Complete Connect onboarding for this account in Stripe Dashboard.'
+            );
+        }
+        if (acct.charges_enabled === false) {
+            console.warn(
+                '[Stripe Connect wallet prereqs] charges_enabled is false — wallets will not surface until Stripe allows charges on this account.'
+            );
+        }
+    } catch (e) {
+        console.warn('[Stripe Connect wallet prereqs] accounts.retrieve failed:', String(e?.message || e));
     }
 }
 
@@ -1594,8 +1699,10 @@ export const createPaymentIntent = async (req, res, next) => {
         }
         console.log('stripePaymentIntentPayload', stripePaymentIntentPayload, '\n', merchant.stripeAccount);
         await ensurePaymentMethodDomainsForWallets(
-            stripePaymentIntentOptions?.stripeAccount || null
+            stripePaymentIntentOptions?.stripeAccount || null,
+            req
         );
+        await logConnectedAccountWalletPrerequisites(stripePaymentIntentOptions?.stripeAccount || null);
         const stripePromise = stripePaymentIntentOptions
             ? stripe.paymentIntents.create(stripePaymentIntentPayload, stripePaymentIntentOptions)
             : stripe.paymentIntents.create(stripePaymentIntentPayload);
