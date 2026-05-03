@@ -57,6 +57,46 @@ const normalizeStripeCurrency = (raw) => {
     return STRIPE_CURRENCY_ALIASES[c] || c;
 };
 
+let warnedCheckoutPaymentMethodTypesPrependedCard = false;
+
+/**
+ * PaymentIntent `payment_method_types` for createPaymentIntent (not automatic_payment_methods).
+ * Override with env `STRIPE_CHECKOUT_PAYMENT_METHOD_TYPES` — comma-separated Stripe type IDs
+ * (see https://stripe.com/docs/api/payment_intents/create#create_payment_intent-payment_method_types).
+ * Example: card,afterpay_clearpay,mobilepay,revolut_pay,billie
+ * Apple Pay / Google Pay need `card`. If `card` is omitted from env, it is prepended automatically.
+ */
+function getCheckoutPaymentIntentMethodTypes() {
+    const defaults = ['card', 'afterpay_clearpay', 'mobilepay', 'revolut_pay', 'billie'];
+    const raw = process.env.STRIPE_CHECKOUT_PAYMENT_METHOD_TYPES;
+    if (raw == null || String(raw).trim() === '') {
+        return defaults;
+    }
+    const parts = String(raw)
+        .split(',')
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean);
+    const valid = parts.filter((t) => /^[a-z][a-z0-9_]*$/.test(t));
+    if (valid.length === 0) {
+        console.warn(
+            '[Stripe] STRIPE_CHECKOUT_PAYMENT_METHOD_TYPES has no valid entries; using defaults'
+        );
+        return defaults;
+    }
+    const deduped = [...new Set(valid)];
+    if (!deduped.includes('card')) {
+        if (!warnedCheckoutPaymentMethodTypesPrependedCard) {
+            warnedCheckoutPaymentMethodTypesPrependedCard = true;
+            console.warn(
+                '[Stripe] STRIPE_CHECKOUT_PAYMENT_METHOD_TYPES did not include "card" — prepending it (required for Apple Pay / Google Pay).'
+            );
+        }
+        return ['card', ...deduped];
+    }
+    const withoutCard = deduped.filter((t) => t !== 'card');
+    return ['card', ...withoutCard];
+}
+
 const resolveSectionMode = (section) => {
 	if (!section) return 'seat';
 	// Hard guard: Seating sections are always seat-based.
@@ -1201,9 +1241,10 @@ async function ensurePaymentMethodDomainsForWallets(connectedAccountId) {
     if (hostnames.length === 0) {
         if (!warnedMissingStripeCheckoutDomain) {
             warnedMissingStripeCheckoutDomain = true;
-            info(
-                '[Stripe] STRIPE_WEB_CHECKOUT_DOMAIN is not set — Apple Pay and Google Pay often stay hidden for Connect direct charges until each hostname is registered. See https://docs.stripe.com/payments/payment-methods/pmd-registration'
-            );
+            const msg =
+                '[Stripe] STRIPE_WEB_CHECKOUT_DOMAIN is not set — Apple Pay / Google Pay usually stay hidden on Connect direct charges until hostnames are registered with paymentMethodDomains (server-side). Set e.g. STRIPE_WEB_CHECKOUT_DOMAIN=okazzo.eu,www.okazzo.eu and restart. https://docs.stripe.com/payments/payment-methods/pmd-registration';
+            info(msg);
+            console.warn(msg);
         }
         return;
     }
@@ -1232,6 +1273,9 @@ async function ensurePaymentMethodDomainsForWallets(connectedAccountId) {
             } else {
                 await stripe.paymentMethodDomains.create({ domain_name });
             }
+            info(
+                `[Stripe] Registered payment method domain "${domain_name}" for ${cacheAccountKey} (wallets can use this hostname after Stripe finishes verification).`
+            );
         } catch (err) {
             const msg = String(err?.message || err);
             const code = err?.code || err?.raw?.code;
@@ -1436,9 +1480,7 @@ export const createPaymentIntent = async (req, res, next) => {
                     locale: locale // Store locale for email templates
                 },
 
-                automatic_payment_methods: {
-                    enabled: true,
-                },
+                payment_method_types: getCheckoutPaymentIntentMethodTypes(),
             };
             if (platformFee > 0) {
                 stripePaymentIntentPayload.application_fee_amount = platformFee;
@@ -1462,9 +1504,7 @@ export const createPaymentIntent = async (req, res, next) => {
                     clientId: clientId,
                     locale: locale // Store locale for email templates
                 },
-                automatic_payment_methods: {
-                    enabled: true,
-                }
+                payment_method_types: getCheckoutPaymentIntentMethodTypes(),
             };
         }
         console.log('stripePaymentIntentPayload', stripePaymentIntentPayload, '\n', merchant.stripeAccount);
