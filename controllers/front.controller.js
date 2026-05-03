@@ -135,7 +135,7 @@ const isExternalEvent = (event) => {
 
 export const getDataForFront = async (req, res, next) => {
     // Get client IP (fast), then run country detection in parallel with main data fetch
-    const clientIP = await getClientIdentifier(req);
+    const clientIP = getClientIdentifier(req);
     const countryPromise = getCountryFromIP(clientIP); // Do not await – runs in parallel with Promise.all below
     // Fetch all data in parallel (country lookup runs alongside)
     const [photo, notification, event, setting] = await Promise.all([
@@ -507,7 +507,8 @@ export const listEvent = async (req, res, next) => {
 }
 
 // Request validation and security helpers
-const getClientIdentifier = async (req) => {
+/** Sync IP / client id from request (never was async — callers that omitted await stored a Promise in Stripe metadata). */
+const getClientIdentifier = (req) => {
     // Check proxy headers first (x-forwarded-for, x-real-ip)
     const forwardedFor = req.headers['x-forwarded-for'];
     if (forwardedFor) {
@@ -1240,6 +1241,16 @@ function parseStripeCheckoutDomainHostnames() {
  */
 async function ensurePaymentMethodDomainsForWallets(connectedAccountId) {
     const hostnames = parseStripeCheckoutDomainHostnames();
+    const useConnect =
+        typeof connectedAccountId === 'string' && connectedAccountId.startsWith('acct_');
+    const cacheAccountKey = useConnect ? connectedAccountId : 'platform';
+
+    // Winston `info()` only hits ./logs/combined.log — always mirror to stdout for ops / Docker / PM2.
+    console.log('[Stripe payment method domains]', {
+        hostnames: hostnames.length ? hostnames : '(empty — set STRIPE_WEB_CHECKOUT_DOMAIN on this API)',
+        registerForStripeAccount: cacheAccountKey,
+    });
+
     if (hostnames.length === 0) {
         if (!warnedMissingStripeCheckoutDomain) {
             warnedMissingStripeCheckoutDomain = true;
@@ -1251,15 +1262,12 @@ async function ensurePaymentMethodDomainsForWallets(connectedAccountId) {
         return;
     }
 
-    const useConnect =
-        typeof connectedAccountId === 'string' && connectedAccountId.startsWith('acct_');
-    const cacheAccountKey = useConnect ? connectedAccountId : 'platform';
-
     for (const domain_name of hostnames) {
         const cacheKey = `stripe_pmd:${cacheAccountKey}:${domain_name}`;
         try {
             const cached = await redisClient.get(cacheKey);
             if (cached === '1') {
+                console.log('[Stripe payment method domains] skip Stripe API (Redis cache OK):', cacheKey);
                 continue;
             }
         } catch {
@@ -1277,9 +1285,9 @@ async function ensurePaymentMethodDomainsForWallets(connectedAccountId) {
                 await stripe.paymentMethodDomains.create({ domain_name });
             }
             domainRegisteredOrBenign = true;
-            info(
-                `[Stripe] Registered payment method domain "${domain_name}" for ${cacheAccountKey} (wallets can use this hostname after Stripe finishes verification).`
-            );
+            const okMsg = `[Stripe] Registered payment method domain "${domain_name}" for ${cacheAccountKey} (complete Stripe domain verification if wallets still hidden).`;
+            info(okMsg);
+            console.log('[Stripe payment method domains]', okMsg);
         } catch (err) {
             const msg = String(err?.message || err);
             const code = err?.code || err?.raw?.code;
@@ -1288,6 +1296,11 @@ async function ensurePaymentMethodDomainsForWallets(connectedAccountId) {
                 /already|duplicate|registered/i.test(msg);
             if (benign) {
                 domainRegisteredOrBenign = true;
+                console.log(
+                    '[Stripe payment method domains] already registered (benign):',
+                    cacheAccountKey,
+                    domain_name
+                );
             } else {
                 console.warn(
                     `[createPaymentIntent] paymentMethodDomains.create (${cacheAccountKey}, ${domain_name}):`,
@@ -1948,7 +1961,7 @@ export const handlePaytrailPaymentFailure = async (req, res, next) => {
         }
 
         const redisClient = (await import('../src/redis/client.js')).default;
-        const clientId = await getClientIdentifier(req);
+        const clientId = getClientIdentifier(req);
 
         // Security Layer 5: Verify stamp exists in Redis and matches transactionId
         // This ensures the failure request is legitimate
@@ -2285,7 +2298,7 @@ export const verifyPaytrailPayment = async (req, res, next) => {
         // 0. NONCE VALIDATION - prevent duplicate form submissions
         if (nonce && typeof nonce === 'string' && nonce.length >= 32) {
             const nonceKey = `paytrail_verify_nonce:${nonce}`;
-            const clientId = await getClientIdentifier(req);
+            const clientId = getClientIdentifier(req);
             const nonceValue = JSON.stringify({
                 stamp,
                 transactionId,
