@@ -1167,6 +1167,93 @@ const calculateStripeProcessingFee = async (amount, currency, country, platformF
     return Math.max(5, totalFee); // Minimum 5 cents
 };
 
+/** Warn once if unset — wallets need this for Connect direct charges. */
+let warnedMissingStripeCheckoutDomain = false;
+
+/**
+ * Public hostname(s) of the Next.js checkout (no scheme/path). Comma-separated OK.
+ * e.g. STRIPE_WEB_CHECKOUT_DOMAIN=www.okazzo.eu,okazzo.eu
+ * @see https://docs.stripe.com/payments/payment-methods/pmd-registration
+ */
+function parseStripeCheckoutDomainHostnames() {
+    const raw = process.env.STRIPE_WEB_CHECKOUT_DOMAIN;
+    if (!raw || typeof raw !== 'string') {
+        return [];
+    }
+    return raw
+        .split(',')
+        .map((s) =>
+            s
+                .trim()
+                .replace(/^https?:\/\//i, '')
+                .split('/')[0]
+                .toLowerCase()
+        )
+        .filter(Boolean);
+}
+
+/**
+ * Apple Pay / Google Pay on the web need the checkout domain registered with Stripe.
+ * For Connect *direct charges*, register on the connected account — not only in the Dashboard.
+ */
+async function ensurePaymentMethodDomainsForWallets(connectedAccountId) {
+    const hostnames = parseStripeCheckoutDomainHostnames();
+    if (hostnames.length === 0) {
+        if (!warnedMissingStripeCheckoutDomain) {
+            warnedMissingStripeCheckoutDomain = true;
+            info(
+                '[Stripe] STRIPE_WEB_CHECKOUT_DOMAIN is not set — Apple Pay and Google Pay often stay hidden for Connect direct charges until each hostname is registered. See https://docs.stripe.com/payments/payment-methods/pmd-registration'
+            );
+        }
+        return;
+    }
+
+    const useConnect =
+        typeof connectedAccountId === 'string' && connectedAccountId.startsWith('acct_');
+    const cacheAccountKey = useConnect ? connectedAccountId : 'platform';
+
+    for (const domain_name of hostnames) {
+        const cacheKey = `stripe_pmd:${cacheAccountKey}:${domain_name}`;
+        try {
+            const cached = await redisClient.get(cacheKey);
+            if (cached === '1') {
+                continue;
+            }
+        } catch {
+            // non-fatal
+        }
+
+        try {
+            if (useConnect) {
+                await stripe.paymentMethodDomains.create(
+                    { domain_name },
+                    { stripeAccount: connectedAccountId }
+                );
+            } else {
+                await stripe.paymentMethodDomains.create({ domain_name });
+            }
+        } catch (err) {
+            const msg = String(err?.message || err);
+            const code = err?.code || err?.raw?.code;
+            const benign =
+                code === 'resource_already_exists' ||
+                /already|duplicate|registered/i.test(msg);
+            if (!benign) {
+                console.warn(
+                    `[createPaymentIntent] paymentMethodDomains.create (${cacheAccountKey}, ${domain_name}):`,
+                    msg
+                );
+            }
+        }
+
+        try {
+            await redisClient.set(cacheKey, '1', { EX: 7 * 24 * 3600 });
+        } catch {
+            // non-fatal
+        }
+    }
+}
+
 export const createPaymentIntent = async (req, res, next) => {
     try {
         // Security Layer 1: Request size validation
@@ -1381,6 +1468,9 @@ export const createPaymentIntent = async (req, res, next) => {
             };
         }
         console.log('stripePaymentIntentPayload', stripePaymentIntentPayload, '\n', merchant.stripeAccount);
+        await ensurePaymentMethodDomainsForWallets(
+            stripePaymentIntentOptions?.stripeAccount || null
+        );
         const stripePromise = stripePaymentIntentOptions
             ? stripe.paymentIntents.create(stripePaymentIntentPayload, stripePaymentIntentOptions)
             : stripe.paymentIntents.create(stripePaymentIntentPayload);
