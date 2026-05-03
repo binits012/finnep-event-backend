@@ -1234,7 +1234,9 @@ function parseStripeCheckoutDomainHostnames() {
 
 /**
  * Apple Pay / Google Pay on the web need the checkout domain registered with Stripe.
- * For Connect *direct charges*, register on the connected account — not only in the Dashboard.
+ * For Connect *direct charges*, register on the **connected account** via API (platform-only
+ * Dashboard registration is not enough). Apple Pay on `checkout.stripe.com` can work while your
+ * custom domain fails until this succeeds and Stripe shows the domain **Enabled** for that acct_.
  */
 async function ensurePaymentMethodDomainsForWallets(connectedAccountId) {
     const hostnames = parseStripeCheckoutDomainHostnames();
@@ -1264,6 +1266,7 @@ async function ensurePaymentMethodDomainsForWallets(connectedAccountId) {
             // non-fatal
         }
 
+        let domainRegisteredOrBenign = false;
         try {
             if (useConnect) {
                 await stripe.paymentMethodDomains.create(
@@ -1273,6 +1276,7 @@ async function ensurePaymentMethodDomainsForWallets(connectedAccountId) {
             } else {
                 await stripe.paymentMethodDomains.create({ domain_name });
             }
+            domainRegisteredOrBenign = true;
             info(
                 `[Stripe] Registered payment method domain "${domain_name}" for ${cacheAccountKey} (wallets can use this hostname after Stripe finishes verification).`
             );
@@ -1282,7 +1286,9 @@ async function ensurePaymentMethodDomainsForWallets(connectedAccountId) {
             const benign =
                 code === 'resource_already_exists' ||
                 /already|duplicate|registered/i.test(msg);
-            if (!benign) {
+            if (benign) {
+                domainRegisteredOrBenign = true;
+            } else {
                 console.warn(
                     `[createPaymentIntent] paymentMethodDomains.create (${cacheAccountKey}, ${domain_name}):`,
                     msg
@@ -1290,10 +1296,13 @@ async function ensurePaymentMethodDomainsForWallets(connectedAccountId) {
             }
         }
 
-        try {
-            await redisClient.set(cacheKey, '1', { EX: 7 * 24 * 3600 });
-        } catch {
-            // non-fatal
+        // Never cache success if registration failed — otherwise Apple Pay stays broken for 7 days with no retries.
+        if (domainRegisteredOrBenign) {
+            try {
+                await redisClient.set(cacheKey, '1', { EX: 7 * 24 * 3600 });
+            } catch {
+                // non-fatal
+            }
         }
     }
 }
