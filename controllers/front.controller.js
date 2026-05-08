@@ -67,7 +67,7 @@ let warnedCheckoutPaymentMethodTypesPrependedCard = false;
  * Apple Pay / Google Pay need `card`. If `card` is omitted from env, it is prepended automatically.
  */
 function getCheckoutPaymentIntentMethodTypes() {
-    const defaults = ['card', 'afterpay_clearpay', 'mobilepay', 'revolut_pay', 'billie'];
+    const defaults = ['card',  'mobilepay', 'revolut_pay', 'billie'];
     const raw = process.env.STRIPE_CHECKOUT_PAYMENT_METHOD_TYPES;
     if (raw == null || String(raw).trim() === '') {
         return defaults;
@@ -706,6 +706,22 @@ const validatePaymentRequest = (reqBody) => {
     return { amount, currency, metadata: sanitizedMetadata };
 };
 
+const assertTicketPurchasable = (ticketConfig) => {
+    if (!ticketConfig) return;
+
+    if (ticketConfig.status === 'sold_out') {
+        const error = new Error('TICKET_SOLD_OUT');
+        error.code = 'TICKET_SOLD_OUT';
+        throw error;
+    }
+
+    if (ticketConfig.status === 'inactive' || ticketConfig.status === 'disabled') {
+        const error = new Error('TICKET_NOT_AVAILABLE');
+        error.code = 'TICKET_NOT_AVAILABLE';
+        throw error;
+    }
+};
+
 const validateMerchantAndEvent = async (metadata) => {
     // Check merchant - search by both merchantId and externalMerchantId
 
@@ -758,6 +774,7 @@ const validateMerchantAndEvent = async (metadata) => {
             if (!ticketConfig) {
                 throw new Error('Ticket configuration is not available in this event');
             }
+            assertTicketPurchasable(ticketConfig);
             return { merchant, event, ticket: ticketConfig };
         }
     }
@@ -770,11 +787,7 @@ const validateMerchantAndEvent = async (metadata) => {
     if (!ticketConfig) {
         throw new Error('Ticket configuration is not available in this event');
     }
-    if(ticketConfig.status === 'sold_out') {
-        const error = new Error('TICKET_SOLD_OUT');
-        error.code = 'TICKET_SOLD_OUT';
-        throw error;
-    }
+    assertTicketPurchasable(ticketConfig);
 
     return { merchant, event, ticket: ticketConfig };
 };
@@ -4187,6 +4200,7 @@ export const handleFreeEventRegistration = async (req, res, next) => {
         const selectedTicket = sanitizedData.ticketId
             ? event.ticketInfo.find(t => t._id.toString() === sanitizedData.ticketId)
             : (event.ticketInfo && event.ticketInfo.length > 0 ? event.ticketInfo[0] : null);
+        assertTicketPurchasable(selectedTicket);
 
         const ticketPrice = selectedTicket ? selectedTicket.price : 0;
         const ticketType = selectedTicket ? selectedTicket.name : sanitizedData.ticketName;

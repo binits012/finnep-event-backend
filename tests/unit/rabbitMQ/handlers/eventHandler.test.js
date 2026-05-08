@@ -39,12 +39,17 @@ const mockMerchant = {
   getMerchantByMerchantId: jest.fn()
 };
 
+const mockEventManifest = {
+  findOne: jest.fn()
+};
+
 // Use dynamic imports for ES modules
 let eventHandler;
 let Event;
 let inboxModel;
 let logger;
 let Merchant;
+let EventManifest;
 
 beforeAll(async () => {
   // Use absolute paths for mocking
@@ -75,11 +80,17 @@ beforeAll(async () => {
     getMerchantByMerchantId: mockMerchant.getMerchantByMerchantId
   }));
 
+  const mongoModelPath = resolve(__dirname, '../../../../model/mongoModel.js');
+  jest.unstable_mockModule(mongoModelPath, () => ({
+    EventManifest: mockEventManifest
+  }));
+
   eventHandler = await import('../../../../rabbitMQ/handlers/eventHandler.js');
   Event = await import('../../../../model/event.js');
   inboxModel = (await import('../../../../model/inboxMessage.js')).inboxModel;
   logger = await import('../../../../model/logger.js');
   Merchant = await import('../../../../model/merchant.js');
+  EventManifest = await import('../../../../model/mongoModel.js').then(m => m.EventManifest);
 });
 
 describe('Event Handler', () => {
@@ -96,6 +107,11 @@ describe('Event Handler', () => {
     mockLogger.info.mockClear();
     mockLogger.error.mockClear();
     mockLogger.warn.mockClear();
+
+    // Default: no manifest sales so `handleEventUpdated` doesn't attempt downstream sync.
+    mockEventManifest.findOne.mockReturnValue({
+      lean: jest.fn().mockResolvedValue(null)
+    });
   });
 
   describe('handleEventMessage', () => {
@@ -132,6 +148,54 @@ describe('Event Handler', () => {
       expect(mockInbox.isProcessed).toHaveBeenCalledWith('msg_123');
       expect(mockMerchant.getMerchantByMerchantId).toHaveBeenCalledWith('merchant_123');
       expect(mockEvent.createEvent).toHaveBeenCalled();
+    });
+
+    it('should pass other_info.ticketListingPricing to Mongo otherInfo', async () => {
+      // Arrange
+      const message = {
+        routingKey: 'event.created',
+        id: 'ext_event_123',
+        merchantId: 'merchant_123',
+        title: 'Test Event',
+        other_info: {
+          ticketListingPricing: {
+            mode: 'included_fees_note',
+            caption: '(Price includes GST and other fees)'
+          }
+        },
+        metaData: {
+          causationId: 'msg_123'
+        }
+      };
+
+      const mockMerchantData = {
+        _id: '507f1f77bcf86cd799439012',
+        merchantId: 'merchant_123'
+      };
+
+      mockInbox.isProcessed.mockResolvedValue(false);
+      mockInbox.saveMessage.mockResolvedValue({});
+      mockMerchant.getMerchantByMerchantId.mockResolvedValue(mockMerchantData);
+      mockEvent.createEvent.mockResolvedValue({
+        _id: '507f1f77bcf86cd799439011',
+        eventTitle: 'Test Event'
+      });
+      mockInbox.markProcessed.mockResolvedValue(true);
+
+      // Act
+      await eventHandler.handleEventMessage(message);
+
+      // Assert
+      expect(mockEvent.createEvent).toHaveBeenCalled();
+      const otherInfoArg = mockEvent.createEvent.mock.calls[0][16];
+      expect(otherInfoArg).toEqual(
+        expect.objectContaining({
+          ticketListingPricing: {
+            mode: 'included_fees_note',
+            caption: '(Price includes GST and other fees)'
+          }
+        })
+      );
     });
 
     it('should handle event.updated message', async () => {

@@ -296,7 +296,7 @@ const ticketInfoSchema = new mongoose.Schema({
 	},
 	status: {
 		type: String,
-		enum: ['available', 'low_stock', 'sold_out'],
+		enum: ['available', 'low_stock', 'sold_out', 'inactive', 'disabled'],
 		default: 'available'
 	},
 	createdAt: { type: Date, default: Date.now }
