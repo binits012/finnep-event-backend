@@ -1,6 +1,13 @@
 import * as Setting from '../model/setting.js'
 import { buildPublicSiteConfigPayload } from './publicSiteConfig.js'
 
+/** Trim + strip trailing slashes (env mistakes like https://host/); Origin header has no path. */
+export function normalizeCorsOrigin(raw) {
+	if (raw == null || typeof raw !== 'string') return ''
+	const s = raw.trim().replace(/\/+$/, '')
+	return s
+}
+
 /** Baseline origins — merged with CORS_ORIGINS, FRONTEND_URL, and DB-driven storefront hosts */
 export const STATIC_APP_ORIGINS = [
 	'https://finnep-eventapp-test.s3.eu-central-1.amazonaws.com',
@@ -10,6 +17,8 @@ export const STATIC_APP_ORIGINS = [
 	'https://www.okazzo.com.au',
 	'https://okazzo.eu',
 	'https://www.okazzo.eu',
+	'https://regional.okazzo.eu',
+	'https://www.regional.okazzo.eu',
 	'https://okazzo.fi',
 	'https://www.okazzo.fi',
 	'https://okazzo.se',
@@ -34,9 +43,16 @@ export function getMergedCorsOrigins() {
 	const fromEnv = process.env.CORS_ORIGINS
 		? process.env.CORS_ORIGINS.split(',').map((url) => url.trim()).filter((url) => url.length > 0)
 		: []
-	return [
-		...new Set([...STATIC_APP_ORIGINS, ...fromEnv, process.env.FRONTEND_URL, ...dynamicCorsOrigins].filter(Boolean))
-	]
+	const merged = [...STATIC_APP_ORIGINS, ...fromEnv, process.env.FRONTEND_URL, ...dynamicCorsOrigins]
+		.filter(Boolean)
+		.map(normalizeCorsOrigin)
+		.filter((o) => o.length > 0)
+	return [...new Set(merged)]
+}
+
+export function isCorsOriginAllowed(originHeader) {
+	if (!originHeader) return true
+	return getMergedCorsOrigins().includes(normalizeCorsOrigin(originHeader))
 }
 
 /**

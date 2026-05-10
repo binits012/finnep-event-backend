@@ -28,7 +28,7 @@ export const DEFAULT_PUBLIC_SITE_CONFIG = {
 		{ hreflang: 'no-NO', publicBaseUrl: 'https://okazzo.no' },
 		{ hreflang: 'da-DK', publicBaseUrl: 'https://okazzo.dk' }
 	],
-	extraCorsOrigins: []
+	extraCorsOrigins: ['https://regional.okazzo.eu', 'https://www.regional.okazzo.eu']
 }
 
 function normalizeHostname(raw) {

@@ -17,7 +17,7 @@ import { messageConsumer } from './rabbitMQ/services/messageConsumer.js';
 import { rabbitMQ } from './util/rabbitmq.js';
 import redisClient from './model/redisConnect.js'; // Ensure Redis client is imported early
 import { httpMetricsMiddleware } from './util/httpRequestMetrics.js';
-import { getMergedCorsOrigins, refreshCorsOriginsFromDb } from './util/corsAllowlist.js';
+import { isCorsOriginAllowed, refreshCorsOriginsFromDb } from './util/corsAllowlist.js';
 const stripe = new Stripe(process.env.STRIPE_KEY)
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET
 var app = express();
@@ -44,12 +44,11 @@ const corsOptions = {
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
 
-    const allowedOrigins = getMergedCorsOrigins();
-
-    if (allowedOrigins.includes(origin)) {
+    if (isCorsOriginAllowed(origin)) {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      // Deny without Error — avoids Express error middleware swallowing OPTIONS responses
+      callback(null, false);
     }
   },
   credentials: true,

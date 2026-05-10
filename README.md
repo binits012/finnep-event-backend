@@ -261,7 +261,7 @@ PORT=3000
 NODE_ENV=development
 
 # CORS Origins (comma-separated list of allowed origins)
-CORS_ORIGINS=http://localhost:3000,http://localhost:3002,http://localhost:3003,https://eventapp.finnep.fi,https://finnep.fi,https://cms.eventapp.finnep.fi,https://okazzo.eu,https://www.okazzo.eu,https://cms.okazzo.eu,https://okazzo.fi,https://www.okazzo.fi,https://cms.okazzo.fi
+CORS_ORIGINS=http://localhost:3000,http://localhost:3002,http://localhost:3003,https://eventapp.finnep.fi,https://finnep.fi,https://cms.eventapp.finnep.fi,https://okazzo.eu,https://www.okazzo.eu,https://cms.okazzo.eu,https://regional.okazzo.eu,https://www.regional.okazzo.eu,https://okazzo.fi,https://www.okazzo.fi,https://cms.okazzo.fi
 
 # Legacy frontend URLs (for backward compatibility)
 FRONTEND_URL=http://localhost:3000
