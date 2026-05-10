@@ -28,6 +28,9 @@ router.route('/user/admin')
 router.route('/user/staff')
     .post(api.createStaffUser)
     .get(api.getStaffUsers)
+router.route('/user/regional')
+    .post(api.createRegionalOpsUser)
+    .get(api.getRegionalOpsUsers)
 
 router.route('/user/:id')
     .get(api.getUserById)
@@ -96,6 +99,15 @@ router.route('/multipleTicket')
     .post(api.createMultipleTicket)
 router.route('/event/:id/ticket')
     .get(api.getAllTicketByEventId)
+
+router.route('/event/:id/ticket-sales-summary')
+    .get(api.getTicketSalesSummaryByEventId)
+
+router.route('/event/:id/tickets/sales')
+    .get(api.getTicketSalesByEventId)
+
+router.route('/event/:id/tickets/sales/export')
+    .get(api.exportTicketSalesByEventId)
 
 router.route('/event/:id/searchTicket')
     .get(api.searchTicket)

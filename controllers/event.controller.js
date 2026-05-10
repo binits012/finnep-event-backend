@@ -11,6 +11,42 @@ import * as OutboxMessage from '../model/outboxMessage.js'
 import { messageConsumer } from '../rabbitMQ/services/messageConsumer.js'
 import { manifestLockService } from '../src/services/manifestLockService.js'
 import { EventManifest } from '../model/mongoModel.js'
+import {
+    applyRegionalScopeToFilters,
+    canAccessCountry,
+    canAccessResource,
+    isGlobalAccess,
+    sendRegionalForbidden
+} from '../util/regionalAccess.js'
+
+const regionalLockedTicketFields = ['price', 'serviceFee', 'entertainmentTax', 'serviceTax', 'orderFee', 'vat']
+
+const getTicketIdentifier = (ticket) => String(ticket?._id || ticket?.name || '')
+
+const normalizeTicketNumber = (value) => {
+    if (value === undefined || value === null || value === '') return undefined
+    const numberValue = Number(value)
+    return Number.isNaN(numberValue) ? value : numberValue
+}
+
+const hasRegionalTicketPricingChanges = (existingTicketInfo = [], incomingTicketInfo = []) => {
+    if (!Array.isArray(existingTicketInfo) || !Array.isArray(incomingTicketInfo)) return true
+    if (existingTicketInfo.length !== incomingTicketInfo.length) return true
+
+    const existingTicketsByIdentifier = new Map(
+        existingTicketInfo.map(ticket => [getTicketIdentifier(ticket), ticket])
+    )
+
+    return incomingTicketInfo.some(incomingTicket => {
+        const identifier = getTicketIdentifier(incomingTicket)
+        const existingTicket = existingTicketsByIdentifier.get(identifier)
+        if (!identifier || !existingTicket) return true
+
+        return regionalLockedTicketFields.some(field => (
+            normalizeTicketNumber(existingTicket[field]) !== normalizeTicketNumber(incomingTicket[field])
+        ))
+    })
+}
 
 export const createEvent = async (req, res, next) =>{
     const token = req.headers.authorization
@@ -64,6 +100,9 @@ export const createEvent = async (req, res, next) =>{
                         })
                     }
 
+                }
+                if (!canAccessCountry(data, country)) {
+                    return sendRegionalForbidden(res)
                 }
                 await Event.createEvent(eventTitle, eventDescription, eventDate,
                     occupancy, ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
@@ -121,7 +160,13 @@ export const getEvents = async(req,res,next)=>{
                 filters.category = req.query.category
             }
 
-            await Event.getEvents(page, limit, filters).then(result=>{
+            if (filters.country && !canAccessCountry(data, filters.country)) {
+                return sendRegionalForbidden(res)
+            }
+
+            const scopedFilters = applyRegionalScopeToFilters(data, filters)
+
+            await Event.getEvents(page, limit, scopedFilters).then(result=>{
                 return res.status(consts.HTTP_STATUS_OK).json({
                     data: result.events,
                     pagination: result.pagination,
@@ -152,7 +197,7 @@ export const getEventFilterOptions = async(req, res, next) => {
                 })
             }
 
-            await Event.getEventFilterOptions().then(result => {
+            await Event.getEventFilterOptions(applyRegionalScopeToFilters(data)).then(result => {
                 return res.status(consts.HTTP_STATUS_OK).json({
                     data: result
                 })
@@ -182,9 +227,15 @@ export const getEventById = async (req, res, next) => {
                 })
             }
 
-            await Event.getEventById(id).then( async data=>{
-                const eventId = data.id
-                const validPhotos = data?.eventPhoto?.filter(photo => photo && photo.trim() !== '') || [];
+            await Event.getEventById(id).then( async eventData=>{
+                if (!eventData) {
+                    return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({ })
+                }
+                if (!canAccessResource(data, eventData)) {
+                    return sendRegionalForbidden(res)
+                }
+                const eventId = eventData.id
+                const validPhotos = eventData?.eventPhoto?.filter(photo => photo && photo.trim() !== '') || [];
                 const photoWithCloudFrontUrls = await Promise.all(validPhotos?.map(async (photo,index) => {
                     const cacheKey = `signedUrl:${eventId}:${index}`;
                     const cached = await commonUtil.getCacheByKey(redisClient, cacheKey);
@@ -234,22 +285,22 @@ export const getEventById = async (req, res, next) => {
                     return signedUrl
                 });
                 */
-                data.eventPhoto = photoWithCloudFrontUrls
+                eventData.eventPhoto = photoWithCloudFrontUrls
 
                 // Fetch pricingConfig from EventManifest if event uses pricing_configuration model
                 let pricingConfig = null;
-                if (data.venue?.venueId && data.venue?.pricingModel === 'pricing_configuration') {
+                if (eventData.venue?.venueId && eventData.venue?.pricingModel === 'pricing_configuration') {
                     try {
                         let eventManifest = null;
 
                         // Try lockedManifestId first (fastest - primary key lookup)
                         // Only if it exists and we're confident it points to EventManifest
-                        if (data.venue?.lockedManifestId) {
+                        if (eventData.venue?.lockedManifestId) {
                             try {
-                                eventManifest = await EventManifest.findById(data.venue.lockedManifestId).lean();
+                                eventManifest = await EventManifest.findById(eventData.venue.lockedManifestId).lean();
                             } catch (findByIdErr) {
                                 // lockedManifestId might point to old Manifest collection, fall through to eventId lookup
-                                info(`lockedManifestId ${data.venue.lockedManifestId} not found in EventManifest, trying eventId lookup`);
+                                info(`lockedManifestId ${eventData.venue.lockedManifestId} not found in EventManifest, trying eventId lookup`);
                             }
                         }
 
@@ -257,7 +308,7 @@ export const getEventById = async (req, res, next) => {
                         // This is consistent with how other parts of the codebase query EventManifest
                         if (!eventManifest) {
                             eventManifest = await EventManifest.findOne({
-                                eventId: String(data._id)
+                                eventId: String(eventData._id)
                             }).lean();
                         }
 
@@ -277,7 +328,7 @@ export const getEventById = async (req, res, next) => {
                 }
 
                 return res.status(consts.HTTP_STATUS_OK).json({
-                    data: data,
+                    data: eventData,
                     timeZone: process.env.TIME_ZONE,
                     pricingConfig: pricingConfig
                 })
@@ -367,6 +418,21 @@ export const updateEventById = async (req,res,next) =>{
                 })
             }
 
+            const originalEvent = await Event.getEventById(id)
+            if (!originalEvent) {
+                return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({ })
+            }
+            if (!canAccessResource(data, originalEvent) || !canAccessCountry(data, country || originalEvent.country)) {
+                return sendRegionalForbidden(res)
+            }
+            if (!isGlobalAccess(data) && ticketInfo !== undefined &&
+                hasRegionalTicketPricingChanges(originalEvent.ticketInfo, ticketInfo)) {
+                return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
+                    message: 'Regional users cannot change ticket pricing or ticket types.',
+                    error: 'REGIONAL_TICKET_PRICING_LOCKED'
+                })
+            }
+
             await Event.updateEventById(id,eventObj).then(data=>{
                 return res.status(consts.HTTP_STATUS_OK).json({ data: data })
             }).catch(err=>{
@@ -402,6 +468,9 @@ export const updateEventStatusById = async (req,res,next) =>{
             const originalEvent = await Event.getEventById(id)
             if(originalEvent === null || originalEvent === '' || originalEvent === 'undefined'){
                 return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({ })
+            }
+            if (!canAccessResource(data, originalEvent)) {
+                return sendRegionalForbidden(res)
             }
             const updatedEvent =  await Event.updateEventById(id,{active:active, featured:featured})
             try {

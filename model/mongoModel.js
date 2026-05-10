@@ -161,6 +161,8 @@ const userSchema = new Schema({
 	role: { type: mongoose.Schema.Types.ObjectId, ref: 'Role' },
 	active: { type: Boolean, default: true },
 	notificationAllowed:{ type: Boolean, default: true },
+	scopeType: { type: String, enum: ['global', 'regional'], default: 'global' },
+	allowedCountryCodes: { type: [String], default: [] },
 	createdAt: { type: Date, default: Date.now }
 })
 userSchema.pre('save', function (next) {
@@ -388,6 +390,7 @@ const eventSchema = new mongoose.Schema({
 	updatedAt:{ type:Date, default:Date.now }
 })
 eventSchema.index({ externalMerchantId: 1, externalEventId: 1 }, { unique: true });
+eventSchema.index({ country: 1 });
 // Featured events indexes
 eventSchema.index({ 'featured.isFeatured': 1, 'featured.priority': -1});
 eventSchema.index({ 'featured.isFeatured': 1, 'featured.featuredType': 1, 'featured.startDate': 1, 'featured.endDate': 1 });
@@ -690,7 +693,8 @@ const merchantSchema = new mongoose.Schema({
 });
 
 // Additional indexes for common search patterns
-merchantSchema.index({ merchantId: 1 }); // Index on country code for filtering
+merchantSchema.index({ merchantId: 1 });
+merchantSchema.index({ country: 1 }); // Index on country code for regional filtering
 merchantSchema.index({ paytrailSubMerchantId: 1 }); // Index for Paytrail lookups
 
 const outboxMessageSchema = new mongoose.Schema({

@@ -1,6 +1,7 @@
 import * as model from '../model/mongoModel.js'
 import {error} from './logger.js'
 import { Ticket } from '../model/mongoModel.js'
+import { buildCountryMatchFilter } from '../util/regionalAccess.js'
 
 const buildValidityWindowFilter = (now) => ([
     { event_end_date: { $gte: now } },
@@ -122,6 +123,11 @@ export const getEvents = async(page = 1, limit = 10, filters = {}) =>{
 
     if (filters.country) {
         queryFilter.country = new RegExp(`^${escapeRegExp(String(filters.country).trim())}$`, 'i')
+    } else if (filters.allowedCountryCodes) {
+        const countryFilter = buildCountryMatchFilter(filters.allowedCountryCodes)
+        if (countryFilter) {
+            queryFilter.country = countryFilter
+        }
     }
 
     if (filters.merchantId) {
@@ -176,14 +182,22 @@ export const getAllEventsForDashboard = async() => {
     }))
 }
 
-export const getEventFilterOptions = async() => {
+export const getEventFilterOptions = async(filters = {}) => {
     try {
+        const queryFilter = {}
+        if (filters.allowedCountryCodes) {
+            const countryFilter = buildCountryMatchFilter(filters.allowedCountryCodes)
+            if (countryFilter) {
+                queryFilter.country = countryFilter
+            }
+        }
+
         // Get all unique countries
-        const countries = await model.Event.distinct('country').exec()
+        const countries = await model.Event.distinct('country', queryFilter).exec()
         const countriesList = countries.filter(c => c && c.trim() !== '').sort()
 
         // Get all unique merchants
-        const merchantIds = await model.Event.distinct('merchant').exec()
+        const merchantIds = await model.Event.distinct('merchant', queryFilter).exec()
         const merchants = await model.Merchant.find({ _id: { $in: merchantIds } })
             .select('_id name')
             .sort({ name: 1 })

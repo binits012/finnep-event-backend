@@ -9,6 +9,8 @@ const router = express.Router()
 import * as front  from '../controllers/front.controller.js'
 import * as guest from '../controllers/guest.controller.js'
 import { handlePaytrailWebhook } from '../controllers/paytrail.webhook.js'
+router.route('/public-site-config')
+    .get(front.getPublicSiteConfig)
 router.route('/')
     .get(front.getDataForFront)
 router.route('/events')

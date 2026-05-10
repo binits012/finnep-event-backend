@@ -8,6 +8,7 @@ import * as consts from '../const.js'
 import * as Role from '../model/role.js'
 import * as common from '../util/common.js'
 import * as Contact from '../model/contact.js'
+import { buildAccessClaims, normalizeCountryCodes } from '../util/regionalAccess.js'
 
 export const login = async (req, res, next) => {
     const username = req.body.username
@@ -17,7 +18,8 @@ export const login = async (req, res, next) => {
             const userData = {
                 username: data.name,
                 role: data.role.roleType,
-                id:data.id
+                id:data.id,
+                ...buildAccessClaims(data)
             }
             jwtToken.generateJWT(userData, async(err, data) =>{ 
                 if(data){ 
@@ -113,6 +115,92 @@ export const createStaffUser = async (req, res, next) => {
                 })
             }
 
+        }
+    })
+}
+
+export const createRegionalOpsUser = async (req, res, next) => {
+    const username = req.body.username
+    const password = req.body.password
+    const allowedCountryCodes = normalizeCountryCodes(req.body.allowedCountryCodes)
+    const token = req.headers.authorization
+
+    if (allowedCountryCodes.length === 0) {
+        return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            message: 'Regional users require at least one country scope',
+            error: 'COUNTRY_SCOPE_REQUIRED'
+        })
+    }
+
+    await jwtToken.verifyJWT(token, async (err, data) => {
+        if (err || data === null) {
+            return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
+                message: 'Please, provide valid token', error: appText.TOKEN_NOT_VALID
+            })
+        } else {
+            const userRoleFromToken = data.role
+            if (consts.ROLE_SUPER_ADMIN === userRoleFromToken) {
+                const regionalOpsRole = await Role.getRoleByRoleType(consts.ROLE_REGIONAL_OPS)
+                if (!regionalOpsRole) {
+                    return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                        message: 'Regional role is not configured',
+                        error: 'REGIONAL_ROLE_NOT_FOUND'
+                    })
+                }
+                await User.createUser(
+                    username,
+                    password,
+                    regionalOpsRole._id,
+                    true,
+                    true,
+                    consts.ACCESS_SCOPE_REGIONAL,
+                    allowedCountryCodes
+                ).then(data => {
+                    const createdUser = {
+                        name: data.name,
+                        active: data.active,
+                        scopeType: data.scopeType,
+                        allowedCountryCodes: data.allowedCountryCodes
+                    }
+                    res.status(consts.HTTP_STATUS_CREATED).json({ data: createdUser })
+                })
+                    .catch(e => {
+                        error('error',e.stack)
+                        res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ message: 'Failed to create new regional user. Check inputs.', error: e.message });
+                    })
+            } else {
+                return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
+                    message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
+                })
+            }
+
+        }
+    })
+}
+
+export const getRegionalOpsUsers = async (req, res, next) => {
+    const token = req.headers.authorization
+    await jwtToken.verifyJWT(token, async (err, data) => {
+        if (err || data === null) {
+            return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
+                message: 'Please, provide valid token', error: appText.TOKEN_NOT_VALID
+            })
+        } else {
+            const userRoleFromToken = data.role
+            if (consts.ROLE_SUPER_ADMIN === userRoleFromToken) {
+                await User.getUsersByRole(consts.ROLE_REGIONAL_OPS).then(data => {
+                    return res.status(consts.HTTP_STATUS_OK).json({ data: data })
+                }).catch(err => {
+                    error('error',err.stack)
+                    return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                        message: 'Sorry, get users failed', error: appText.USER_GET_FAILED
+                    })
+                })
+            } else {
+                return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
+                    message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
+                })
+            }
         }
     })
 }
@@ -346,6 +434,8 @@ export const updateUserById = async (req, res, next) => {
     const token = req.headers.authorization
     const active = req.body.active
     const notificationAllowed = req.body.notificationAllowed
+    const hasAllowedCountryCodes = Object.prototype.hasOwnProperty.call(req.body, 'allowedCountryCodes')
+    const allowedCountryCodes = hasAllowedCountryCodes ? normalizeCountryCodes(req.body.allowedCountryCodes) : []
     if (userId === null || userId === "" || userId === undefined
         || token === null || token === "" || token === undefined) {
         UserActivity.createUserActivity(token !== undefined ? token : "NOT PROVIDED", Action.UPDATE, "update user failed.")
@@ -386,8 +476,24 @@ export const updateUserById = async (req, res, next) => {
                     })
                 }
             }
-            getUserFromId.active =  active !== null ? active : true
-            getUserFromId.notificationAllowed = notificationAllowed === null ? false: notificationAllowed 
+            if (hasAllowedCountryCodes) {
+                if (userRoleFromToken !== consts.ROLE_SUPER_ADMIN ||
+                    getUserFromId.role.roleType !== consts.ROLE_REGIONAL_OPS) {
+                    return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
+                        message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
+                    })
+                }
+                if (allowedCountryCodes.length === 0) {
+                    return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                        message: 'Regional users require at least one country scope',
+                        error: 'COUNTRY_SCOPE_REQUIRED'
+                    })
+                }
+                getUserFromId.scopeType = consts.ACCESS_SCOPE_REGIONAL
+                getUserFromId.allowedCountryCodes = allowedCountryCodes
+            }
+            if (typeof active === 'boolean') getUserFromId.active = active
+            if (typeof notificationAllowed === 'boolean') getUserFromId.notificationAllowed = notificationAllowed
             await User.updateUser(userId, getUserFromId).then(data => {
                 return res.status(consts.HTTP_STATUS_OK).json({ data: data })
             }).catch(err => {

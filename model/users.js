@@ -4,12 +4,14 @@ import * as consts from '../const.js'
 
 
 export class User {
-	constructor(name, pwd, role, active, notificationAllowed) {
+	constructor(name, pwd, role, active, notificationAllowed, scopeType = consts.ACCESS_SCOPE_GLOBAL, allowedCountryCodes = []) {
 		this.name = name;
 		this.pwd = pwd;
 		this.role = role;
 		this.active = active;
 		this.notificationAllowed = notificationAllowed;
+		this.scopeType = scopeType;
+		this.allowedCountryCodes = allowedCountryCodes;
 	}
 
 	async saveToDB() {
@@ -19,7 +21,9 @@ export class User {
 				pwd: this.pwd,
 				role: this.role,
 				active: this.active,
-				notificationAllowed: this.notificationAllowed
+				notificationAllowed: this.notificationAllowed,
+				scopeType: this.scopeType,
+				allowedCountryCodes: this.allowedCountryCodes
 			});
 
 			return await user.save();
@@ -30,8 +34,8 @@ export class User {
 	}
 }
 
-export const createUser = async function (name, pwd, role, active,notificationAllowed) {
-	var user = new User(name, pwd, role, active,notificationAllowed);
+export const createUser = async function (name, pwd, role, active,notificationAllowed, scopeType = consts.ACCESS_SCOPE_GLOBAL, allowedCountryCodes = []) {
+	var user = new User(name, pwd, role, active,notificationAllowed, scopeType, allowedCountryCodes);
 
 	return await user.saveToDB();
 

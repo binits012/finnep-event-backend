@@ -17,6 +17,7 @@ import { messageConsumer } from './rabbitMQ/services/messageConsumer.js';
 import { rabbitMQ } from './util/rabbitmq.js';
 import redisClient from './model/redisConnect.js'; // Ensure Redis client is imported early
 import { httpMetricsMiddleware } from './util/httpRequestMetrics.js';
+import { getMergedCorsOrigins, refreshCorsOriginsFromDb } from './util/corsAllowlist.js';
 const stripe = new Stripe(process.env.STRIPE_KEY)
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET
 var app = express();
@@ -39,26 +40,11 @@ const rabbitConsumerWatchQueues = ['event-events-queue', 'merchant-events-queue'
     }
 })();
 
-const STATIC_APP_ORIGINS = [
-  'https://finnep-eventapp-test.s3.eu-central-1.amazonaws.com',
-  'https://d3ibhfrhdk2dm6.cloudfront.net',
-  'https://test.okazzo.eu',
-  'https://okazzo.eu',
-  'https://www.okazzo.eu',
-  'http://localhost:3000',
-  'http://localhost:3002',
-  'http://localhost:3003',
-  'http://192.168.1.107:3003'
-];
-
 const corsOptions = {
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
 
-    const fromEnv = process.env.CORS_ORIGINS
-      ? process.env.CORS_ORIGINS.split(',').map(url => url.trim()).filter(url => url.length > 0)
-      : [];
-    const allowedOrigins = [...new Set([...STATIC_APP_ORIGINS, ...fromEnv, process.env.FRONTEND_URL].filter(Boolean))];
+    const allowedOrigins = getMergedCorsOrigins();
 
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
@@ -276,6 +262,7 @@ if (process.env.NODE_ENV !== 'test') {
     await adminRole.notificationTypes()
     //create settings
     await adminRole.settings()
+    await refreshCorsOriginsFromDb()
     //create socialMedia
     //await adminRole.socialMedia()
 }

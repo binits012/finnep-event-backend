@@ -13,6 +13,7 @@ import * as OrderTicket from '../model/orderTicket.js'
 import crypto from 'crypto'
 import { dirname } from 'path'
 import {manipulatePhoneNumber, generateQRCode} from '../util/common.js'
+import { canAccessResource, sendRegionalForbidden } from '../util/regionalAccess.js'
 const __dirname = dirname(import.meta.url).slice(7)
 
 const childQrPattern = /^([a-fA-F0-9]{24})#([1-9]\d*)$/
@@ -33,6 +34,214 @@ const mapTicketInfoForScanner = (ticketInfo) => {
         return Object.fromEntries(ticketInfo.entries())
     }
     return ticketInfo
+}
+
+const getTicketTypeKey = (ticket) => String(ticket?._id || ticket?.id || ticket?.name || '')
+
+const buildTicketTypeLabel = (event, ticketType) => {
+    const configuredTickets = Array.isArray(event?.ticketInfo) ? event.ticketInfo : []
+    const configuredTicket = configuredTickets.find(ticket => {
+        const ticketKey = getTicketTypeKey(ticket)
+        return ticketKey === String(ticketType) || ticket?.name === ticketType
+    })
+
+    return configuredTicket?.name || ticketType || 'normal'
+}
+
+const buildConfiguredTicketSalesRows = (event, salesRows) => {
+    const configuredTickets = Array.isArray(event?.ticketInfo) ? event.ticketInfo : []
+    const salesByType = new Map(salesRows.map(row => [String(row._id || 'normal'), row]))
+    const usedTypes = new Set()
+
+    const rows = configuredTickets.map(ticket => {
+        const possibleKeys = [ticket?._id, ticket?.id, ticket?.name].map(value => String(value || '')).filter(Boolean)
+        const sales = possibleKeys.map(key => salesByType.get(key)).find(Boolean)
+        possibleKeys.forEach(key => usedTypes.add(key))
+        if (sales?._id) usedTypes.add(String(sales._id))
+
+        return {
+            ticketType: ticket?.name || 'Unnamed ticket',
+            configuredQuantity: Number(ticket?.quantity || 0),
+            configuredPrice: Number(ticket?.price || 0),
+            ticketDocuments: sales?.ticketDocuments || 0,
+            quantitySold: sales?.quantitySold || 0,
+            revenue: sales?.revenue || 0,
+            sentCount: sales?.sentCount || 0,
+            activeCount: sales?.activeCount || 0,
+            checkedInCount: sales?.checkedInCount || 0,
+            firstSoldAt: sales?.firstSoldAt || null,
+            latestSoldAt: sales?.latestSoldAt || null
+        }
+    })
+
+    salesRows.forEach(sales => {
+        if (usedTypes.has(String(sales._id || 'normal'))) return
+        rows.push({
+            ticketType: buildTicketTypeLabel(event, sales._id),
+            configuredQuantity: 0,
+            configuredPrice: 0,
+            ticketDocuments: sales.ticketDocuments || 0,
+            quantitySold: sales.quantitySold || 0,
+            revenue: sales.revenue || 0,
+            sentCount: sales.sentCount || 0,
+            activeCount: sales.activeCount || 0,
+            checkedInCount: sales.checkedInCount || 0,
+            firstSoldAt: sales.firstSoldAt || null,
+            latestSoldAt: sales.latestSoldAt || null
+        })
+    })
+
+    return rows
+}
+
+const maskEmail = (email = '') => {
+    const [localPart, domain] = String(email).split('@')
+    if (!localPart || !domain) return email ? '***' : ''
+    const visible = localPart.slice(0, Math.min(2, localPart.length))
+    return `${visible}${'*'.repeat(Math.max(3, localPart.length - visible.length))}@${domain}`
+}
+
+const getTicketInfoValue = (ticketInfo, key, fallback = '') => {
+    if (!ticketInfo) return fallback
+    if (ticketInfo instanceof Map) return ticketInfo.get(key) ?? fallback
+    return ticketInfo[key] ?? fallback
+}
+
+const toTicketNumber = (value, fallback = 0) => {
+    const numberValue = Number(value)
+    return Number.isFinite(numberValue) ? numberValue : fallback
+}
+
+const getTicketOwnerEmail = async (ticket) => {
+    const ticketForId = ticket?.ticketFor?.id || ticket?.ticketFor?._id || ticket?.ticketFor
+    if (!ticketForId) return ''
+    return await getEmail(ticketForId)
+}
+
+const getTicketTypeLabel = (event, ticket) => {
+    const configuredTickets = Array.isArray(event?.ticketInfo) ? event.ticketInfo : []
+    const ticketType = ticket?.type || getTicketInfoValue(ticket?.ticketInfo, 'ticketType', 'normal')
+    const configuredTicket = configuredTickets.find(item => (
+        String(item?._id || item?.id || item?.name || '') === String(ticketType) || item?.name === ticketType
+    ))
+    return configuredTicket?.name || ticketType || 'normal'
+}
+
+const mapTicketSalesRow = async (ticket, event, { includePii = false } = {}) => {
+    const email = await getTicketOwnerEmail(ticket)
+    const ticketCode = ticket?.otp || ''
+    const ticketInfo = ticket?.ticketInfo
+    const quantity = toTicketNumber(getTicketInfoValue(ticketInfo, 'quantity', 1), 1)
+    const price = toTicketNumber(getTicketInfoValue(ticketInfo, 'price', 0), 0)
+    const storedTotalPrice = toTicketNumber(getTicketInfoValue(ticketInfo, 'totalPrice', 0), 0)
+    const totalPrice = storedTotalPrice > 0 ? storedTotalPrice : price * quantity
+
+    return {
+        id: ticket.id,
+        ticketFor: includePii ? email : undefined,
+        ticketForMasked: includePii ? undefined : maskEmail(email),
+        event: event.id,
+        isSend: ticket.isSend,
+        active: ticket.active,
+        isRead: ticket.isRead,
+        readAt: ticket.readAt || null,
+        readBy: ticket.readBy?.name || null,
+        type: getTicketTypeLabel(event, ticket),
+        ticketCode: includePii ? ticketCode : undefined,
+        ticketCodeMasked: includePii || !ticketCode ? undefined : `***${String(ticketCode).slice(-4)}`,
+        quantity,
+        price,
+        totalPrice,
+        paymentProvider: ticket.paymentProvider || '',
+        paytrailTransactionId: ticket.paytrailTransactionId || '',
+        paytrailStamp: ticket.paytrailStamp || '',
+        paytrailSubMerchantId: ticket.paytrailSubMerchantId || '',
+        createdAt: ticket.createdAt
+    }
+}
+
+const escapeCsvValue = (value) => {
+    if (value === undefined || value === null) return ''
+    const stringValue = value instanceof Date ? value.toISOString() : String(value)
+    return /[",\n\r]/.test(stringValue)
+        ? `"${stringValue.replace(/"/g, '""')}"`
+        : stringValue
+}
+
+const toTicketSalesCsv = (rows = []) => {
+    const headers = [
+        'ticket_id',
+        'buyer_email',
+        'ticket_code',
+        'ticket_type',
+        'quantity',
+        'price',
+        'total_price',
+        'sent',
+        'active',
+        'checked_in',
+        'read_at',
+        'read_by',
+        'payment_provider',
+        'paytrail_transaction_id',
+        'paytrail_stamp',
+        'paytrail_sub_merchant_id',
+        'sold_at'
+    ]
+    const body = rows.map(row => [
+        row.id,
+        row.ticketFor,
+        row.ticketCode,
+        row.type,
+        row.quantity,
+        row.price,
+        row.totalPrice,
+        row.isSend,
+        row.active,
+        row.isRead,
+        row.readAt,
+        row.readBy,
+        row.paymentProvider,
+        row.paytrailTransactionId,
+        row.paytrailStamp,
+        row.paytrailSubMerchantId,
+        row.createdAt
+    ].map(escapeCsvValue).join(','))
+
+    return [headers.join(','), ...body].join('\n')
+}
+
+const getTicketSalesFilters = (query = {}, event = null) => {
+    const ticketType = String(query.ticketType || '').trim()
+    const configuredTicket = ticketType && Array.isArray(event?.ticketInfo)
+        ? event.ticketInfo.find(ticket => (
+            String(ticket?._id || '') === ticketType ||
+            String(ticket?.id || '') === ticketType ||
+            ticket?.name === ticketType
+        ))
+        : null
+
+    return {
+        query: query.query,
+        status: query.status,
+        ticketType,
+        ticketTypes: configuredTicket
+            ? [configuredTicket._id, configuredTicket.id, configuredTicket.name].map(value => String(value || '')).filter(Boolean)
+            : undefined
+    }
+}
+
+const getTicketSalesPagination = (query = {}) => {
+    const rawPage = parseInt(query.page, 10)
+    const rawLimit = parseInt(query.limit, 10)
+    const page = Number.isNaN(rawPage) || rawPage <= 0 ? 1 : rawPage
+    const limit = Number.isNaN(rawLimit) || rawLimit <= 0 ? 50 : Math.min(rawLimit, 100)
+    return {
+        page,
+        pageSize: limit,
+        skip: (page - 1) * limit,
+        limit
+    }
 }
 
 export const createSingleTicket = async(req,res,next) =>{
@@ -210,6 +419,15 @@ export const getAllTicketByEventId = async(req,res,next) =>{
             })
 
             if(!res.headersSent){
+                if (!event) {
+                    return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+                        message: 'Sorry, get all tickets by event failed.', error: appText.RESOURCE_NOT_FOUND
+                    })
+                }
+                if (!canAccessResource(data, event)) {
+                    return sendRegionalForbidden(res)
+                }
+
                 try{
                     const [tickets, total] = await Promise.all([
                         Ticket.getAllTicketByEventId(event.id, { skip, limit: pageSize }),
@@ -282,6 +500,221 @@ export const getAllTicketByEventId = async(req,res,next) =>{
                 }
             }
 
+        }
+    })
+}
+
+export const getTicketSalesSummaryByEventId = async(req,res,next) =>{
+    const token = req.headers.authorization
+    const eventId = req.params.id
+
+    await jwtToken.verifyJWT(token, async (err, data) => {
+        if (err || data === null) {
+            return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({
+                message: 'Please, provide valid token', error: appText.TOKEN_NOT_VALID
+            })
+        } else {
+            const userRoleFromToken = data.role
+            if (consts.ROLE_MEMBER === userRoleFromToken) {
+                return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
+                    message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
+                })
+            }
+
+            const event = await Event.getEventById(eventId).catch(err => {
+                error('error', err.stack)
+                if(!res.headersSent){
+                    return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+                        message: 'Sorry, get ticket sales summary failed.', error: appText.RESOURCE_NOT_FOUND
+                    })
+                }
+            })
+
+            if (res.headersSent) return
+            if (!event) {
+                return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+                    message: 'Sorry, get ticket sales summary failed.', error: appText.RESOURCE_NOT_FOUND
+                })
+            }
+            if (!canAccessResource(data, event)) {
+                return sendRegionalForbidden(res)
+            }
+
+            try {
+                const salesRows = await Ticket.getTicketSalesSummaryByEventId(event.id)
+                const ticketTypes = buildConfiguredTicketSalesRows(event, salesRows)
+                const summary = ticketTypes.reduce((acc, ticket) => {
+                    acc.ticketDocuments += ticket.ticketDocuments
+                    acc.quantitySold += ticket.quantitySold
+                    acc.revenue += ticket.revenue
+                    acc.sentCount += ticket.sentCount
+                    acc.activeCount += ticket.activeCount
+                    acc.checkedInCount += ticket.checkedInCount
+                    return acc
+                }, {
+                    ticketDocuments: 0,
+                    quantitySold: 0,
+                    revenue: 0,
+                    sentCount: 0,
+                    activeCount: 0,
+                    checkedInCount: 0,
+                    occupancy: Number(event.occupancy || 0)
+                })
+
+                summary.remainingCapacity = Math.max(0, summary.occupancy - summary.quantitySold)
+                summary.occupancyRate = summary.occupancy > 0
+                    ? Math.round((summary.quantitySold / summary.occupancy) * 10000) / 100
+                    : 0
+
+                return res.status(consts.HTTP_STATUS_OK).json({
+                    data: {
+                        event: {
+                            id: event.id,
+                            eventTitle: event.eventTitle,
+                            country: event.country,
+                            occupancy: event.occupancy
+                        },
+                        summary,
+                        ticketTypes
+                    }
+                })
+            } catch (err) {
+                error('error', err.stack)
+                if(!res.headersSent){
+                    return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
+                        message: 'Sorry, get ticket sales summary failed.', error: appText.INTERNAL_SERVER_ERROR
+                    })
+                }
+            }
+        }
+    })
+}
+
+export const getTicketSalesByEventId = async(req,res,next) =>{
+    const token = req.headers.authorization
+    const eventId = req.params.id
+
+    await jwtToken.verifyJWT(token, async (err, data) => {
+        if (err || data === null) {
+            return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({
+                message: 'Please, provide valid token', error: appText.TOKEN_NOT_VALID
+            })
+        } else {
+            const userRoleFromToken = data.role
+            if (consts.ROLE_MEMBER === userRoleFromToken) {
+                return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
+                    message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
+                })
+            }
+
+            const event = await Event.getEventById(eventId).catch(err => {
+                error('error', err.stack)
+                if(!res.headersSent){
+                    return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+                        message: 'Sorry, get ticket sales failed.', error: appText.RESOURCE_NOT_FOUND
+                    })
+                }
+            })
+
+            if (res.headersSent) return
+            if (!event) {
+                return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+                    message: 'Sorry, get ticket sales failed.', error: appText.RESOURCE_NOT_FOUND
+                })
+            }
+            if (!canAccessResource(data, event)) {
+                return sendRegionalForbidden(res)
+            }
+
+            try {
+                const filters = getTicketSalesFilters(req.query, event)
+                const pagination = getTicketSalesPagination(req.query)
+                const [tickets, total] = await Promise.all([
+                    Ticket.getTicketsByEventIdPaginated(event.id, filters, pagination),
+                    Ticket.countTicketsByEventIdFiltered(event.id, filters)
+                ])
+                const mappedTickets = await Promise.all(
+                    tickets.map(ticket => mapTicketSalesRow(ticket, event, { includePii: false }))
+                )
+
+                return res.status(consts.HTTP_STATUS_OK).json({
+                    data: mappedTickets,
+                    filters,
+                    pagination: {
+                        total,
+                        page: pagination.page,
+                        pageSize: pagination.pageSize,
+                        totalPages: Math.ceil(total / pagination.pageSize)
+                    }
+                })
+            } catch (err) {
+                error('error', err.stack)
+                if(!res.headersSent){
+                    return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
+                        message: 'Sorry, get ticket sales failed.', error: appText.INTERNAL_SERVER_ERROR
+                    })
+                }
+            }
+        }
+    })
+}
+
+export const exportTicketSalesByEventId = async(req,res,next) =>{
+    const token = req.headers.authorization
+    const eventId = req.params.id
+
+    await jwtToken.verifyJWT(token, async (err, data) => {
+        if (err || data === null) {
+            return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({
+                message: 'Please, provide valid token', error: appText.TOKEN_NOT_VALID
+            })
+        } else {
+            const userRoleFromToken = data.role
+            if (consts.ROLE_MEMBER === userRoleFromToken) {
+                return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
+                    message: 'Sorry, You do not have rights', error: appText.INSUFFICENT_ROLE
+                })
+            }
+
+            const event = await Event.getEventById(eventId).catch(err => {
+                error('error', err.stack)
+                if(!res.headersSent){
+                    return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+                        message: 'Sorry, export ticket sales failed.', error: appText.RESOURCE_NOT_FOUND
+                    })
+                }
+            })
+
+            if (res.headersSent) return
+            if (!event) {
+                return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+                    message: 'Sorry, export ticket sales failed.', error: appText.RESOURCE_NOT_FOUND
+                })
+            }
+            if (!canAccessResource(data, event)) {
+                return sendRegionalForbidden(res)
+            }
+
+            try {
+                const filters = getTicketSalesFilters(req.query, event)
+                const tickets = await Ticket.getTicketsByEventIdForExport(event.id, filters)
+                const mappedTickets = await Promise.all(
+                    tickets.map(ticket => mapTicketSalesRow(ticket, event, { includePii: true }))
+                )
+                const csv = toTicketSalesCsv(mappedTickets)
+                const filename = `${String(event.eventName || event.eventTitle || event.id).replace(/[^a-z0-9_-]+/gi, '-')}-ticket-sales.csv`
+
+                res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+                res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
+                return res.status(consts.HTTP_STATUS_OK).send(csv)
+            } catch (err) {
+                error('error', err.stack)
+                if(!res.headersSent){
+                    return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
+                        message: 'Sorry, export ticket sales failed.', error: appText.INTERNAL_SERVER_ERROR
+                    })
+                }
+            }
         }
     })
 }

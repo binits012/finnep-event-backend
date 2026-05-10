@@ -19,6 +19,7 @@
     "esbuild": "node esbuild.config.js",
     "docs:generate": "node scripts/generateSwagger.js",
     "migrate": "node scripts/migrate-schemas.js",
+    "migrate:user-regional-scopes": "node scripts/backfill-user-regional-scopes.mjs",
     "migrate:event-end-date": "node scripts/backfill-event-end-date.mjs",
     "preview:email": "node scripts/preview-email.js",
     "preview:email:list": "node scripts/preview-email.js --list",

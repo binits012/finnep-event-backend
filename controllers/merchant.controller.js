@@ -13,6 +13,11 @@ import { dirname } from 'path'
 const __dirname = dirname(import.meta.url).slice(7)
 import { loadEmailTemplateForMerchant } from '../util/common.js'
 import { forward } from '../util/sendMail.js'
+import {
+    applyRegionalScopeToFilters,
+    canAccessResource,
+    sendRegionalForbidden
+} from '../util/regionalAccess.js'
 
 export const createMerchant = async (req, res, next) => {
     return res.status(consts.HTTP_STATUS_NOT_IMPLEMENTED).json({
@@ -40,6 +45,9 @@ export const getMerchantById = async (req, res, next) => {
 
                 const merchant = await Merchant.getMerchantById(id)
                 if (merchant) {
+                    if (!canAccessResource(data, merchant)) {
+                        return sendRegionalForbidden(res)
+                    }
                     return res.status(consts.HTTP_STATUS_OK).json(merchant)
                 } else {
                     return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).send({ error: RESOURCE_NOT_FOUND })
@@ -105,7 +113,7 @@ export const getAllMerchants = async (req, res, next) => {
                     })
                 }
 
-                const merchants = await Merchant.getAllMerchants()
+                const merchants = await Merchant.getAllMerchants(applyRegionalScopeToFilters(data))
                 res.status(consts.HTTP_STATUS_OK).json(merchants)
             } catch (err) {
                 error(err)
@@ -120,7 +128,17 @@ export const getAllMerchants = async (req, res, next) => {
 export const updateMerchantById = async (req, res, next) => {
     const token = req.headers.authorization
     const id = req.params.id
-    const { status } = req.body
+    const {
+        status,
+        stripeAccount,
+        stripePlatformFee,
+        revolutFee,
+        paytrailEnabled,
+        paytrailSubMerchantId,
+        paytrailCommissionRate,
+        paytrailStatus,
+        bankingInfo
+    } = req.body
     await jwtToken.verifyJWT(token, async (err, data) => {
         if (err || data === null) {
             return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({
@@ -140,11 +158,85 @@ export const updateMerchantById = async (req, res, next) => {
                 if (!originalMerchant) {
                     return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).send({ error: RESOURCE_NOT_FOUND })
                 }
+                if (!canAccessResource(data, originalMerchant)) {
+                    return sendRegionalForbidden(res)
+                }
+
+                const updateData = {}
+
+                if (status !== undefined) {
+                    if (!['active', 'inactive', 'pending', 'suspended'].includes(status)) {
+                        return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                            message: 'Invalid merchant status',
+                            error: 'INVALID_MERCHANT_STATUS'
+                        })
+                    }
+                    updateData.status = status
+                }
+                if (stripeAccount !== undefined) {
+                    updateData.stripeAccount = stripeAccount
+                }
+                if (stripePlatformFee !== undefined) {
+                    const fee = Number(stripePlatformFee)
+                    if (!Number.isFinite(fee) || fee < 0) {
+                        return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                            message: 'Stripe platform fee must be a non-negative number',
+                            error: 'INVALID_STRIPE_PLATFORM_FEE'
+                        })
+                    }
+                    updateData['otherInfo.stripe'] = Math.round(fee)
+                }
+                if (revolutFee !== undefined) {
+                    const fee = Number(revolutFee)
+                    if (!Number.isFinite(fee) || fee < 0) {
+                        return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                            message: 'Revolut fee must be a non-negative number',
+                            error: 'INVALID_REVOLUT_FEE'
+                        })
+                    }
+                    updateData['otherInfo.revolut'] = Math.round(fee)
+                }
+                if (paytrailEnabled !== undefined) {
+                    updateData.paytrailEnabled = Boolean(paytrailEnabled)
+                }
+                if (paytrailSubMerchantId !== undefined) {
+                    updateData.paytrailSubMerchantId = paytrailSubMerchantId || null
+                }
+                if (paytrailCommissionRate !== undefined) {
+                    const rate = Number(paytrailCommissionRate)
+                    if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
+                        return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                            message: 'Paytrail commission rate must be between 0 and 100',
+                            error: 'INVALID_PAYTRAIL_COMMISSION_RATE'
+                        })
+                    }
+                    updateData['paytrailShopInShopData.commissionRate'] = rate
+                }
+                if (paytrailStatus !== undefined) {
+                    if (!['pending', 'active', 'suspended'].includes(paytrailStatus)) {
+                        return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                            message: 'Invalid Paytrail status',
+                            error: 'INVALID_PAYTRAIL_STATUS'
+                        })
+                    }
+                    updateData['paytrailShopInShopData.status'] = paytrailStatus
+                }
+                if (bankingInfo !== undefined) {
+                    updateData.bankingInfo = bankingInfo
+                }
+
+                if (Object.keys(updateData).length === 0) {
+                    return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                        message: 'No supported merchant fields provided for update',
+                        error: 'NO_UPDATE_FIELDS'
+                    })
+                }
 
                 // 1. Update merchant
-                const updatedMerchant = await Merchant.updateMerchantById(id, { 'status': status })
+                const updatedMerchant = await Merchant.updateMerchantById(id, updateData)
 
                 if (updatedMerchant) {
+                    if (status !== undefined && status !== originalMerchant.status) {
                     try {
                         // 2. Create outbox message entry
                         const correlationId = uuidv4()
@@ -240,6 +332,7 @@ export const updateMerchantById = async (req, res, next) => {
                     } catch (publishError) {
                         error('Failed to create outbox message or publish merchant update event:', publishError)
                         // Continue with response even if publishing fails
+                    }
                     }
 
                     return res.status(consts.HTTP_STATUS_OK).json(updatedMerchant)

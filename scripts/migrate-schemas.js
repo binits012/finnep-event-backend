@@ -289,6 +289,20 @@ async function ensureIndexes() {
 
         await safeCreateIndex(
             Event.collection,
+            { country: 1 },
+            { background: true }
+        );
+        info('Event country index ensured');
+
+        await safeCreateIndex(
+            Merchant.collection,
+            { country: 1 },
+            { background: true }
+        );
+        info('Merchant country index ensured');
+
+        await safeCreateIndex(
+            Event.collection,
             { 'featured.isFeatured': 1, 'featured.priority': -1 },
             { background: true }
         );

@@ -19,6 +19,7 @@ import * as manifestController from './manifest.controller.js'
 import * as venueController from './venue.controller.js'
 import * as seatController from './seat.controller.js'
 import * as systemResources from '../util/systemResources.js'
+import { getAllowedCountryCodes, isGlobalAccess } from '../util/regionalAccess.js'
 
 export const getHealth = (req, res) => {
     res.status(consts.HTTP_STATUS_OK).json({
@@ -48,7 +49,13 @@ export const getSession = async (req, res, next) => {
                 error: 'INSUFFICIENT_PERMISSIONS'
             })
         }
-        return res.status(consts.HTTP_STATUS_OK).json({ ok: true, role: data.role })
+        return res.status(consts.HTTP_STATUS_OK).json({
+            ok: true,
+            role: data.role,
+            scopeType: data.scopeType || consts.ACCESS_SCOPE_GLOBAL,
+            allowedCountryCodes: getAllowedCountryCodes(data),
+            isGlobalAccess: isGlobalAccess(data)
+        })
     })
 }
 
@@ -63,6 +70,14 @@ export const getAdminUsers = async (req, res, next) => {
 }
 export const createStaffUser = async (req, res, next) => {
     await user.createStaffUser(req,res,next)
+}
+
+export const createRegionalOpsUser = async (req, res, next) => {
+    await user.createRegionalOpsUser(req,res,next)
+}
+
+export const getRegionalOpsUsers = async (req, res, next) => {
+    await user.getRegionalOpsUsers(req,res,next)
 }
 
 export const getStaffUsers = async (req, res, next) => {
@@ -434,6 +449,36 @@ export const getAllTicketByEventId = async(req, res, next) =>{
             message: 'Invalid Id.', error: appText.INVALID_ID
         })
         await ticket.getAllTicketByEventId(req,res,next)
+    }))
+}
+
+export const getTicketSalesSummaryByEventId = async(req, res, next) =>{
+    const id = req.params.id
+    param(id).custom(common.validateParam(id).then(async data=>{
+        if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            message: 'Invalid Id.', error: appText.INVALID_ID
+        })
+        await ticket.getTicketSalesSummaryByEventId(req,res,next)
+    }))
+}
+
+export const getTicketSalesByEventId = async(req, res, next) =>{
+    const id = req.params.id
+    param(id).custom(common.validateParam(id).then(async data=>{
+        if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            message: 'Invalid Id.', error: appText.INVALID_ID
+        })
+        await ticket.getTicketSalesByEventId(req,res,next)
+    }))
+}
+
+export const exportTicketSalesByEventId = async(req, res, next) =>{
+    const id = req.params.id
+    param(id).custom(common.validateParam(id).then(async data=>{
+        if(!data) return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            message: 'Invalid Id.', error: appText.INVALID_ID
+        })
+        await ticket.exportTicketSalesByEventId(req,res,next)
     }))
 }
 

@@ -1,5 +1,6 @@
 import * as model from '../model/mongoModel.js'
 import {error} from '../model/logger.js'
+import mongoose from 'mongoose'
 
 export class Ticket{
     constructor(qrCode, ticketFor, event, type, ticketInfo, otp, merchantId, externalMerchantId) {
@@ -78,6 +79,108 @@ export const getAllTicketByEventId = async(eventId, options = {}) =>{
 
 export const countTicketsByEventId = async(eventId) =>{
     return await model.Ticket.countDocuments({ event: eventId }).exec()
+}
+
+export const getTicketSalesSummaryByEventId = async(eventId) =>{
+    const eventObjectId = typeof eventId === 'string' ? new mongoose.Types.ObjectId(eventId) : eventId
+
+    return await model.Ticket.aggregate([
+        { $match: { event: eventObjectId } },
+        {
+            $addFields: {
+                quantityNumber: {
+                    $convert: { input: '$ticketInfo.quantity', to: 'double', onError: 1, onNull: 1 }
+                },
+                priceNumber: {
+                    $convert: { input: '$ticketInfo.price', to: 'double', onError: 0, onNull: 0 }
+                },
+                totalPriceNumber: {
+                    $convert: { input: '$ticketInfo.totalPrice', to: 'double', onError: 0, onNull: 0 }
+                }
+            }
+        },
+        {
+            $group: {
+                _id: { $ifNull: ['$type', 'normal'] },
+                ticketDocuments: { $sum: 1 },
+                quantitySold: { $sum: '$quantityNumber' },
+                revenue: {
+                    $sum: {
+                        $cond: [
+                            { $gt: ['$totalPriceNumber', 0] },
+                            '$totalPriceNumber',
+                            { $multiply: ['$priceNumber', '$quantityNumber'] }
+                        ]
+                    }
+                },
+                sentCount: { $sum: { $cond: ['$isSend', 1, 0] } },
+                activeCount: { $sum: { $cond: ['$active', 1, 0] } },
+                checkedInCount: { $sum: { $cond: ['$isRead', 1, 0] } },
+                firstSoldAt: { $min: '$createdAt' },
+                latestSoldAt: { $max: '$createdAt' }
+            }
+        },
+        { $sort: { quantitySold: -1, _id: 1 } }
+    ]).exec()
+}
+
+const buildEventTicketSalesFilter = (eventId, filters = {}) => {
+    const eventObjectId = typeof eventId === 'string' ? new mongoose.Types.ObjectId(eventId) : eventId
+    const query = String(filters.query || '').trim()
+    const status = String(filters.status || '').trim()
+    const ticketType = String(filters.ticketType || '').trim()
+    const filter = { event: eventObjectId }
+
+    if (query) {
+        const queryRegex = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+        filter.$or = [
+            { otp: queryRegex },
+            { type: queryRegex },
+            { paymentProvider: queryRegex },
+            { paytrailTransactionId: queryRegex },
+            { paytrailStamp: queryRegex }
+        ]
+    }
+
+    if (Array.isArray(filters.ticketTypes) && filters.ticketTypes.length > 0) {
+        filter.type = { $in: filters.ticketTypes }
+    } else if (ticketType) {
+        filter.type = ticketType
+    }
+
+    if (status === 'sent') filter.isSend = true
+    if (status === 'unsent') filter.isSend = false
+    if (status === 'checked_in') filter.isRead = true
+    if (status === 'not_checked_in') filter.isRead = false
+    if (status === 'active') filter.active = true
+    if (status === 'inactive') filter.active = false
+
+    return filter
+}
+
+export const getTicketsByEventIdPaginated = async(eventId, filters = {}, pagination = {}) =>{
+    const { skip = 0, limit = 50 } = pagination
+    return await model.Ticket.find(buildEventTicketSalesFilter(eventId, filters))
+        .populate('ticketFor')
+        .populate('readBy', 'name')
+        .select('-qrCode -ics')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .exec()
+}
+
+export const countTicketsByEventIdFiltered = async(eventId, filters = {}) =>{
+    return await model.Ticket.countDocuments(buildEventTicketSalesFilter(eventId, filters)).exec()
+}
+
+export const getTicketsByEventIdForExport = async(eventId, filters = {}) =>{
+    return await model.Ticket.find(buildEventTicketSalesFilter(eventId, filters))
+        .populate('ticketFor')
+        .populate('readBy', 'name')
+        .select('-qrCode -ics')
+        .sort({ createdAt: -1 })
+        .exec()
 }
 
 export const getAllTickets = async() =>{

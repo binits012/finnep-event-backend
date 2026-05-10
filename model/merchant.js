@@ -1,5 +1,6 @@
 import * as model from '../model/mongoModel.js';
 import { error, info } from './logger.js';
+import { buildCountryMatchFilter } from '../util/regionalAccess.js';
 
 export class Merchant {
   constructor(merchantId, name, orgName, country, code, email, companyEmail, phone, companyPhoneNumber, address, companyAddress,
@@ -84,9 +85,17 @@ export async function getMerchantByMerchantId(merchantId) {
   }
 }
 
-export async function getAllMerchants() {
+export async function getAllMerchants(filters = {}) {
   try {
-    const merchants = await model.Merchant.find({});
+    const queryFilter = {};
+    if (filters.allowedCountryCodes) {
+      const countryFilter = buildCountryMatchFilter(filters.allowedCountryCodes);
+      if (countryFilter) {
+        queryFilter.country = countryFilter;
+      }
+    }
+
+    const merchants = await model.Merchant.find(queryFilter);
     return merchants;
   } catch (err) {
     error('Error fetching all merchants:', err);

@@ -32,6 +32,7 @@ import { Venue } from '../model/mongoModel.js'
 import { PersonalDataRequest } from '../model/personalDataRequest.js'
 import { getPresalePayload, consumePresaleToken } from '../util/presaleToken.js'
 import { getSurveyTokenPayload, consumeSurveyToken } from '../util/surveyToken.js'
+import { buildPublicSiteConfigPayload } from '../util/publicSiteConfig.js'
 
 /** ISO 3166-1 alpha-3 (or other mistaken 3-letter codes) → ISO 4217 for Stripe */
 const STRIPE_CURRENCY_ALIASES = {
@@ -205,6 +206,24 @@ export const getDataForFront = async (req, res, next) => {
         companyTitle: process.env.COMPANY_TITLE || 'Okazzo'
     }
     res.status(consts.HTTP_STATUS_OK).json(data)
+}
+
+/** Slim JSON for storefront: hosts, SEO, CSP manifest origins — cacheable */
+export const getPublicSiteConfig = async (req, res, next) => {
+    try {
+        let setting = await commonUtil.getCacheByKey(redisClient, SETTINGS_CACHE_KEY)
+        if (!setting || setting instanceof Error || setting === null) {
+            setting = await Setting.getSetting()
+        }
+        const payload = buildPublicSiteConfigPayload(setting)
+        res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=120')
+        res.status(consts.HTTP_STATUS_OK).json(payload)
+    } catch (err) {
+        error('getPublicSiteConfig %s', err?.stack || err)
+        return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
+            message: 'Failed to load public site config'
+        })
+    }
 }
 
 /**

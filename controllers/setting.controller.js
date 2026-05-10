@@ -3,6 +3,8 @@ import * as consts from'../const.js'
 import * as appText from '../applicationTexts.js'
 import {error} from '../model/logger.js'
 import * as Setting from '../model/setting.js'
+import { validatePublicSiteConfig, otherInfoToPlain } from '../util/publicSiteConfig.js'
+import { refreshCorsOriginsFromDb } from '../util/corsAllowlist.js'
 
 export const createSetting = async (req,res,next) =>{
     const token = req.headers.authorization
@@ -126,13 +128,44 @@ export const updateSettingById = async(req,res,next)=>{
             } 
             const prevSetting = await Setting.getSettingById(id)
             if(prevSetting.length >0){
+                const prevDoc = prevSetting[0]
                 const updateObj = {
                     aboutSection: aboutSection,
                     contactInfo: contactInfo,
                     socialMedia: socialMedia,
-                    otherInfo:otherInfo
-                } 
-                await Setting.updateSettingById(id, updateObj).then(data =>{
+                }
+                // Only touch otherInfo when the client sends it — avoids wiping terms/locales/etc.
+                // When sent, merge with existing so partial CMS payloads cannot erase nested keys.
+                if (otherInfo !== undefined && otherInfo !== null) {
+                    if (Array.isArray(otherInfo)) {
+                        return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                            message: 'otherInfo must be a plain object',
+                        })
+                    }
+                    const prevPlain = otherInfoToPlain(prevDoc.otherInfo)
+                    const incoming =
+                        otherInfo instanceof Map
+                            ? Object.fromEntries(otherInfo.entries())
+                            : typeof otherInfo === 'object'
+                              ? { ...otherInfo }
+                              : {}
+                    const merged = { ...prevPlain, ...incoming }
+                    if (merged.publicSiteConfig != null) {
+                        const v = validatePublicSiteConfig(merged.publicSiteConfig)
+                        if (!v.ok) {
+                            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                                message: 'Invalid publicSiteConfig',
+                                errors: v.errors
+                            })
+                        }
+                        merged.publicSiteConfig = v.normalized
+                    }
+                    updateObj.otherInfo = merged
+                }
+                await Setting.updateSettingById(id, updateObj).then(async (data) => {
+                    if (updateObj.otherInfo !== undefined) {
+                        await refreshCorsOriginsFromDb()
+                    }
                     return res.status(consts.HTTP_STATUS_OK).json({ data: data })
                 }).catch(err=>{
                     error('error',err)

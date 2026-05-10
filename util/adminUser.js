@@ -27,18 +27,23 @@ export const createRoles = async () => {
     const adminRole = await Role.getRoleByRoleType(consts.ROLE_ADMIN)
     const staffRole = await Role.getRoleByRoleType(consts.ROLE_STAFF)
     const customerRole = await Role.getRoleByRoleType(consts.ROLE_MEMBER)
+    const regionalOpsRole = await Role.getRoleByRoleType(consts.ROLE_REGIONAL_OPS)
     if (!adminRole && !staffRole && !customerRole) {
         try {
             await Role.createRole(consts.ROLE_ADMIN)
             await Role.createRole(consts.ROLE_STAFF)
             await Role.createRole(consts.ROLE_MEMBER)
+            await Role.createRole(consts.ROLE_REGIONAL_OPS)
             await createAdmin();
         } catch (error) {
             logger.error('error on roles %s ',error.stack)
             await Role.deleteRole(consts.ROLE_ADMIN)
             await Role.deleteRole(consts.ROLE_STAFF)
             await Role.deleteRole(consts.ROLE_MEMBER)
+            await Role.deleteRole(consts.ROLE_REGIONAL_OPS)
         }
+    } else if (!regionalOpsRole) {
+        await Role.createRole(consts.ROLE_REGIONAL_OPS)
     }
 }
 
