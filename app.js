@@ -47,8 +47,10 @@ const corsOptions = {
     if (isCorsOriginAllowed(origin)) {
       callback(null, true);
     } else {
-      // Deny without Error — avoids Express error middleware swallowing OPTIONS responses
-      callback(null, false);
+      // `cors` treats the 2nd arg as the allowed origin value; `false` is falsy so it
+      // calls next() without running the preflight handler (can surface as nginx 500).
+      // Empty array => isOriginAllowed false => preflight ends with no ACAO (browser blocks).
+      callback(null, []);
     }
   },
   credentials: true,
