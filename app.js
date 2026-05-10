@@ -17,7 +17,12 @@ import { messageConsumer } from './rabbitMQ/services/messageConsumer.js';
 import { rabbitMQ } from './util/rabbitmq.js';
 import redisClient from './model/redisConnect.js'; // Ensure Redis client is imported early
 import { httpMetricsMiddleware } from './util/httpRequestMetrics.js';
-import { isCorsOriginAllowed, refreshCorsOriginsFromDb } from './util/corsAllowlist.js';
+import {
+  getMergedCorsOrigins,
+  isCorsOriginAllowed,
+  normalizeCorsOrigin,
+  refreshCorsOriginsFromDb
+} from './util/corsAllowlist.js';
 const stripe = new Stripe(process.env.STRIPE_KEY)
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET
 var app = express();
@@ -40,13 +45,36 @@ const rabbitConsumerWatchQueues = ['event-events-queue', 'merchant-events-queue'
     }
 })();
 
+// Trace CORS preflight: if this never prints for your curl, the request is not reaching Node (nginx/CDN).
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS') {
+    console.log('[CORS] OPTIONS inbound', {
+      url: req.originalUrl,
+      origin: req.headers.origin || '(missing)',
+      acrm: req.headers['access-control-request-method'] || '(none)',
+      acrh: req.headers['access-control-request-headers'] || '(none)'
+    });
+  }
+  next();
+});
+
 const corsOptions = {
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
 
-    if (isCorsOriginAllowed(origin)) {
+    const allowed = isCorsOriginAllowed(origin);
+    if (allowed) {
       callback(null, true);
     } else {
+      const normalized = normalizeCorsOrigin(origin);
+      const merged = getMergedCorsOrigins();
+      console.warn('[CORS] origin denied', {
+        origin,
+        normalized,
+        inListExact: merged.includes(origin),
+        inListNormalized: merged.includes(normalized),
+        allowlistCount: merged.length
+      });
       // `cors` treats the 2nd arg as the allowed origin value; `false` is falsy so it
       // calls next() without running the preflight handler (can surface as nginx 500).
       // Empty array => isOriginAllowed false => preflight ends with no ACAO (browser blocks).
