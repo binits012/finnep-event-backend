@@ -2,6 +2,8 @@ import * as model from '../model/mongoModel.js'
 import {error} from './logger.js'
 import { Ticket } from '../model/mongoModel.js'
 import { buildCountryMatchFilter } from '../util/regionalAccess.js'
+import mongoose from 'mongoose'
+import { parseAvailableHeadcount } from '../util/ticketQuantity.js'
 
 const buildValidityWindowFilter = (now) => ([
     { event_end_date: { $gte: now } },
@@ -233,6 +235,54 @@ export const getEventByExternalIds = async (externalMerchantId, externalEventId)
         externalEventId: String(externalEventId)
     }).populate('merchant').exec();
 }
+
+/**
+ * Atomically decrement ticket type available headcount (admission units, not pack count).
+ * Skips when ticket type has no available cap in Mongo.
+ */
+export const decrementTicketTypeAvailable = async (eventId, ticketTypeId, admissionQuantity, ticketTypeConfig = null) => {
+    const qty = parseInt(String(admissionQuantity), 10);
+    if (!ticketTypeId || !Number.isFinite(qty) || qty < 1) {
+        return { success: false, reason: 'invalid_args' };
+    }
+
+    if (ticketTypeConfig && parseAvailableHeadcount(ticketTypeConfig) == null) {
+        return { success: true, skipped: true };
+    }
+
+    const ticketTypeObjectId = new mongoose.Types.ObjectId(ticketTypeId);
+
+    const updated = await model.Event.findOneAndUpdate(
+        {
+            _id: eventId,
+            ticketInfo: {
+                $elemMatch: {
+                    _id: ticketTypeObjectId,
+                    available: { $gte: qty }
+                }
+            }
+        },
+        { $inc: { 'ticketInfo.$.available': -qty } },
+        { new: true }
+    ).exec();
+
+    if (!updated) {
+        return { success: false, reason: 'insufficient_inventory' };
+    }
+
+    const ticketType = updated.ticketInfo?.find((t) => String(t._id) === String(ticketTypeId));
+    if (ticketType && ticketType.available <= 0) {
+        const status = ticketType.status;
+        if (status !== 'inactive' && status !== 'disabled') {
+            await model.Event.updateOne(
+                { _id: eventId, 'ticketInfo._id': ticketTypeObjectId },
+                { $set: { 'ticketInfo.$.status': 'sold_out' } }
+            ).exec();
+        }
+    }
+
+    return { success: true, admissionQuantity: qty };
+};
 
 export const updateEventById = async (id, obj) =>{
     try {

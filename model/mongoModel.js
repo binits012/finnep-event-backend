@@ -398,7 +398,7 @@ eventSchema.index({ 'featured.isFeatured': 1, 'featured.endDate': 1 }); // For c
 
 eventSchema.pre('findOneAndUpdate', function(next) {
 	const update = this.getUpdate()
-	if (update && update.$set.ticketInfo) {
+	if (update?.$set?.ticketInfo) {
 	  const ticketInfoArray = update.$set.ticketInfo
 	  const names = ticketInfoArray.map(item => item.name)
 	  const uniqueNames = new Set(names)
@@ -591,6 +591,10 @@ platformMarketingConsentSchema.statics.updatePlatformConsent = async function (e
 
 const settingSchema = new mongoose.Schema({
 	createdAt: { type: Date, default: Date.now },
+	/** Exactly one platform-wide default row should have true (enforced in app + partial unique index). */
+	isPlatformDefault: { type: Boolean, default: false },
+	/** ISO 3166-1 alpha-2 when this row is market-specific; unset/null on default row. */
+	marketCountryCode: { type: String, default: null, uppercase: true, trim: true },
 	aboutSection:{ type: String },
 	contactInfo:{
 		type: Map,
@@ -605,6 +609,15 @@ const settingSchema = new mongoose.Schema({
 		of:mongoose.Schema.Types.Mixed
 	}
 })
+
+settingSchema.index(
+	{ isPlatformDefault: 1 },
+	{ unique: true, partialFilterExpression: { isPlatformDefault: true } }
+)
+settingSchema.index(
+	{ marketCountryCode: 1 },
+	{ unique: true, sparse: true, partialFilterExpression: { marketCountryCode: { $type: 'string', $exists: true, $ne: '' } } }
+)
 
 
 

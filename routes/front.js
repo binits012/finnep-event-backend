@@ -11,6 +11,8 @@ import * as guest from '../controllers/guest.controller.js'
 import { handlePaytrailWebhook } from '../controllers/paytrail.webhook.js'
 router.route('/public-site-config')
     .get(front.getPublicSiteConfig)
+router.route('/business-landing')
+    .get(front.getBusinessLandingPublic)
 router.route('/')
     .get(front.getDataForFront)
 router.route('/events')

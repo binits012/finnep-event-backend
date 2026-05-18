@@ -14,6 +14,7 @@ import crypto from 'crypto'
 import { dirname } from 'path'
 import {manipulatePhoneNumber, generateQRCode} from '../util/common.js'
 import { canAccessResource, sendRegionalForbidden } from '../util/regionalAccess.js'
+import { parseRequestMarketCountryCode } from '../util/platformSettings.js'
 const __dirname = dirname(import.meta.url).slice(7)
 
 const childQrPattern = /^([a-fA-F0-9]{24})#([1-9]\d*)$/
@@ -107,6 +108,13 @@ const getTicketInfoValue = (ticketInfo, key, fallback = '') => {
     return ticketInfo[key] ?? fallback
 }
 
+const toDisplayFinalAmount = (value, fallback = 0) => {
+    const numberValue = Number(value)
+    if (!Number.isFinite(numberValue)) return fallback
+    const roundedThree = Math.round(numberValue * 1000) / 1000
+    return Math.ceil((roundedThree * 100) - Number.EPSILON) / 100
+}
+
 const toTicketNumber = (value, fallback = 0) => {
     const numberValue = Number(value)
     return Number.isFinite(numberValue) ? numberValue : fallback
@@ -150,8 +158,8 @@ const mapTicketSalesRow = async (ticket, event, { includePii = false } = {}) => 
         ticketCode: includePii ? ticketCode : undefined,
         ticketCodeMasked: includePii || !ticketCode ? undefined : `***${String(ticketCode).slice(-4)}`,
         quantity,
-        price,
-        totalPrice,
+        price: toDisplayFinalAmount(price, 0),
+        totalPrice: toDisplayFinalAmount(totalPrice, 0),
         paymentProvider: ticket.paymentProvider || '',
         paytrailTransactionId: ticket.paytrailTransactionId || '',
         paytrailStamp: ticket.paytrailStamp || '',
@@ -311,7 +319,9 @@ export const createSingleTicket = async(req,res,next) =>{
                     // Extract locale from request (default to en-US if not available)
                     const locale = req?.query?.locale || req?.headers?.['accept-language'] ?
                         (await import('../util/common.js')).extractLocaleFromRequest(req) : 'en-US';
-                    const emailPayload = await ticketMaster.createEmailPayload(event, ticket, ticketFor, otp, locale)
+                    const emailPayload = await ticketMaster.createEmailPayload(event, ticket, ticketFor, otp, locale, {
+                        marketCountryCode: parseRequestMarketCountryCode(req)
+                    })
 
                     await new Promise(resolve => setTimeout(resolve, 100)) //100 mili second intentional delay
                     await OrderTicket.updateOrderTicketById(ticketOrder.id, {
@@ -472,7 +482,7 @@ export const getAllTicketByEventId = async(req,res,next) =>{
                                 ticketCode:e.otp,
                                 quantity:e?.ticketInfo?.get("quantity"),
                                 price:e?.ticketInfo?.get("price"),
-                                totalPrice: e?.ticketInfo?.get("totalPrice"),
+                                totalPrice: toDisplayFinalAmount(e?.ticketInfo?.get("totalPrice"), 0),
                                 createdAt: e.createdAt
                             }
                             return ticketData
@@ -746,7 +756,7 @@ export const getTicketById = async(req,res,next) =>{
                     ticketInfo:{
                         quantity:ticket.ticketInfo.get("quantity"),
                         ticketType:ticket.event.ticketInfo.filter(e=>e.id===ticketTypeId).map(e=>e.name)[0],
-                        totalPrice:ticket.ticketInfo.get("totalPrice")
+                        totalPrice:toDisplayFinalAmount(ticket.ticketInfo.get("totalPrice"), 0)
                     }
                 }
                 const page = (await fs.readFile(__dirname.replace('controllers','')+'/staticPages/ticketInfo.html','utf8')) .replace('$eventTitle',data.event.eventName)
@@ -787,7 +797,7 @@ export const getTicketById = async(req,res,next) =>{
                             ticketInfo:{
                                 quantity:ticket.ticketInfo.get("quantity"),
                                 ticketType:ticket.event.ticketInfo.filter(e=>e.id===ticketTypeId).map(e=>e.name)[0],
-                                totalPrice:ticket.ticketInfo.get("totalPrice")
+                                totalPrice:toDisplayFinalAmount(ticket.ticketInfo.get("totalPrice"), 0)
                             }
                         }
                         res.status(consts.HTTP_STATUS_OK).json({data:data})
@@ -1135,7 +1145,7 @@ export const searchTicket = async (req, res, next) => {
                     ticketInfo: {
                         quantity: ticket.ticketInfo.get("quantity"),
                         ticketType: ticketTypeId,
-                        totalPrice: ticket.ticketInfo.get("totalPrice")
+                        totalPrice: toDisplayFinalAmount(ticket.ticketInfo.get("totalPrice"), 0)
                     },
                     readBy: typeof ticket.readBy !== 'undefined' ? ticket.readBy.name : null,
                 }

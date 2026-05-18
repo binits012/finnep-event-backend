@@ -24,7 +24,7 @@ const options = {
   retryWrites: true,
   retryReads: true,
   maxPoolSize: 50,               // ✅ ADD - increase connection pool
-  minPoolSize: 10,  
+  minPoolSize: 10,
 };
 
 // Connect to MongoDB

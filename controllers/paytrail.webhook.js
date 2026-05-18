@@ -9,6 +9,13 @@ import { info, error } from '../model/logger.js';
 import * as consts from '../const.js';
 import { queueTicketEmail } from '../workers/emailWorker.js';
 import { publishTicketCreationEvent } from './front.controller.js';
+import {
+    applyTicketQuantitiesToTicketInfo,
+    findTicketTypeConfig,
+    getScanCountFromTicketType,
+    validateScanCountOrderQuantity,
+    validateTicketPurchaseInventory
+} from '../util/ticketQuantity.js';
 import { EventManifest, PlatformMarketingConsent } from '../model/mongoModel.js';
 import { manifestUpdateService } from '../src/services/manifestUpdateService.js';
 import { seatReservationService } from '../src/services/seatReservationService.js';
@@ -142,10 +149,9 @@ export async function createTicketFromPaytrailPayment(paymentData, transactionId
     // Load event for venue info (same structure as Stripe ticketInfo)
     const event = await Event.getEventById(paymentData.eventId);
 
-    const ticketInfo = {
+    const ticketInfoDraft = {
         eventName: paymentData.eventName,
         ticketName: paymentData.ticketName,
-        quantity: paymentData.quantity?.toString() || '1',
         price: paymentData.amount / 100,
         currency: 'EUR',
         purchaseDate: new Date().toISOString(),
@@ -181,7 +187,7 @@ export async function createTicketFromPaytrailPayment(paymentData, transactionId
 
     // Add venue (same structure as Stripe) so ticket display is consistent
     if (event && event.venue) {
-        ticketInfo.venue = {
+        ticketInfoDraft.venue = {
             venueId: event.venue.venueId || null,
             externalVenueId: event.venue.externalVenueId || null,
             venueName: event.venue.name || null,
@@ -191,8 +197,41 @@ export async function createTicketFromPaytrailPayment(paymentData, transactionId
 
     // Add seats array (same structure as Stripe) for seat-based events
     if (event && event.venue && event.venue.venueId && placeIds.length > 0) {
-        ticketInfo.seats = placeIds.map(placeId => ({ placeId }));
+        ticketInfoDraft.seats = placeIds.map(placeId => ({ placeId }));
     }
+
+    const ticketTypeConfig = findTicketTypeConfig(event, paymentData.ticketId);
+    const seatCount = Math.max(placeIds.length, seatTickets.length);
+
+    if (ticketTypeConfig && event && paymentData.ticketId) {
+        const inventoryCheck = validateTicketPurchaseInventory(event, ticketTypeConfig, {
+            orderQuantity: paymentData.quantity,
+            seatCount,
+            metadata: paymentData
+        });
+        const inventoryDecrement = await Event.decrementTicketTypeAvailable(
+            event._id,
+            paymentData.ticketId,
+            inventoryCheck.admissionQuantity,
+            ticketTypeConfig
+        );
+        if (!inventoryDecrement.success) {
+            const err = new Error('INSUFFICIENT_TICKET_INVENTORY');
+            err.code = 'INSUFFICIENT_TICKET_INVENTORY';
+            throw err;
+        }
+    }
+
+    const scanCount = getScanCountFromTicketType(ticketTypeConfig);
+    const scanValidation = validateScanCountOrderQuantity(paymentData.quantity, scanCount);
+    if (!scanValidation.valid) {
+        throw new Error(scanValidation.error);
+    }
+    const { ticketInfo, quantities } = applyTicketQuantitiesToTicketInfo(ticketInfoDraft, {
+        orderQuantity: paymentData.quantity,
+        ticketTypeConfig,
+        seatCount
+    });
 
     const emailCrypto = await hash.getCryptoBySearchIndex(paymentData.email, 'email');
     let emailHash = emailCrypto.length > 0 ? emailCrypto[0]._id : (await hash.createHashData(paymentData.email, 'email'))._id;
@@ -200,7 +239,7 @@ export async function createTicketFromPaytrailPayment(paymentData, transactionId
     // Platform marketing: default opt-in for every new email
     await PlatformMarketingConsent.getOrCreatePlatformConsent(emailHash);
 
-    const ticket = await Ticket.createTicket(
+    let ticket = await Ticket.createTicket(
         null,
         emailHash,
         paymentData.eventId,
@@ -210,6 +249,18 @@ export async function createTicketFromPaytrailPayment(paymentData, transactionId
         paymentData.merchantId,
         paymentData.externalMerchantId
     );
+
+    await ticketMaster.provisionGroupChildQRCodes(
+        ticket,
+        event,
+        quantities.admissionQuantity,
+        {
+            eventId: paymentData.eventId,
+            merchantId: paymentData.merchantId,
+            externalMerchantId: paymentData.externalMerchantId
+        }
+    );
+    ticket = await Ticket.getTicketById(ticket._id, false);
 
     // Update ticket with Paytrail fields
     // subMerchantId can be null in single account mode

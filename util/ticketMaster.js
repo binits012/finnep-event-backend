@@ -1,4 +1,5 @@
-import { generateICS, generateQRCode, loadEmailTemplate, resolveBrandingContactEmail } from './common.js'
+import { generateICS, generateQRCode, loadEmailTemplate } from './common.js'
+import { resolvePlatformBrandingAsync } from './platformSettings.js'
 import * as Ticket from '../model/ticket.js'
 import {error} from '../model/logger.js'
 import dotenv from 'dotenv'
@@ -8,18 +9,19 @@ import path, { dirname } from 'path'
 import { fileURLToPath } from 'url'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
+import { roundMoney } from './money.js';
+
 /**
- * Format currency amount
+ * Format currency amount (2 decimal places, rounded after each value).
  */
 const formatCurrency = (amount, currency = 'EUR') => {
-    if (amount === null || amount === undefined || isNaN(amount)) return '0.000';
-    // Truncate to 3 decimal places without rounding (preserve exact values)
-    const numAmount = parseFloat(amount);
-    if (isNaN(numAmount)) return '0.000';
-    // Use round (not floor) to handle floating-point representation errors
-    const rounded = Math.round(numAmount * 1000) / 1000;
-    return rounded.toFixed(3);
+    if (amount === null || amount === undefined || isNaN(amount)) return '0.00';
+    const rounded = roundMoney(amount);
+    if (isNaN(rounded)) return '0.00';
+    return rounded.toFixed(2);
 };
+
+const formatFinalCurrency = (amount, currency = 'EUR') => formatCurrency(amount, currency);
 
 /**
  * Format date for display
@@ -135,7 +137,77 @@ const buildVenueMapLink = (venue, geoCode = null) => {
     return `https://www.google.com/maps?q=${encodeURIComponent(address)}`;
 };
 
-export const createEmailPayload = async (event, ticket, ticketFor, otp, locale = 'en-US') => {
+const ticketInfoToPlainObject = (ticketInfo) => {
+    if (!ticketInfo) return {};
+    if (ticketInfo instanceof Map) return Object.fromEntries(ticketInfo);
+    if (typeof ticketInfo === 'object') return { ...ticketInfo };
+    return {};
+};
+
+/**
+ * Create child QR records for grouped tickets (quantity > 1 admissions).
+ * Idempotent: reuses existing childQRCodes entries when indices match.
+ */
+export const provisionGroupChildQRCodes = async (ticket, event, admissionQuantity, metadata = {}) => {
+    if (!ticket) {
+        throw new Error('Cannot provision child QR codes: ticket is missing');
+    }
+    const ticketId = ticket.id || ticket._id;
+    const quantity = parseInt(String(admissionQuantity), 10) || 1;
+    const ticketInfoData = ticketInfoToPlainObject(ticket.ticketInfo);
+
+    if (quantity <= 1) {
+        return { childQRCodes: [], ticketInfo: ticketInfoData };
+    }
+
+    const existing = Array.isArray(ticketInfoData.childQRCodes) ? ticketInfoData.childQRCodes : [];
+    const childQRCodes = [];
+
+    for (let childIndex = 1; childIndex <= quantity; childIndex++) {
+        const existingEntry = existing.find((item) => Number(item?.childIndex) === childIndex);
+        const childQrCodeValue = String(
+            existingEntry?.childQrCodeValue
+            || existingEntry?.value
+            || `${ticketId}#${childIndex}`
+        );
+
+        await Ticket.upsertChildTicketQR({
+            parentTicketId: ticketId,
+            childIndex,
+            childQrCodeValue,
+            event: ticket.event,
+            merchant: ticket.merchant,
+            externalMerchantId: ticket.externalMerchantId
+        });
+
+        childQRCodes.push({
+            childIndex,
+            childQrCodeValue,
+            parentTicketId: String(ticketId),
+            eventId: String(metadata?.eventId || event?._id || event?.id || ''),
+            merchantId: String(metadata?.merchantId || ''),
+            externalMerchantId: String(metadata?.externalMerchantId || ''),
+            active: existingEntry?.active !== false,
+            isRead: existingEntry?.isRead === true,
+            createdAt: existingEntry?.createdAt || new Date().toISOString()
+        });
+    }
+
+    const updatedTicketInfo = {
+        ...ticketInfoData,
+        quantity: String(quantity),
+        childQRCodes
+    };
+    await Ticket.updateTicketById(ticketId, { ticketInfo: updatedTicketInfo });
+
+    return { childQRCodes, ticketInfo: updatedTicketInfo };
+};
+
+/**
+ * @param {object} options
+ * @param {string|null} [options.marketCountryCode] — ISO alpha-2; omit or null = platform default (e.g. webhooks)
+ */
+export const createEmailPayload = async (event, ticket, ticketFor, otp, locale = 'en-US', options = {}) => {
     try {
         const ticketId = ticket.id || ticket._id;
         const icsData = await generateICS(event, ticketId);
@@ -153,23 +225,9 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
         const venueInfo = event.venueInfo || {};
         const merchant = event.merchant || {};
 
-        // ticket.ticketInfo is stored as a MongoDB Map, so we need to convert it to a plain object
-        // Handle both Map and plain object cases
-        let ticketInfoData = {};
-        if (ticket.ticketInfo) {
-            if (ticket.ticketInfo instanceof Map) {
-                // Convert Map to plain object
-                ticketInfoData = Object.fromEntries(ticket.ticketInfo);
-                console.log('[ticketMaster] Converted Map to object:', ticketInfoData);
-            } else if (typeof ticket.ticketInfo === 'object' && ticket.ticketInfo !== null) {
-                // Already a plain object
-                ticketInfoData = ticket.ticketInfo;
-                console.log('[ticketMaster] Using plain object:', ticketInfoData);
-            }
-        } else {
+        let ticketInfoData = ticketInfoToPlainObject(ticket.ticketInfo);
+        if (!ticket.ticketInfo) {
             console.warn('[ticketMaster] ticket.ticketInfo is missing or undefined');
-            console.log('[ticketMaster] ticket object keys:', Object.keys(ticket));
-            console.log('[ticketMaster] ticket.ticketInfo type:', typeof ticket.ticketInfo);
         }
 
         // Helper function to safely get values from objects
@@ -201,40 +259,13 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
         const vat = parseFloat(getValue(ticketInfoData, 'vat')) || 0;
         let vatRate = parseFloat(getValue(ticketInfoData, 'vatRate')) || vat; // Use let to allow recalculation if vatAmount exists but vatRate is 0
 
-        // Get quantity (number of tickets) - needed to determine if stored values are per-unit or total
         const quantity = parseInt(getValue(ticketInfoData, 'quantity') || '1', 10) || 1;
-
-        let childQRCodes = [];
-        if (quantity > 1) {
-            for (let childIndex = 1; childIndex <= quantity; childIndex++) {
-                const childQrCodeValue = `${ticketId}#${childIndex}`;
-
-                await Ticket.upsertChildTicketQR({
-                    parentTicketId: ticketId,
-                    childIndex,
-                    childQrCodeValue,
-                    event: ticket.event,
-                    merchant: ticket.merchant,
-                    externalMerchantId: ticket.externalMerchantId
-                });
-
-                childQRCodes.push({
-                    childIndex,
-                    childQrCodeValue
-                });
-            }
-        } else {
-            childQRCodes = [];
-        }
-
-        if (ticketInfoData && typeof ticketInfoData === 'object') {
-            const updatedTicketInfo = {
-                ...ticketInfoData,
-                childQRCodes
-            };
-            await Ticket.updateTicketById(ticketId, { ticketInfo: updatedTicketInfo });
-            ticketInfoData = updatedTicketInfo;
-        }
+        const provisioned = await provisionGroupChildQRCodes(ticket, event, quantity, {
+            eventId: event?._id,
+            merchantId: ticket.merchant?._id || ticket.merchant,
+            externalMerchantId: ticket.externalMerchantId
+        });
+        ticketInfoData = provisioned?.ticketInfo ?? ticketInfoData;
 
         // Check if we have seatTickets (for seated events with different ticket types per seat)
         let seatTickets = getValue(ticketInfoData, 'seatTickets');
@@ -459,10 +490,13 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
         // Total = (per-unit totals) + (per-transaction fees)
         const totalAmount = totalBasePrice + totalServiceFee + totalServiceTaxAmount + totalVatAmount + orderFee + orderFeeServiceTax;
 
-        // Get currency
-        const currency = getValue(ticketInfoData, 'currency')?.toUpperCase() || process.env.PAYMENT_CURRENCY?.toUpperCase() || 'EUR';
+        // Get currency (stored value may be non-string; coerce before toUpperCase)
+        const currency = String(
+            getValue(ticketInfoData, 'currency', '') || process.env.PAYMENT_CURRENCY || 'EUR'
+        ).toUpperCase();
         const currencySymbol = getCurrencySymbol(currency);
         const formatMoney = (amount) => `${formatCurrency(amount)} ${currencySymbol}`;
+        const formatFinalMoney = (amount) => `${formatFinalCurrency(amount)} ${currencySymbol}`;
 
         // Extract venue information
         const venueName = venue.name || venueInfo.name || event.eventLocationAddress || 'TBA';
@@ -530,13 +564,17 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
             (ticket.createdAt ? new Date(ticket.createdAt) : new Date())
         );
 
-        // Platform/Company information
-        const companyName = process.env.COMPANY_TITLE || 'Finnep';
-        const companyLogo = process.env.COMPANY_LOGO || 'https://finnep.s3.eu-central-1.amazonaws.com/Other/finnep_logo.png';
-        const brandingContactEmail = resolveBrandingContactEmail();
-        const businessId = process.env.BUSINESS_ID || '3579764-6';
-        const socialMedidFB = process.env.SOCIAL_MEDIA_FB || event.socialMedia?.facebook || 'https://www.facebook.com/profile.php?id=61565375592900';
-        const socialMedidLN = process.env.SOCIAL_MEDIA_LN || event.socialMedia?.linkedin || 'https://www.linkedin.com/company/105069196/admin/dashboard/';
+        const marketCountryCode =
+            options && Object.prototype.hasOwnProperty.call(options, 'marketCountryCode')
+                ? options.marketCountryCode
+                : null;
+        const branding = await resolvePlatformBrandingAsync(marketCountryCode);
+        const companyName = branding.companyName;
+        const companyLogo = branding.companyLogo;
+        const brandingContactEmail = branding.brandingContactEmail;
+        const businessId = branding.businessId;
+        const socialMedidFB = branding.socialMedidFB || event.socialMedia?.facebook;
+        const socialMedidLN = branding.socialMedidLN || event.socialMedia?.linkedin;
 
         // Public transport
         const publicTransportLink = event.transportLink || buildVenueMapLink(venue);
@@ -586,7 +624,7 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
             orderFee: orderFee > 0 ? formatMoney(orderFee) : null,
             orderFeeServiceTax: orderFeeServiceTax > 0 ? formatMoney(orderFeeServiceTax) : null,
             tax: formatMoney(totalEntertainmentTaxAmount + totalServiceTaxAmount), // Keep for backward compatibility
-            totalAmount: formatMoney(totalAmount),
+            totalAmount: formatFinalMoney(totalAmount),
 
             // Transportation
             publicTransportLink: publicTransportLink,

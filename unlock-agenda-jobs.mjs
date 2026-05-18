@@ -19,8 +19,7 @@ const options = {
   useUnifiedTopology: true,
   serverSelectionTimeoutMS: 5000,
   socketTimeoutMS: 45000,
-  keepAlive: true,
-  keepAliveInitialDelay: 300000
+  keepAlive: true
 };
 
 async function unlockJobs(jobName = null) {

@@ -18,6 +18,7 @@ import {
     canAccessResource,
     sendRegionalForbidden
 } from '../util/regionalAccess.js'
+import { parseRequestMarketCountryCode, resolvePlatformBrandingAsync } from '../util/platformSettings.js'
 
 export const createMerchant = async (req, res, next) => {
     return res.status(consts.HTTP_STATUS_NOT_IMPLEMENTED).json({
@@ -309,7 +310,21 @@ export const updateMerchantById = async (req, res, next) => {
                             const locale = req.query?.locale || req.headers?.['accept-language'] ?
                                 (await import('../util/common.js')).extractLocaleFromRequest(req) : 'en-US';
 
-                            const loadedData = await loadEmailTemplateForMerchant(fileLocation, updatedMerchant?.orgName, dashboardUrl, locale)
+                            const brand = await resolvePlatformBrandingAsync(parseRequestMarketCountryCode(req))
+                            const loadedData = await loadEmailTemplateForMerchant(
+                                fileLocation,
+                                updatedMerchant?.orgName,
+                                dashboardUrl,
+                                locale,
+                                {
+                                    companyLogo: brand.companyLogo,
+                                    companyName: brand.companyName,
+                                    brandingContactEmail: brand.brandingContactEmail,
+                                    businessId: brand.businessId,
+                                    socialMedidFB: brand.socialMedidFB,
+                                    socialMedidLN: brand.socialMedidLN
+                                }
+                            )
                             const { getEmailSubject } = await import('../util/emailTranslations.js');
                             const templateName = status === 'active' ? 'merchant_activated' : 'merchant_suspended';
                             const emailSubject = await getEmailSubject(templateName, locale);

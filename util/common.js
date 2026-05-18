@@ -37,7 +37,7 @@ const websiteLinkLabel = (url) => {
   }
 };
 
-const emailFooterBusinessFromEnv = (options = {}) => ({
+export const emailFooterBusinessFromEnv = (options = {}) => ({
   businessId: options.businessId ?? process.env.BUSINESS_ID ?? '3579764-6',
   socialMedidFB: options.socialMedidFB ?? process.env.SOCIAL_MEDIA_FB ?? 'https://www.facebook.com/profile.php?id=61565375592900',
   socialMedidLN: options.socialMedidLN ?? process.env.SOCIAL_MEDIA_LN ?? 'https://www.linkedin.com/company/105069196/admin/dashboard/'

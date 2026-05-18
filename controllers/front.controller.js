@@ -10,6 +10,16 @@ import * as Ticket from '../model/ticket.js'
 import crypto from 'crypto'
 import { RESOURCE_NOT_FOUND, INTERNAL_SERVER_ERROR } from '../applicationTexts.js'
 import * as ticketMaster from '../util/ticketMaster.js'
+import {
+    applyTicketQuantitiesToTicketInfo,
+    findTicketTypeConfig,
+    formatInventoryErrorMessage,
+    getScanCountFromTicketType,
+    resolveSeatCountFromPurchaseMetadata,
+    validateScanCountOrderQuantity,
+    validateTicketPurchaseInventory
+} from '../util/ticketQuantity.js'
+import { computeTicketLinePricing, roundMoney, moneyPercentOfExactSum } from '../util/money.js'
 import * as sendMail from '../util/sendMail.js'
 import Stripe from 'stripe'
 const stripe = new Stripe(process.env.STRIPE_KEY)
@@ -33,6 +43,13 @@ import { PersonalDataRequest } from '../model/personalDataRequest.js'
 import { getPresalePayload, consumePresaleToken } from '../util/presaleToken.js'
 import { getSurveyTokenPayload, consumeSurveyToken } from '../util/surveyToken.js'
 import { buildPublicSiteConfigPayload } from '../util/publicSiteConfig.js'
+import { validateBusinessLandingConfig } from '../util/businessLanding.js'
+import {
+    parseRequestMarketCountryCode,
+    resolvePublicPlatformSettingSlice,
+    resolveMergedPlatformSettings,
+    pickDefaultPlatformDoc,
+} from '../util/platformSettings.js'
 
 /** ISO 3166-1 alpha-3 (or other mistaken 3-letter codes) → ISO 4217 for Stripe */
 const STRIPE_CURRENCY_ALIASES = {
@@ -198,11 +215,15 @@ export const getDataForFront = async (req, res, next) => {
         ? notification
         : []
 
+    const marketCc = parseRequestMarketCountryCode(req)
+    const platformSetting = await resolvePublicPlatformSettingSlice(marketCc)
+
     const data = {
         photo: photosWithCloudFrontUrls?.filter(e => e.publish),
         notification: notificationList,
         event: filteredEvents,
         setting: setting,
+        platformSetting,
         companyTitle: process.env.COMPANY_TITLE || 'Okazzo'
     }
     res.status(consts.HTTP_STATUS_OK).json(data)
@@ -215,13 +236,118 @@ export const getPublicSiteConfig = async (req, res, next) => {
         if (!setting || setting instanceof Error || setting === null) {
             setting = await Setting.getSetting()
         }
-        const payload = buildPublicSiteConfigPayload(setting)
+        const marketCc = parseRequestMarketCountryCode(req)
+        const slice = await resolvePublicPlatformSettingSlice(marketCc)
+        const payload = buildPublicSiteConfigPayload(setting, slice.otherInfo)
         res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=120')
-        res.status(consts.HTTP_STATUS_OK).json(payload)
+        res.status(consts.HTTP_STATUS_OK).json({
+            ...payload,
+            platformConfigTier: slice.platformConfigTier,
+            platformCountryCode: slice.platformCountryCode
+        })
     } catch (err) {
         error('getPublicSiteConfig %s', err?.stack || err)
         return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
             message: 'Failed to load public site config'
+        })
+    }
+}
+
+/** Allowlisted fields from merged otherInfo for public business landing (no raw otherInfo leak). */
+function pickPublicBrandingFromOtherInfo(oiPlain, canonicalBaseUrl) {
+    const o = oiPlain && typeof oiPlain === 'object' && !Array.isArray(oiPlain) ? oiPlain : {}
+    const title = typeof o.companyTitle === 'string' ? o.companyTitle.trim().slice(0, 240) : ''
+    let logo = typeof o.companyLogo === 'string' ? o.companyLogo.trim().slice(0, 2000) : ''
+    if (logo) {
+        if (logo.startsWith('//')) {
+            logo = `https:${logo}`
+        }
+        const base =
+            typeof canonicalBaseUrl === 'string' && canonicalBaseUrl.trim()
+                ? String(canonicalBaseUrl).replace(/\/+$/, '')
+                : ''
+        if (logo.startsWith('/') && base) {
+            logo = `${base}${logo}`
+        }
+        if (logo.startsWith('/') && !base) {
+            logo = ''
+        }
+        try {
+            const u = new URL(logo)
+            if (u.protocol !== 'https:' && u.protocol !== 'http:') {
+                logo = ''
+            }
+        } catch {
+            logo = ''
+        }
+    }
+    return {
+        companyTitle: title || null,
+        companyLogo: logo || null,
+    }
+}
+
+/** Public B2B landing JSON: structured copy + slim site hints — cacheable, no auth */
+export const getBusinessLandingPublic = async (req, res, next) => {
+    try {
+        let setting = await commonUtil.getCacheByKey(redisClient, SETTINGS_CACHE_KEY)
+        if (!setting || setting instanceof Error || setting === null) {
+            setting = await Setting.getSetting()
+        }
+        const marketCc = parseRequestMarketCountryCode(req)
+        const slice = await resolvePublicPlatformSettingSlice(marketCc)
+        const oiRaw = slice.otherInfo
+        const oiPlain =
+            oiRaw instanceof Map
+                ? Object.fromEntries(oiRaw.entries())
+                : oiRaw && typeof oiRaw === 'object'
+                  ? { ...oiRaw }
+                  : {}
+        const raw = oiPlain.businessLanding
+        let businessLanding = null
+        if (raw != null) {
+            const v = validateBusinessLandingConfig(raw)
+            if (v.ok) {
+                businessLanding = v.normalized
+            } else {
+                error('getBusinessLandingPublic invalid stored config %j', v.errors)
+            }
+        }
+        const sitePayload = buildPublicSiteConfigPayload(setting, slice.otherInfo)
+        const rows = Array.isArray(setting) ? setting : []
+        const defaultDoc = pickDefaultPlatformDoc(rows) || rows[0]
+        const updatedAt =
+            defaultDoc?.updatedAt instanceof Date
+                ? defaultDoc.updatedAt.toISOString()
+                : defaultDoc?.createdAt instanceof Date
+                  ? defaultDoc.createdAt.toISOString()
+                  : new Date().toISOString()
+
+        const aboutRaw = slice.aboutSection
+        const aboutSection =
+            typeof aboutRaw === 'string' && aboutRaw.trim()
+                ? aboutRaw.trim().slice(0, 120000)
+                : null
+
+        res.setHeader('Cache-Control', 'public, s-maxage=120, stale-while-revalidate=300')
+        res.status(consts.HTTP_STATUS_OK).json({
+            updatedAt,
+            platformCountryCode: slice.platformCountryCode,
+            platformConfigTier: slice.platformConfigTier,
+            businessLanding,
+            site: {
+                primaryCanonicalBaseUrl: sitePayload.primaryCanonicalBaseUrl,
+                siteCluster: sitePayload.hosts?.[0]?.siteCluster ?? null,
+            },
+            contactInfo: slice.contactInfo,
+            socialMedia: slice.socialMedia,
+            branding: pickPublicBrandingFromOtherInfo(oiPlain, sitePayload.primaryCanonicalBaseUrl),
+            aboutSection,
+        })
+    } catch (err) {
+        error('getBusinessLandingPublic %s', err?.stack || err)
+        return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
+            message: 'Failed to load business landing config',
         })
     }
 }
@@ -444,7 +570,9 @@ export const completeOrderTicket = async (req, res, next) => {
             const event = await Event.getEventById(ticketInfo.eventId);
             // Extract locale from request
             const locale = commonUtil.extractLocaleFromRequest(req);
-            const emailPayload = await ticketMaster.createEmailPayload(event, ticket, ticketFor, orderTicket?.otp, locale);
+            const emailPayload = await ticketMaster.createEmailPayload(event, ticket, ticketFor, orderTicket?.otp, locale, {
+                marketCountryCode: parseRequestMarketCountryCode(req)
+            });
             await new Promise(resolve => setTimeout(resolve, 100)); // intentional delay
             await sendMail.forward(emailPayload).then(async data => {
                 // Update the ticket to mark as sent
@@ -741,6 +869,26 @@ const assertTicketPurchasable = (ticketConfig) => {
     }
 };
 
+const resolveSeatCountFromMetadata = (metadata = {}) => {
+    const placeIds = metadata.placeIds;
+    const placeCount = Array.isArray(placeIds)
+        ? placeIds.length
+        : (typeof placeIds === 'string' && placeIds.trim() ? 1 : 0);
+    const seatTickets = metadata.seatTickets;
+    const seatTicketCount = Array.isArray(seatTickets) ? seatTickets.length : 0;
+    return Math.max(placeCount, seatTicketCount);
+};
+
+/**
+ * Apply pack-size × order-quantity to ticketInfo.quantity (admission headcount).
+ */
+const ticketInfoToPlainObjectForPublish = (ticketInfo) => {
+    if (!ticketInfo) return {};
+    if (ticketInfo instanceof Map) return Object.fromEntries(ticketInfo);
+    if (typeof ticketInfo === 'object') return { ...ticketInfo };
+    return {};
+};
+
 const validateMerchantAndEvent = async (metadata) => {
     // Check merchant - search by both merchantId and externalMerchantId
 
@@ -794,6 +942,11 @@ const validateMerchantAndEvent = async (metadata) => {
                 throw new Error('Ticket configuration is not available in this event');
             }
             assertTicketPurchasable(ticketConfig);
+            validateTicketPurchaseInventory(event, ticketConfig, {
+                orderQuantity: metadata?.quantity ?? 1,
+                seatCount: resolveSeatCountFromMetadata(metadata || {}),
+                metadata: metadata || {}
+            });
             return { merchant, event, ticket: ticketConfig };
         }
     }
@@ -807,6 +960,11 @@ const validateMerchantAndEvent = async (metadata) => {
         throw new Error('Ticket configuration is not available in this event');
     }
     assertTicketPurchasable(ticketConfig);
+    validateTicketPurchaseInventory(event, ticketConfig, {
+        orderQuantity: metadata?.quantity ?? 1,
+        seatCount: resolveSeatCountFromMetadata(metadata || {}),
+        metadata: metadata || {}
+    });
 
     return { merchant, event, ticket: ticketConfig };
 };
@@ -895,14 +1053,14 @@ const calculateExpectedPrice = (ticket, event, quantity, metadata = {}) => {
             const orderFeeServiceTax = parseFloat(metadata.orderFeeServiceTax) || 0;
 
             // Sum all components
-            const totalAmount = Math.round((
+            const totalAmount = roundMoney(
                 totalBasePrice +
                 totalServiceFee +
                 totalEntertainmentTaxAmount +
                 totalServiceTaxAmount +
                 orderFee +
                 orderFeeServiceTax
-            ) * 1000) / 1000;
+            );
 
             console.log('[calculateExpectedPrice] Using pre-calculated totals for pricing_configuration:', {
                 totalBasePrice,
@@ -956,21 +1114,21 @@ const calculateExpectedPrice = (ticket, event, quantity, metadata = {}) => {
             });
 
             // Calculate percentages on EXACT totals (not truncated), then truncate result to 3 decimals
-            const totalEntertainmentTaxAmount = Math.round((totalBasePrice * taxRate / 100) * 1000) / 1000;
-            const totalServiceTaxAmount = Math.round((totalServiceFee * serviceTaxRate / 100) * 1000) / 1000;
+            const totalEntertainmentTaxAmount = moneyPercentOfExactSum(totalBasePrice, taxRate);
+            const totalServiceTaxAmount = moneyPercentOfExactSum(totalServiceFee, serviceTaxRate);
 
             // Now truncate the base totals for consistency
-            const totalBasePriceTruncated = Math.round(totalBasePrice * 1000) / 1000;
-            const totalServiceFeeTruncated = Math.round(totalServiceFee * 1000) / 1000;
-            const orderFeeTax = Math.round((orderFee * serviceTaxRate / 100) * 1000) / 1000;
+            const totalBasePriceTruncated = roundMoney(totalBasePrice);
+            const totalServiceFeeTruncated = roundMoney(totalServiceFee);
+            const orderFeeTax = roundMoney(orderFee * serviceTaxRate / 100);
 
             // Calculate seat totals: basePrice + tax + serviceFee + serviceTax
             // Use round (not floor) to handle floating-point representation errors when summing
-            const seatsTotalTruncated = Math.round((totalBasePriceTruncated + totalEntertainmentTaxAmount + totalServiceFeeTruncated + totalServiceTaxAmount) * 1000) / 1000;
-            const orderFeeTotalTruncated = Math.round((orderFee + orderFeeTax) * 1000) / 1000;
+            const seatsTotalTruncated = roundMoney(totalBasePriceTruncated + totalEntertainmentTaxAmount + totalServiceFeeTruncated + totalServiceTaxAmount);
+            const orderFeeTotalTruncated = roundMoney(orderFee + orderFeeTax);
 
             // Grand total (round to handle floating-point errors)
-            const totalAmount = Math.round((seatsTotalTruncated + orderFeeTotalTruncated) * 1000) / 1000;
+            const totalAmount = roundMoney(seatsTotalTruncated + orderFeeTotalTruncated);
 
             console.log('Pricing configuration seat-based price calculation:', {
                 seatTickets: metadata.seatTickets,
@@ -1021,25 +1179,25 @@ const calculateExpectedPrice = (ticket, event, quantity, metadata = {}) => {
 
                 // Per seat: basePrice + (basePrice * entertainmentTax) + serviceFee + (serviceFee * serviceTax)
                 const seatPrice = basePrice + (basePrice * entertainmentTaxRate) + serviceFee + (serviceFee * serviceTaxRate);
-                const seatPriceTruncated = Math.round(seatPrice * 1000) / 1000;
+                const seatPriceTruncated = roundMoney(seatPrice);
                 seatsTotal += seatPriceTruncated;
 
                 // Order fee (take from first seat with order fee)
                 if (orderFee === 0) {
                     orderFee = parseFloat(seatTicketData.orderFee) || 0;
                     // Truncate order fee tax to 3 decimals
-                    orderFeeTax = Math.round((orderFee * serviceTaxRate) * 1000) / 1000; // Service tax on order fee
+                    orderFeeTax = roundMoney(orderFee * serviceTaxRate); // Service tax on order fee
                 }
             });
 
             // Use round (not floor) to handle floating-point representation errors when summing
-            const seatsTotalTruncated = Math.round(seatsTotal * 1000) / 1000;
-            const orderFeeTaxTruncated = Math.round(orderFeeTax * 1000) / 1000;
+            const seatsTotalTruncated = roundMoney(seatsTotal);
+            const orderFeeTaxTruncated = roundMoney(orderFeeTax);
             // Use round (not floor) to handle floating-point representation errors
-            const orderFeeTotalTruncated = Math.round((orderFee + orderFeeTaxTruncated) * 1000) / 1000;
+            const orderFeeTotalTruncated = roundMoney(orderFee + orderFeeTaxTruncated);
 
             // Grand total (round to handle floating-point errors)
-            const totalAmount = Math.round((seatsTotalTruncated + orderFeeTotalTruncated) * 1000) / 1000;
+            const totalAmount = roundMoney(seatsTotalTruncated + orderFeeTotalTruncated);
 
             console.log('Ticket info seat-based price calculation (individual tickets):', {
                 seatTickets: metadata.seatTickets,
@@ -1063,22 +1221,22 @@ const calculateExpectedPrice = (ticket, event, quantity, metadata = {}) => {
         // Fallback: For seat-based purchases with single ticket type, use the new pricing model
         // Per ticket calculation: basePrice + (basePrice * entertainmentTax%) + serviceFee + (serviceFee * serviceTax%)
         // Truncate each intermediate calculation to 3 decimals
-        const entertainmentTaxAmount = Math.round((ticketPrice * (entertainmentTax / 100)) * 1000) / 1000;
-        const serviceTaxAmount = Math.round((serviceFee * (serviceTax / 100)) * 1000) / 1000;
-        const perTicketPrice = Math.round((ticketPrice + entertainmentTaxAmount + serviceFee + serviceTaxAmount) * 1000) / 1000;
+        const entertainmentTaxAmount = roundMoney(ticketPrice * (entertainmentTax / 100));
+        const serviceTaxAmount = roundMoney(serviceFee * (serviceTax / 100));
+        const perTicketPrice = roundMoney(ticketPrice + entertainmentTaxAmount + serviceFee + serviceTaxAmount);
 
         // Total for all tickets (truncate each calculation to avoid rounding errors)
         const perTicketPriceTruncated = perTicketPrice; // Already truncated above
         const ticketsTotal = perTicketPriceTruncated * qty;
         // Use round (not floor) to handle floating-point representation errors
-        const ticketsTotalRounded = Math.round(ticketsTotal * 1000) / 1000;
+        const ticketsTotalRounded = roundMoney(ticketsTotal);
 
         // Order fee (once per transaction) + service tax on order fee
-        const orderFeeTax = Math.round((orderFee * (serviceTax / 100)) * 1000) / 1000;
-        const orderFeeTotalRounded = Math.round((orderFee + orderFeeTax) * 1000) / 1000;
+        const orderFeeTax = roundMoney(orderFee * (serviceTax / 100));
+        const orderFeeTotalRounded = roundMoney(orderFee + orderFeeTax);
 
         // Grand total (round to handle floating-point errors)
-        const totalAmount = Math.round((ticketsTotalRounded + orderFeeTotalRounded) * 1000) / 1000;
+        const totalAmount = roundMoney(ticketsTotalRounded + orderFeeTotalRounded);
 
         console.log('Seat-based price calculation (single ticket type):', {
             ticketPrice,
@@ -1105,64 +1263,41 @@ const calculateExpectedPrice = (ticket, event, quantity, metadata = {}) => {
             totalAmount: totalAmount
         };
     } else {
-        // Legacy calculation for non-seat purchases (backward compatibility)
-        // Calculate per unit subtotal (price + service fee)
-        const perUnitSubtotal = ticketPrice + serviceFee;
+        const pricing = computeTicketLinePricing({
+            basePrice: ticketPrice,
+            serviceFee,
+            vatRatePercent: vatRate,
+            serviceTaxRatePercent: serviceTax,
+            orderFee,
+            quantity: qty
+        });
 
-        // Calculate VAT amount per unit (VAT is only on base price, not service fee)
-        const perUnitVat = ticketPrice * (vatRate / 100);
-
-        // Calculate service tax on service fee (per unit)
-        const perUnitServiceTax = (serviceFee > 0 && serviceTax > 0)
-            ? serviceFee * (serviceTax / 100)
-            : 0;
-
-        // Calculate total per unit
-        const perUnitTotal = perUnitSubtotal + perUnitVat + perUnitServiceTax;
-
-        // Calculate service tax on order fee (per transaction, not per unit)
-        const orderFeeServiceTax = (orderFee > 0 && serviceTax > 0)
-            ? orderFee * (serviceTax / 100)
-            : 0;
-
-        // Calculate total for all units + order fee + service tax on order fee
-        // Order fee is per transaction, not per unit
-        const totalAmount = (perUnitTotal * qty) + orderFee + orderFeeServiceTax;
-
-        console.log('Legacy price calculation:', {
+        console.log('Ticket line price calculation:', {
             ticketPrice,
             serviceFee,
             vatRate,
             serviceTax,
             orderFee,
-            perUnitSubtotal,
-            perUnitVat,
-            perUnitServiceTax,
-            perUnitTotal,
             qty,
-            orderFee,
-            orderFeeServiceTax,
-            totalAmount
+            pricing
         });
 
         return {
-            perUnitSubtotal,
-            perUnitVat,
-            perUnitTotal,
-            totalAmount: Math.round(totalAmount * 1000) / 1000 // Round to handle floating-point errors
+            perUnitSubtotal: pricing.perUnitSubtotal,
+            perUnitVat: pricing.perUnitVat,
+            perUnitTotal: pricing.perUnitTotal,
+            totalAmount: pricing.total
         };
     }
 };
 
-const validatePriceCalculation = (clientAmount, expectedPrice, tolerance = 0.02) => {
-    // Truncate both values to 3 decimal places for comparison (no rounding)
-    const clientAmountTruncated = Math.round(clientAmount * 1000) / 1000;
-    const expectedAmountTruncated = Math.round(expectedPrice.totalAmount * 1000) / 1000;
+const validatePriceCalculation = (clientAmount, expectedPrice, tolerance = 0.01) => {
+    const clientAmountRounded = roundMoney(clientAmount);
+    const expectedAmountRounded = roundMoney(expectedPrice.totalAmount);
 
-    // For seat-based purchases, allow slightly more tolerance due to multiple ticket types
-    const difference = Math.abs(clientAmountTruncated - expectedAmountTruncated);
+    const difference = Math.abs(clientAmountRounded - expectedAmountRounded);
     if (difference > tolerance) {
-        throw new Error(`Price calculation mismatch. Expected: ${expectedAmountTruncated}, Received: ${clientAmountTruncated}`);
+        throw new Error(`Price calculation mismatch. Expected: ${expectedAmountRounded}, Received: ${clientAmountRounded}`);
     }
 };
 
@@ -1173,9 +1308,10 @@ const validatePriceCalculation = (clientAmount, expectedPrice, tolerance = 0.02)
  * @param {string} currency - Currency code (e.g., 'eur', 'dkk', 'usd')
  * @param {string} country - Country name or code
  * @param {number} platformFee - Platform fee in cents
+ * @param {string|null} [marketCountryCode] — merged settings scope (default + optional market row)
  * @returns {Promise<number>} Processing fee in cents
  */
-const calculateStripeProcessingFee = async (amount, currency, country, platformFee = 30) => {
+const calculateStripeProcessingFee = async (amount, currency, country, platformFee = 30, marketCountryCode = null) => {
     const currencyLower = currency.toLowerCase();
     const countryLower = country?.toLowerCase() || '';
     // Default fee structure (fallback if not in database)
@@ -1188,13 +1324,8 @@ const calculateStripeProcessingFee = async (amount, currency, country, platformF
     };
 
     try {
-        // Fetch Stripe fees from Settings - check cache first
-        let settings = await commonUtil.getCacheByKey(redisClient, SETTINGS_CACHE_KEY)
-        if (!settings || settings instanceof Error || settings === null) {
-            settings = await Setting.getSetting()
-        }
-        console.log('settings', settings);
-        const stripeFeesConfig = settings?.[0]?.otherInfo?.stripeFees;
+        const { merged } = await resolveMergedPlatformSettings(marketCountryCode);
+        const stripeFeesConfig = merged?.otherInfo?.stripeFees;
 
         if (stripeFeesConfig && typeof stripeFeesConfig === 'object') {
             // Find matching country in config
@@ -1225,7 +1356,6 @@ const calculateStripeProcessingFee = async (amount, currency, country, platformF
             const percentageFee = Math.ceil(amount * (feeStructure.percentage || 0));
             const fixedFee = feeStructure.fixed || 0;
             const totalFee = percentageFee + fixedFee + platformFee; // Add 10 cents to the stripe processing fee to cover the application fee
-            console.log('totalFee', totalFee);
             return Math.max(platformFee, totalFee); // Minimum 5 cents
         }
     } catch (err) {
@@ -1236,7 +1366,6 @@ const calculateStripeProcessingFee = async (amount, currency, country, platformF
     const feeStructure = defaultFees.default;
     const percentageFee = Math.ceil(amount * feeStructure.percentage);
     const totalFee = percentageFee + feeStructure.fixed + platformFee;
-    console.log('totalFee =============================================>', totalFee);
     return Math.max(5, totalFee); // Minimum 5 cents
 };
 
@@ -1766,11 +1895,11 @@ export const createPaymentIntent = async (req, res, next) => {
             timestamp: new Date().toISOString()
         });
         console.log('error', error.message);
-        // Don't expose internal error details
-        const safeErrorMessage =  error.message
+        const safeErrorMessage = formatInventoryErrorMessage(error);
 
         res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
-            error: error.message
+            error: safeErrorMessage,
+            code: error.code || undefined
         });
     }
 }
@@ -2064,7 +2193,7 @@ const _createPaytrailPaymentInternal = async (req, res, next, { redirectSuccessU
     } catch (error) {
         console.error('Error creating Paytrail payment:', error);
         res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
-            error: error.message
+            error: formatInventoryErrorMessage(error)
         });
     }
 }
@@ -3236,8 +3365,9 @@ export const handlePaymentSuccess = async (req, res, next) => {
         const ticketInfo = {
             eventName: sanitizedMetadata.eventName,
             ticketName: sanitizedMetadata.ticketName,
-            quantity: sanitizedMetadata.quantity,
-            price: paymentIntent.amount / 100, // Convert from cents
+            price: paymentIntent.amount / 100, // Convert from cents — authoritative paid total
+            totalAmount: paymentIntent.amount / 100,
+            totalPrice: paymentIntent.amount / 100,
             currency: paymentIntent.currency,
             purchaseDate: new Date().toISOString(),
             paymentIntentId: paymentIntentId,
@@ -3271,40 +3401,6 @@ export const handlePaymentSuccess = async (req, res, next) => {
             totalServiceFee: sanitizedMetadata.totalServiceFee !== undefined ? sanitizedMetadata.totalServiceFee : null
         };
 
-        // Optional recurring/season support:
-        // If the selected ticket type config includes `scanCount`, override `ticketInfo.quantity`
-        // (this becomes the EMS scan allowance via `ticket_info.quantity`).
-        // If `scanCount` is missing/unparsable, keep existing behavior (use order quantity).
-        try {
-            const ticketTypeId = sanitizedMetadata.ticketId;
-            if (ticketTypeId) {
-                const ticketTypeConfig = Array.isArray(event?.ticketInfo)
-                    ? event.ticketInfo.find(t => String(t?._id ?? t?.id ?? '') === String(ticketTypeId))
-                    : null;
-
-                const scanCountRaw = ticketTypeConfig?.scanCount ?? ticketTypeConfig?.scan_count;
-                const scanCount = scanCountRaw != null ? parseInt(scanCountRaw, 10) : null;
-
-                if (scanCount != null && !Number.isNaN(scanCount) && scanCount > 0) {
-                    const quantityNum = parseInt(sanitizedMetadata.quantity, 10);
-                    // ScanCount passes represent a single personal pass/QR.
-                    // Standard rule: enforce quantity=1 for these tickets.
-                    if (Number.isNaN(quantityNum) || quantityNum !== 1) {
-                        return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
-                            success: false,
-                            error: 'Invalid quantity for scanCount ticket (must be 1)'
-                        });
-                    }
-
-                    // No multiplication by order quantity (scanCount is per QR/ticket).
-                    ticketInfo.quantity = scanCount.toString();
-                }
-            }
-        } catch (e) {
-            // Non-fatal: if scanCount override fails, keep original ticketInfo.quantity.
-            console.warn('[handlePaymentSuccess] scanCount override failed:', e);
-        }
-
         // Add venue information if available
         if (event && event.venue) {
             ticketInfo.venue = {
@@ -3329,6 +3425,48 @@ export const handlePaymentSuccess = async (req, res, next) => {
             ticketInfo.seats = sanitizedMetadata.placeIds.map(placeId => ({
                 placeId: placeId
             }));
+        }
+
+        const ticketTypeConfig = findTicketTypeConfig(event, sanitizedMetadata.ticketId);
+        const seatCount = resolveSeatCountFromMetadata(sanitizedMetadata);
+        const scanCount = getScanCountFromTicketType(ticketTypeConfig);
+        const scanValidation = validateScanCountOrderQuantity(sanitizedMetadata.quantity, scanCount);
+        if (!scanValidation.valid) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                success: false,
+                error: scanValidation.error
+            });
+        }
+        const { ticketInfo: ticketInfoWithQty, quantities } = applyTicketQuantitiesToTicketInfo(ticketInfo, {
+            orderQuantity: sanitizedMetadata.quantity,
+            ticketTypeConfig,
+            seatCount
+        });
+        Object.assign(ticketInfo, ticketInfoWithQty);
+
+        if (sanitizedMetadata.ticketId) {
+            try {
+                validateTicketPurchaseInventory(event, ticketTypeConfig, {
+                    orderQuantity: sanitizedMetadata.quantity,
+                    seatCount,
+                    metadata: sanitizedMetadata
+                });
+            } catch (invErr) {
+                return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                    error: formatInventoryErrorMessage(invErr)
+                });
+            }
+            const inventoryDecrement = await Event.decrementTicketTypeAvailable(
+                event._id,
+                sanitizedMetadata.ticketId,
+                quantities.admissionQuantity,
+                ticketTypeConfig
+            );
+            if (!inventoryDecrement.success) {
+                return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                    error: 'Not enough tickets remaining for this purchase.'
+                });
+            }
         }
 
         // Security Layer 3.5 (continued): Atomically check and reserve paymentIntentId to prevent duplicate ticket creation
@@ -3402,6 +3540,22 @@ export const handlePaymentSuccess = async (req, res, next) => {
             throw err;
         });
 
+        if (!ticket?._id && !ticket?.id) {
+            throw new Error('Ticket creation failed');
+        }
+
+        await ticketMaster.provisionGroupChildQRCodes(
+            ticket,
+            event,
+            quantities.admissionQuantity,
+            {
+                eventId: sanitizedMetadata.eventId,
+                merchantId: sanitizedMetadata.merchantId,
+                externalMerchantId: sanitizedMetadata.externalMerchantId
+            }
+        );
+        ticket = await Ticket.getTicketById(ticket._id, false);
+
         // Consume presale token (one-time use) if present in metadata
         const stripePresaleToken = mergedMetadata.presaleToken || null;
         if (stripePresaleToken && typeof stripePresaleToken === 'string') {
@@ -3416,7 +3570,9 @@ export const handlePaymentSuccess = async (req, res, next) => {
         // Extract locale from mergedMetadata (prefer request body, fallback to Stripe metadata)
         const { normalizeLocale } = await import('../util/common.js');
         const locale = mergedMetadata.locale ? normalizeLocale(mergedMetadata.locale) : 'en-US';
-        const emailPayload = await ticketMaster.createEmailPayload(event, ticket, sanitizedMetadata.email, otp, locale);
+        const emailPayload = await ticketMaster.createEmailPayload(event, ticket, sanitizedMetadata.email, otp, locale, {
+            marketCountryCode: parseRequestMarketCountryCode(req)
+        });
         await new Promise(resolve => setTimeout(resolve, 100)); // intentional delay
         await sendMail.forward(emailPayload).then(async data => {
             // Update the ticket to mark as sent
@@ -3480,9 +3636,6 @@ export const handlePaymentSuccess = async (req, res, next) => {
             }
         }
 
-        // Update ticket availability (atomic operation)
-        //await Ticket.decrementAvailability(sanitizedMetadata.ticketId, parseInt(sanitizedMetadata.quantity));
-
         const clientId = getClientIdentifier(req);
         console.log('Payment success handled:', {
             paymentIntentId,
@@ -3525,7 +3678,8 @@ export const handlePaymentSuccess = async (req, res, next) => {
             if (event?.event_end_date) {
                 ticket.validUntil = new Date(event.event_end_date);
             }
-            await publishTicketCreationEvent(ticket, event, sanitizedMetadata, paymentIntentId);
+            const ticketForPublish = await Ticket.getTicketById(ticket._id, false);
+            await publishTicketCreationEvent(ticketForPublish || ticket, event, sanitizedMetadata, paymentIntentId);
         } catch (publishError) {
             console.error('Failed to publish ticket creation event:', publishError);
             // Don't fail the entire operation if event publishing fails
@@ -3534,6 +3688,7 @@ export const handlePaymentSuccess = async (req, res, next) => {
     } catch (error) {
         console.error('Error handling payment success:', {
             error: error.message,
+            stack: error.stack,
             clientId: getClientIdentifier(req),
             timestamp: new Date().toISOString()
         });
@@ -3580,54 +3735,30 @@ export const publishTicketCreationEvent = async (ticket, event, metadata, paymen
             }
         }
 
-        // Ensure childQRCodes are present for group/multi-ticket orders.
-        // The EMS consumer persists `ticket.ticketInfo.childQRCodes` as-is, and some flows
-        // publish the ticket-created event before ticketMaster later populates them.
-        // Deterministically generate them from ticket id + quantity when missing.
         try {
-            const ticketIdString = ticket?._id?.toString?.() || String(ticket?._id || '');
-            const ticketInfo = cleanTicket?.ticketInfo;
-            if (ticketInfo && typeof ticketInfo === 'object') {
-                const rawQty = ticketInfo.quantity ?? ticketInfo.qty ?? 1;
-                const quantity = parseInt(String(rawQty), 10);
-                const existingChildQRCodes = Array.isArray(ticketInfo.childQRCodes)
-                    ? ticketInfo.childQRCodes
-                    : [];
-
-                const enrichChild = (child, idx) => {
-                    const childIndex = Number(child?.childIndex ?? (idx + 1));
-                    const childValue = String(child?.childQrCodeValue || `${ticketIdString}#${childIndex}`);
-                    return {
-                        childIndex,
-                        childQrCodeValue: childValue,
-                        parentTicketId: ticketIdString,
-                        eventId: String(event?._id || event?.id || ''),
-                        merchantId: String(metadata?.merchantId || ''),
-                        externalMerchantId: String(metadata?.externalMerchantId || ''),
-                        active: child?.active !== false,
-                        isRead: false,
-                        createdAt: new Date().toISOString()
-                    };
-                };
-
-                const shouldPopulate =
-                    Number.isFinite(quantity) && quantity > 1 && existingChildQRCodes.length === 0 && ticketIdString;
-
-                if (shouldPopulate) {
-                    ticketInfo.childQRCodes = Array.from({ length: quantity }, (_, idx) => enrichChild({}, idx));
-
-                    // Persist to FEB so any local reads (e.g. ticket display / scanning)
-                    // don't depend on later email/ticketMaster flows to populate child QR codes.
-                    await Ticket.updateTicketById(ticket._id, { ticketInfo });
-                } else if (existingChildQRCodes.length > 0) {
-                    // Backfill required child metadata if older records only have index + QR value.
-                    ticketInfo.childQRCodes = existingChildQRCodes.map((child, idx) => enrichChild(child, idx));
-                    await Ticket.updateTicketById(ticket._id, { ticketInfo });
-                }
+            const rawQty = cleanTicket?.ticketInfo?.quantity ?? cleanTicket?.ticketInfo?.qty ?? 1;
+            const admissionQuantity = parseInt(String(rawQty), 10) || 1;
+            await ticketMaster.provisionGroupChildQRCodes(ticket, event, admissionQuantity, metadata);
+            const freshTicket = await Ticket.getTicketById(ticket._id, false);
+            if (freshTicket) {
+                cleanTicket.ticketInfo = ticketInfoToPlainObjectForPublish(freshTicket.ticketInfo);
             }
         } catch (childQrError) {
             error('Failed to populate childQRCodes in publishTicketCreationEvent:', childQrError?.message || childQrError);
         }
+
+        const ticketTypeIdForInventory =
+            cleanTicket?.ticketInfo?.ticketId ?? metadata?.ticketId ?? null;
+        const ticketTypeConfigForInventory = findTicketTypeConfig(event, ticketTypeIdForInventory);
+        const seatCountForInventory = resolveSeatCountFromPurchaseMetadata(metadata);
+        const { quantities: inventoryQuantities } = applyTicketQuantitiesToTicketInfo(
+            {},
+            {
+                orderQuantity: metadata?.quantity ?? cleanTicket?.ticketInfo?.orderQuantity ?? 1,
+                ticketTypeConfig: ticketTypeConfigForInventory,
+                seatCount: seatCountForInventory
+            }
+        );
 
         // Platform marketing consent (per-email, default opt-in for new emails)
         const ticketForId = ticket.ticketFor?._id || ticket.ticketFor;
@@ -3645,6 +3776,12 @@ export const publishTicketCreationEvent = async (ticket, event, metadata, paymen
                 externalEventId: event.externalEventId,
                 externalMerchantId: metadata.externalMerchantId,
                 merchantId: metadata.merchantId,
+                inventory: {
+                    ticketTypeId: ticketTypeIdForInventory,
+                    admissionQuantity: inventoryQuantities.admissionQuantity,
+                    orderQuantity: inventoryQuantities.orderQuantity,
+                    packSize: inventoryQuantities.packSize
+                },
                 // Optional push tokens captured during free registration.
                 androidFcmToken: metadata?.androidFcmToken ?? null,
                 iosApnsToken: metadata?.iosApnsToken ?? null,
@@ -4147,10 +4284,9 @@ export const handleFreeEventRegistration = async (req, res, next) => {
             throw new Error('Invalid email format');
         }
 
-        // Validate quantity
-        const quantityNum = parseInt(sanitizedData.quantity);
-        if (isNaN(quantityNum) || quantityNum !== 1) {
-            throw new Error('Invalid quantity (must be 1)');
+        const orderQuantityNum = parseInt(sanitizedData.quantity, 10);
+        if (isNaN(orderQuantityNum) || orderQuantityNum < 1) {
+            throw new Error('Invalid quantity (must be at least 1)');
         }
 
         // Validate ID formats
@@ -4228,7 +4364,6 @@ export const handleFreeEventRegistration = async (req, res, next) => {
         const ticketInfo = {
             eventName: sanitizedData.eventName,
             ticketName: sanitizedData.ticketName,
-            quantity: sanitizedData.quantity,
             price: ticketPrice,
             currency: 'EUR', // Default currency for free events
             purchaseDate: new Date().toISOString(),
@@ -4242,16 +4377,47 @@ export const handleFreeEventRegistration = async (req, res, next) => {
             ticketInfo.sectionSelections = sanitizedData.sectionSelections;
         }
 
-        // Optional recurring/season support for free events:
-        // If the selected ticket type config includes `scanCount`, override `ticketInfo.quantity`.
-        try {
-            const scanCountRaw = selectedTicket?.scanCount ?? selectedTicket?.scan_count;
-            const scanCount = scanCountRaw != null ? parseInt(scanCountRaw, 10) : null;
-            if (scanCount != null && !Number.isNaN(scanCount) && scanCount > 0) {
-                ticketInfo.quantity = scanCount.toString();
+        const seatCount = resolveSeatCountFromMetadata(sanitizedData);
+        const scanCount = getScanCountFromTicketType(selectedTicket);
+        const scanValidation = validateScanCountOrderQuantity(sanitizedData.quantity, scanCount);
+        if (!scanValidation.valid) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                success: false,
+                error: scanValidation.error
+            });
+        }
+        const { ticketInfo: ticketInfoWithQty, quantities } = applyTicketQuantitiesToTicketInfo(ticketInfo, {
+            orderQuantity: sanitizedData.quantity,
+            ticketTypeConfig: selectedTicket,
+            seatCount
+        });
+        Object.assign(ticketInfo, ticketInfoWithQty);
+
+        if (selectedTicket && sanitizedData.ticketId) {
+            try {
+                validateTicketPurchaseInventory(event, selectedTicket, {
+                    orderQuantity: sanitizedData.quantity,
+                    seatCount,
+                    metadata: sanitizedData
+                });
+            } catch (invErr) {
+                return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                    success: false,
+                    error: formatInventoryErrorMessage(invErr)
+                });
             }
-        } catch (e) {
-            console.warn('[handleFreeEventRegistration] scanCount override failed:', e);
+            const inventoryDecrement = await Event.decrementTicketTypeAvailable(
+                event._id,
+                sanitizedData.ticketId,
+                quantities.admissionQuantity,
+                selectedTicket
+            );
+            if (!inventoryDecrement.success) {
+                return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                    success: false,
+                    error: 'Not enough tickets remaining for this registration.'
+                });
+            }
         }
 
         // Get or create crypto hash for email (using efficient search)
@@ -4283,10 +4449,28 @@ export const handleFreeEventRegistration = async (req, res, next) => {
             throw err;
         });
 
+        if (!ticket?._id && !ticket?.id) {
+            throw new Error('Ticket creation failed');
+        }
+
+        await ticketMaster.provisionGroupChildQRCodes(
+            ticket,
+            event,
+            quantities.admissionQuantity,
+            {
+                eventId: sanitizedData.eventId,
+                merchantId: sanitizedData.merchantId,
+                externalMerchantId: sanitizedData.externalMerchantId
+            }
+        );
+        ticket = await Ticket.getTicketById(ticket._id, false);
+
         // Generate email payload and send ticket (same as handlePaymentSuccess)
         // Extract locale from request
         const locale = commonUtil.extractLocaleFromRequest(req);
-        const emailPayload = await ticketMaster.createEmailPayload(event, ticket, sanitizedData.email, otp, locale);
+        const emailPayload = await ticketMaster.createEmailPayload(event, ticket, sanitizedData.email, otp, locale, {
+            marketCountryCode: parseRequestMarketCountryCode(req)
+        });
         if (!emailPayload?.to) {
             throw new Error('Ticket email recipient is missing');
         }
@@ -4319,7 +4503,8 @@ export const handleFreeEventRegistration = async (req, res, next) => {
             if (event?.event_end_date) {
                 ticket.validUntil = new Date(event.event_end_date);
             }
-            await publishTicketCreationEvent(ticket, event, sanitizedData, null); // null for paymentIntentId since it's free
+            const ticketForPublish = await Ticket.getTicketById(ticket._id, false);
+            await publishTicketCreationEvent(ticketForPublish || ticket, event, sanitizedData, null); // null for paymentIntentId since it's free
         } catch (publishError) {
             console.error('Failed to publish ticket creation event:', publishError);
             // Don't fail the entire operation if event publishing fails

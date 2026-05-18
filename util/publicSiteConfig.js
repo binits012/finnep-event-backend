@@ -3,6 +3,8 @@
  * Stored under Setting.otherInfo.publicSiteConfig (Mongo Map / plain object).
  */
 
+import { pickDefaultPlatformDoc } from './platformSettings.js'
+
 export const DEFAULT_PUBLIC_SITE_CONFIG = {
 	version: 1,
 	primaryCanonicalBaseUrl: 'https://okazzo.eu',
@@ -18,7 +20,11 @@ export const DEFAULT_PUBLIC_SITE_CONFIG = {
 		{ hostname: 'okazzo.no', publicBaseUrl: 'https://okazzo.no', siteCluster: 'eu' },
 		{ hostname: 'www.okazzo.no', publicBaseUrl: 'https://www.okazzo.no', siteCluster: 'eu' },
 		{ hostname: 'okazzo.dk', publicBaseUrl: 'https://okazzo.dk', siteCluster: 'eu' },
-		{ hostname: 'www.okazzo.dk', publicBaseUrl: 'https://www.okazzo.dk', siteCluster: 'eu' }
+		{ hostname: 'www.okazzo.dk', publicBaseUrl: 'https://www.okazzo.dk', siteCluster: 'eu' },
+		{ hostname: 'business.okazzo.eu', publicBaseUrl: 'https://business.okazzo.eu', siteCluster: 'eu' },
+		{ hostname: 'www.business.okazzo.eu', publicBaseUrl: 'https://www.business.okazzo.eu', siteCluster: 'eu' },
+		{ hostname: 'business.okazzo.com.au', publicBaseUrl: 'https://business.okazzo.com.au', siteCluster: 'au' },
+		{ hostname: 'www.business.okazzo.com.au', publicBaseUrl: 'https://www.business.okazzo.com.au', siteCluster: 'au' }
 	],
 	hreflangAlternates: [
 		{ hreflang: 'en-US', publicBaseUrl: 'https://okazzo.com.au' },
@@ -28,7 +34,14 @@ export const DEFAULT_PUBLIC_SITE_CONFIG = {
 		{ hreflang: 'no-NO', publicBaseUrl: 'https://okazzo.no' },
 		{ hreflang: 'da-DK', publicBaseUrl: 'https://okazzo.dk' }
 	],
-	extraCorsOrigins: ['https://regional.okazzo.eu', 'https://www.regional.okazzo.eu']
+	extraCorsOrigins: [
+		'https://regional.okazzo.eu',
+		'https://www.regional.okazzo.eu',
+		'https://business.okazzo.eu',
+		'https://www.business.okazzo.eu',
+		'https://business.okazzo.com.au',
+		'https://www.business.okazzo.com.au',
+	],
 }
 
 function normalizeHostname(raw) {
@@ -206,17 +219,31 @@ export function mergePublicSiteConfigWithDefaults(raw) {
 		hreflangAlternates:
 			Array.isArray(extracted.hreflangAlternates) && extracted.hreflangAlternates.length > 0
 				? extracted.hreflangAlternates
-				: DEFAULT_PUBLIC_SITE_CONFIG.hreflangAlternates
+				: DEFAULT_PUBLIC_SITE_CONFIG.hreflangAlternates,
+		extraCorsOrigins: [
+			...new Set([
+				...(DEFAULT_PUBLIC_SITE_CONFIG.extraCorsOrigins || []),
+				...(Array.isArray(extracted.extraCorsOrigins) ? extracted.extraCorsOrigins : []),
+			]),
+		],
 	}
 	return merged
 }
 
 /**
  * Build slim API payload + derived CORS/CSP origin lists.
+ * @param {object|object[]} settingArrayOrDoc — DB row(s); default row is chosen when an array
+ * @param {object|null|undefined} mergedOtherInfo — optional merged otherInfo (market overlay) for publicSiteConfig
  */
-export function buildPublicSiteConfigPayload(settingArrayOrDoc) {
-	const doc = Array.isArray(settingArrayOrDoc) ? settingArrayOrDoc[0] : settingArrayOrDoc
-	const raw = extractPublicSiteConfigFromSettingDoc(doc)
+export function buildPublicSiteConfigPayload(settingArrayOrDoc, mergedOtherInfo = null) {
+	const firstDoc = Array.isArray(settingArrayOrDoc)
+		? pickDefaultPlatformDoc(settingArrayOrDoc) || settingArrayOrDoc[0]
+		: settingArrayOrDoc
+	const docForConfig =
+		mergedOtherInfo != null && typeof mergedOtherInfo === 'object'
+			? { otherInfo: mergedOtherInfo }
+			: firstDoc
+	const raw = extractPublicSiteConfigFromSettingDoc(docForConfig)
 	const effective = mergePublicSiteConfigWithDefaults(raw)
 	const v = validatePublicSiteConfig(effective)
 	const config = v.ok ? v.normalized : DEFAULT_PUBLIC_SITE_CONFIG
@@ -235,10 +262,10 @@ export function buildPublicSiteConfigPayload(settingArrayOrDoc) {
 	}
 
 	const updatedAt =
-		doc && doc.updatedAt instanceof Date
-			? doc.updatedAt.toISOString()
-			: doc && doc.createdAt instanceof Date
-				? doc.createdAt.toISOString()
+		firstDoc && firstDoc.updatedAt instanceof Date
+			? firstDoc.updatedAt.toISOString()
+			: firstDoc && firstDoc.createdAt instanceof Date
+				? firstDoc.createdAt.toISOString()
 				: new Date().toISOString()
 
 	return {

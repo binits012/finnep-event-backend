@@ -17,6 +17,13 @@ const generateCode = () => {
     return Math.floor(10000000 + Math.random() * 90000000).toString();
 }
 
+const toDisplayFinalAmount = (value) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return value;
+    const roundedThree = Math.round(parsed * 1000) / 1000;
+    return Math.ceil((roundedThree * 100) - Number.EPSILON) / 100;
+}
+
 export const checkEmail = async (req, res, next) => {
     try {
         const { email } = req.body;
@@ -318,13 +325,13 @@ export const getTickets = async (req, res, next) => {
                                 ticketInfoPlain.entertainmentTax ??
                                 ticketInfoPlain.tax ??
                                 null,
-                            totalAmount: ticketInfoPlain.totalAmount ??
+                            totalAmount: toDisplayFinalAmount(ticketInfoPlain.totalAmount ??
                                 ticketInfoPlain.total ??
                                 ticketInfoPlain.amount ??
                                 ticketInfoPlain.totalPrice ??
                                 ticketInfoPlain.totalPaid ??
                                 ticketInfoPlain.grandTotal ??
-                                (ticketInfoPlain.price ?? ticketInfoPlain.basePrice ?? null),
+                                (ticketInfoPlain.price ?? ticketInfoPlain.basePrice ?? null)),
                             pricingModel: ticketInfoPlain.pricingModel ??
                                 t.event?.venue?.pricingModel ??
                                 null,
@@ -532,14 +539,14 @@ export const getTicketById = async (req, res, next) => {
                         ticketInfoPlain.totalServiceFee ??
                         ticketInfoPlain.ticketServiceFee ??
                         null,
-                    totalAmount: ticketInfoPlain.totalAmount ??
+                    totalAmount: toDisplayFinalAmount(ticketInfoPlain.totalAmount ??
                         ticketInfoPlain.total ??
                         ticketInfoPlain.amount ??
                         ticketInfoPlain.totalPrice ??
                         ticketInfoPlain.totalPaid ??
                         ticketInfoPlain.grandTotal ??
                         // Last resort: if we don't have the grand total, show the best-available price.
-                        (ticketInfoPlain.price ?? ticketInfoPlain.basePrice ?? null),
+                        (ticketInfoPlain.price ?? ticketInfoPlain.basePrice ?? null)),
                     currency: ticketInfoPlain.currency || paymentCurrency,
                     purchaseDate: derivedPurchaseDate,
                     childQRCodes: Array.isArray(ticketInfoPlain.childQRCodes) ? ticketInfoPlain.childQRCodes : [],
