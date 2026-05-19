@@ -149,10 +149,13 @@ export async function createTicketFromPaytrailPayment(paymentData, transactionId
     // Load event for venue info (same structure as Stripe ticketInfo)
     const event = await Event.getEventById(paymentData.eventId);
 
+    const paidAmount = paymentData.amount / 100;
     const ticketInfoDraft = {
         eventName: paymentData.eventName,
         ticketName: paymentData.ticketName,
-        price: paymentData.amount / 100,
+        price: paidAmount,
+        totalPrice: paidAmount,
+        totalAmount: paidAmount,
         currency: 'EUR',
         purchaseDate: new Date().toISOString(),
         paytrailTransactionId: transactionId,
