@@ -338,6 +338,9 @@ export const getTickets = async (req, res, next) => {
                             currency: ticketInfoPlain.currency || paymentCurrency,
                             purchaseDate: derivedPurchaseDate,
                             childQRCodes: Array.isArray(ticketInfoPlain.childQRCodes) ? ticketInfoPlain.childQRCodes : [],
+                            couponCode: ticketInfoPlain.couponCode ?? null,
+                            couponDiscountAmount: ticketInfoPlain.couponDiscountAmount ?? null,
+                            catalogTotalBasePrice: ticketInfoPlain.catalogTotalBasePrice ?? null,
                             ...(seatTickets ? { seatTickets } : {})
                             // Exclude sensitive fields: paymentIntentId, email, merchantId, eventId, ticketId, eventName
                         } : null;
@@ -550,6 +553,9 @@ export const getTicketById = async (req, res, next) => {
                     currency: ticketInfoPlain.currency || paymentCurrency,
                     purchaseDate: derivedPurchaseDate,
                     childQRCodes: Array.isArray(ticketInfoPlain.childQRCodes) ? ticketInfoPlain.childQRCodes : [],
+                    couponCode: ticketInfoPlain.couponCode ?? null,
+                    couponDiscountAmount: ticketInfoPlain.couponDiscountAmount ?? null,
+                    catalogTotalBasePrice: ticketInfoPlain.catalogTotalBasePrice ?? null,
                     ...(seatTickets ? { seatTickets } : {})
                     // Exclude sensitive fields: paymentIntentId, email, merchantId, eventId, ticketId, eventName
                 } : null;

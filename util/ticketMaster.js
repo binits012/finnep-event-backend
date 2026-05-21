@@ -2,6 +2,7 @@ import { generateICS, generateQRCode, loadEmailTemplate } from './common.js'
 import { resolvePlatformBrandingAsync } from './platformSettings.js'
 import * as Ticket from '../model/ticket.js'
 import {error} from '../model/logger.js'
+import { forward } from './sendMail.js'
 import dotenv from 'dotenv'
 import moment from 'moment-timezone'
 dotenv.config()
@@ -10,6 +11,7 @@ import { fileURLToPath } from 'url'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 import { roundMoney } from './money.js';
+import { getTicketDiscountDisplay } from './ticketDiscountDisplay.js';
 
 /**
  * Format currency amount (2 decimal places, rounded after each value).
@@ -203,20 +205,68 @@ export const provisionGroupChildQRCodes = async (ticket, event, admissionQuantit
     return { childQRCodes, ticketInfo: updatedTicketInfo };
 };
 
+const qrCodeToDataUrl = (qrCode) => {
+    if (!qrCode) return null;
+    if (Buffer.isBuffer(qrCode)) {
+        const asString = qrCode.toString('utf8');
+        if (asString.startsWith('data:image/')) return asString;
+        return `data:image/png;base64,${qrCode.toString('base64')}`;
+    }
+    if (typeof qrCode === 'string') {
+        if (qrCode.startsWith('data:image/')) return qrCode;
+        return `data:image/png;base64,${qrCode}`;
+    }
+    return null;
+};
+
+/**
+ * Generate and persist master QR + ICS on the ticket (idempotent).
+ * Must run at fulfillment time so clients can download/display QR without waiting for email.
+ */
+export const ensureTicketQrAndIcs = async (event, ticket) => {
+    const ticketId = ticket?.id || ticket?._id;
+    if (!ticketId || !event) {
+        throw new Error('ensureTicketQrAndIcs: missing ticket or event');
+    }
+
+    const hasQr = !!(qrCodeToDataUrl(ticket.qrCode));
+    const hasIcs = ticket.ics && (
+        Buffer.isBuffer(ticket.ics)
+            ? ticket.ics.length > 0
+            : typeof ticket.ics === 'string' && ticket.ics.length > 0
+    );
+
+    if (hasQr && hasIcs) {
+        return ticket;
+    }
+
+    const updateObj = {};
+    if (!hasIcs) {
+        updateObj.ics = await generateICS(event, ticketId);
+    }
+    if (!hasQr) {
+        updateObj.qrCode = await generateQRCode(String(ticketId));
+    }
+
+    const updated = await Ticket.updateTicketById(ticketId, updateObj);
+    return updated || ticket;
+};
+
 /**
  * @param {object} options
  * @param {string|null} [options.marketCountryCode] — ISO alpha-2; omit or null = platform default (e.g. webhooks)
  */
 export const createEmailPayload = async (event, ticket, ticketFor, otp, locale = 'en-US', options = {}) => {
     try {
+        ticket = await ensureTicketQrAndIcs(event, ticket);
         const ticketId = ticket.id || ticket._id;
-        const icsData = await generateICS(event, ticketId);
-        const qrData = await generateQRCode(ticketId);
-        const updateObj = {
-            qrCode: qrData,
-            ics: icsData
-        };
-        await Ticket.updateTicketById(ticketId, updateObj);
+        const qrData = qrCodeToDataUrl(ticket.qrCode);
+        if (!qrData) {
+            throw new Error(`Missing QR code for ticket ${ticketId}`);
+        }
+        const icsData = ticket.ics
+            ? (Buffer.isBuffer(ticket.ics) ? ticket.ics.toString('utf8') : String(ticket.ics))
+            : await generateICS(event, ticketId);
 
         // Extract event data
         const eventDate = event.eventDate;
@@ -580,6 +630,11 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
         const publicTransportLink = event.transportLink || buildVenueMapLink(venue);
         const publicTransportInfo = event.transportLink ? 'Click the link above for directions' : (venue.transportInfo || 'Please check the venue website for transportation options');
 
+        const discountDisplay = getTicketDiscountDisplay(ticketInfoData);
+        const displayBasePriceTotal = discountDisplay
+            ? discountDisplay.catalogTotalBasePrice
+            : totalBasePrice;
+
         // Build template variables
         // Note: Template shows "(x3)" so we pass TOTAL values (per-unit * quantity)
         const templateVariables = {
@@ -608,9 +663,14 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
             // Total values for display with "(x3)" in template
             // basePrice and serviceFee are per-unit, so we multiply by quantity
             // serviceTaxAmount and vatAmount from DB are already totals (from frontend metadata)
-            basePrice: formatMoney(totalBasePrice),
-            ticketPrice: formatMoney(totalBasePrice), // Keep for backward compatibility
-            subtotal: formatMoney(totalBasePrice + totalEntertainmentTaxAmount),
+            basePrice: formatMoney(displayBasePriceTotal),
+            ticketPrice: formatMoney(displayBasePriceTotal), // Keep for backward compatibility
+            subtotal: formatMoney(displayBasePriceTotal + totalEntertainmentTaxAmount),
+            couponCode: discountDisplay?.couponCode || null,
+            couponDiscountAmount: discountDisplay
+                ? formatMoney(discountDisplay.couponDiscountAmount)
+                : null,
+            hasDiscount: !!discountDisplay,
             serviceFee: formatMoney(totalServiceFee),
             serviceTaxRate: serviceTax > 0 ? serviceTax.toString() : null,
             // serviceTaxAmount from DB is already total (perUnitServiceTax * quantity from frontend)
@@ -737,4 +797,33 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
         error('error creating ticket email payload %s', err?.stack || err?.message || String(err));
         throw err;
     }
-};
+}
+
+/**
+ * Send ticket email without blocking the caller (e.g. checkout response).
+ * Failed sends are persisted by sendMail.forward for scheduler retry.
+ */
+export const sendTicketEmailInBackground = (event, ticket, ticketForEmail, otp, locale = 'en-US', options = {}) => {
+    const ticketId = ticket?._id || ticket?.id;
+    void (async () => {
+        try {
+            if (!process.env.SEND_MAIL) return;
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            const emailPayload = await createEmailPayload(event, ticket, ticketForEmail, otp, locale, options);
+            if (!emailPayload?.to) {
+                error('[sendTicketEmailInBackground] missing recipient for ticket %s', ticketId);
+                return;
+            }
+            await forward(emailPayload);
+            if (ticketId) {
+                await Ticket.updateTicketById(ticketId, { isSend: true });
+            }
+        } catch (err) {
+            error(
+                '[sendTicketEmailInBackground] failed for ticket %s: %s',
+                ticketId,
+                err?.stack || err?.message || String(err)
+            );
+        }
+    })();
+};;

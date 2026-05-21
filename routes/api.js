@@ -8,6 +8,7 @@ import * as express from 'express'
 const router = express.Router()
 import * as api  from '../controllers/api.controller.js'
 import * as report from '../controllers/report.controller.js'
+import * as audit from '../controllers/audit.controller.js'
 import * as monitor from '../controllers/monitor.controller.js'
 import * as dashboard from '../controllers/dashboard.controller.js'
 import { authenticate, requireAdmin } from '../middleware/auth.middleware.js'
@@ -69,6 +70,7 @@ router.route('/queue/config/metrics')
     .get(api.getSystemMetrics)
 
 router.get('/admin/monitor-kpis', authenticate, requireAdmin, monitor.getMonitorKpis)
+router.get('/admin/audit', authenticate, requireAdmin, audit.getAuditLogs)
 
 router.route('/event')
     .post(api.createEvent)

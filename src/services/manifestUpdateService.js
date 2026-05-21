@@ -9,6 +9,66 @@ import { error, info } from '../../model/logger.js';
  */
 export class ManifestUpdateService {
 	/**
+	 * Atomically mark seats as sold. Fails if any seat is already sold.
+	 * @throws {Error} code SEATS_ALREADY_SOLD when conflict
+	 */
+	async assertAndMarkSeatsAsSold(manifestId, placeIds) {
+		if (!manifestId || !placeIds || !Array.isArray(placeIds) || placeIds.length === 0) {
+			throw new Error('Invalid parameters: manifestId and placeIds array are required');
+		}
+
+		const manifest = await EventManifest.findById(manifestId);
+		if (!manifest) {
+			throw new Error(`Event manifest not found: ${manifestId}`);
+		}
+
+		const validPlaceIds = [];
+		for (const placeId of placeIds) {
+			if (!manifest.placeIds || !manifest.placeIds.includes(placeId)) {
+				error(`PlaceId ${placeId} not found in event manifest ${manifestId}`);
+				continue;
+			}
+			validPlaceIds.push(placeId);
+		}
+
+		if (validPlaceIds.length === 0) {
+			const err = new Error('No valid placeIds to mark as sold');
+			err.code = 'INVALID_PLACE_IDS';
+			throw err;
+		}
+
+		const soldConflictFilter = {
+			_id: manifestId,
+			$or: [
+				{ 'availability.sold': { $exists: false } },
+				{ 'availability.sold': { $size: 0 } },
+				{ 'availability.sold': { $not: { $elemMatch: { $in: validPlaceIds } } } },
+			],
+		};
+
+		const updatedManifest = await EventManifest.findOneAndUpdate(
+			soldConflictFilter,
+			{
+				$addToSet: { 'availability.sold': { $each: validPlaceIds } },
+				$set: { updatedAt: new Date() },
+			},
+			{ new: true }
+		);
+
+		if (!updatedManifest) {
+			const err = new Error('One or more seats are already sold');
+			err.code = 'SEATS_ALREADY_SOLD';
+			throw err;
+		}
+
+		info(
+			`Atomically marked ${validPlaceIds.length} seat(s) as sold in event manifest ${manifestId}. Total sold: ${updatedManifest.availability?.sold?.length || 0}`
+		);
+
+		return updatedManifest;
+	}
+
+	/**
 	 * Mark seats as sold in the manifest
 	 * @param {string} manifestId - MongoDB Manifest ID
 	 * @param {string[]} placeIds - Array of place IDs to mark as sold

@@ -3,7 +3,7 @@ import { error, info } from '../../model/logger.js';
 
 /**
  * Seat Reservation Service
- * Manages temporary seat reservations using Redis (7 min TTL)
+ * Manages temporary seat reservations using Redis (10 min TTL)
  */
 export class SeatReservationService {
 	/**
@@ -120,6 +120,38 @@ export class SeatReservationService {
 			return await seatReservationClient.deleteReservations(eventId, placeIds, email);
 		} catch (err) {
 			error(`Error releasing reservations for event ${eventId}:`, err);
+			throw err;
+		}
+	}
+
+	/**
+	 * Release all seat reservations owned by a checkout session + email.
+	 */
+	async releaseReservationsBySession(eventId, sessionId, email = null) {
+		try {
+			if (!eventId || !sessionId) return { released: 0, placeIds: [] };
+
+			const normalizedEmail = email ? String(email).trim().toLowerCase() : null;
+			const reservedMap = await this.getReservedSeats(eventId);
+			const placeIds = [];
+
+			for (const [placeId, holderSessionId] of reservedMap.entries()) {
+				if (holderSessionId !== sessionId) continue;
+				if (normalizedEmail) {
+					const ownerSessionId = await this.getReservation(eventId, placeId, normalizedEmail);
+					if (!ownerSessionId) continue;
+				}
+				placeIds.push(placeId);
+			}
+
+			if (!placeIds.length) {
+				return { released: 0, placeIds: [] };
+			}
+
+			const released = await this.releaseReservations(eventId, placeIds, normalizedEmail);
+			return { released, placeIds };
+		} catch (err) {
+			error(`Error releasing reservations by session for event ${eventId}:`, err);
 			throw err;
 		}
 	}

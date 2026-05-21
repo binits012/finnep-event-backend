@@ -7,6 +7,8 @@ import { handleSeatedEventTicketCreated } from '../handlers/seatedEventTicketHan
 import { handleSurveyMessage } from '../handlers/surveyHandler.js';
 import { handlePresaleSendEmails } from '../handlers/presaleSendEmailsHandler.js';
 import { handleWaitlistStatusUpdated } from '../handlers/waitlistStatusHandler.js';
+import { handleDiscountCodesUpdated } from '../handlers/discountCodesSyncHandler.js';
+import { handleCustomerMessage } from '../handlers/customerHandler.js';
 import { info, error, warn } from '../../model/logger.js';
 
 // Track if queues have been set up to prevent duplicate setup
@@ -116,6 +118,23 @@ const setupQueues = async (force = false) => {
             await handleSurveyMessage(message);
         }, surveyEventsQueueOptions);
 
+        const customerEventsQueueOptions = {
+            prefetch: QUEUE_PREFETCH,
+            deadLetterExchange: 'event-merchant-dlx',
+            deadLetterRoutingKey: 'dlq.customer-events-queue.retry-1',
+            // EMS publishes customer.created to RABBITMQ_EXCHANGE; bind here so FEB receives messages even if EMS never declared this queue on the broker.
+            topicExchangeBindings: [
+                {
+                    exchange: process.env.RABBITMQ_EXCHANGE || 'event-merchant-exchange',
+                    routingKey: 'customer.created'
+                }
+            ]
+        };
+        info('Setting up customer-events-queue with options:', customerEventsQueueOptions);
+        await messageConsumer.consumeQueue('customer-events-queue', async (message) => {
+            await handleCustomerMessage(message);
+        }, customerEventsQueueOptions);
+
         const presaleSendEmailsQueueOptions = {
             prefetch: QUEUE_PREFETCH,
             deadLetterExchange: 'event-merchant-dlx',
@@ -135,6 +154,16 @@ const setupQueues = async (force = false) => {
         await messageConsumer.consumeQueue('waitlist-status-sync-queue', async (message) => {
             await handleWaitlistStatusUpdated(message);
         }, waitlistStatusSyncQueueOptions);
+
+        const discountCodesSyncQueueOptions = {
+            prefetch: QUEUE_PREFETCH,
+            deadLetterExchange: 'event-merchant-dlx',
+            deadLetterRoutingKey: 'dlq.discount-codes-sync-queue.retry-1'
+        };
+        info('Setting up discount-codes-sync-queue with options:', discountCodesSyncQueueOptions);
+        await messageConsumer.consumeQueue('discount-codes-sync-queue', async (message) => {
+            await handleDiscountCodesUpdated(message);
+        }, discountCodesSyncQueueOptions);
 
         isSetupComplete = true;
         info('All queues set up and consuming messages');

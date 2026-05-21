@@ -8,6 +8,11 @@ import { error, info } from '../../model/logger.js';
  * TTL: 600 seconds (10 minutes)
  */
 class SeatReservationClient {
+	_normalizeEmail(email) {
+		if (!email) return null;
+		return String(email).trim().toLowerCase();
+	}
+
 	/**
 	 * Encode email to base64 for use in Redis key
 	 * @param {string} email - Email address
@@ -29,6 +34,7 @@ class SeatReservationClient {
 	async setReservation(eventId, placeId, sessionId, email) {
 		try {
 			const ttl = 600; // 10 minutes in seconds
+			const normalizedEmail = this._normalizeEmail(email);
 
 			// Use a unified availability key to prevent multiple reservations of the same seat
 			const availabilityKey = `seat_availability:${eventId}:${placeId}`;
@@ -52,13 +58,13 @@ class SeatReservationClient {
 					// Check if same user (email takes precedence over sessionId)
 					let isSameUser = false;
 
-					if (email && details.email) {
+					if (normalizedEmail && details.email) {
 						// Both have email - compare emails
-						isSameUser = details.email === email;
-					} else if (email && !details.email) {
+						isSameUser = this._normalizeEmail(details.email) === normalizedEmail;
+					} else if (normalizedEmail && !details.email) {
 						// Current request has email but stored reservation doesn't - can't be same user
 						isSameUser = false;
-					} else if (!email && details.email) {
+					} else if (!normalizedEmail && details.email) {
 						// Current request has no email but stored has email - can't be same user
 						isSameUser = false;
 					} else {
@@ -70,7 +76,7 @@ class SeatReservationClient {
 						// Same user - update reservation details and extend TTL
 						const updatedDetails = JSON.stringify({
 							sessionId,
-							email: email || details.email || null,
+							email: normalizedEmail || this._normalizeEmail(details.email) || null,
 							timestamp: Date.now()
 						});
 
@@ -80,13 +86,13 @@ class SeatReservationClient {
 
 						const results = await multi.exec();
 						if (results && results[0] === 'OK') {
-							info(`Seat reservation extended: ${availabilityKey} for user ${email || sessionId}`);
+							info(`Seat reservation extended: ${availabilityKey} for user ${normalizedEmail || sessionId}`);
 							return true;
 						}
 						return false;
 					} else {
 						// Different user - seat is taken
-						info(`Seat ${placeId} already reserved by different user (current: ${email || sessionId}, existing: ${details.email || details.sessionId})`);
+						info(`Seat ${placeId} already reserved by different user (current: ${normalizedEmail || sessionId}, existing: ${details.email || details.sessionId})`);
 						return false;
 					}
 				} else {
@@ -98,19 +104,19 @@ class SeatReservationClient {
 				// Seat is available - create reservation
 				const reservationDetails = JSON.stringify({
 					sessionId,
-					email: email || null,
+					email: normalizedEmail || null,
 					timestamp: Date.now()
 				});
 
 				// Use MULTI to ensure atomicity
 				const multi = redisClient.multi();
-				multi.set(availabilityKey, email || sessionId, { NX: true, EX: ttl });
+				multi.set(availabilityKey, normalizedEmail || sessionId, { NX: true, EX: ttl });
 				multi.set(detailsKey, reservationDetails, { EX: ttl });
 
 				const results = await multi.exec();
 
 				if (results && results[0] === 'OK' && results[1] === 'OK') {
-					info(`Seat reservation created: ${availabilityKey} for user ${email || sessionId}`);
+					info(`Seat reservation created: ${availabilityKey} for user ${normalizedEmail || sessionId}`);
 					return true;
 				} else {
 					info(`Failed to reserve seat ${placeId} - race condition or already reserved`);
@@ -132,6 +138,7 @@ class SeatReservationClient {
 	 */
 	async getReservation(eventId, placeId, email = null) {
 		try {
+			const normalizedEmail = this._normalizeEmail(email);
 			const availabilityKey = `seat_availability:${eventId}:${placeId}`;
 
 			// Check if seat is reserved
@@ -150,9 +157,9 @@ class SeatReservationClient {
 				try {
 					const details = JSON.parse(reservationDetails);
 
-					if (email) {
+					if (normalizedEmail) {
 						// Check if reserved by specific email
-						return details.email === email ? details.sessionId : null;
+						return this._normalizeEmail(details.email) === normalizedEmail ? details.sessionId : null;
 					} else {
 						// Return session ID of whoever reserved it
 						return details.sessionId;
@@ -181,6 +188,7 @@ class SeatReservationClient {
 	 */
 	async deleteReservation(eventId, placeId, email = null) {
 		try {
+			const normalizedEmail = this._normalizeEmail(email);
 			const availabilityKey = `seat_availability:${eventId}:${placeId}`;
 			const detailsKey = `seat_reservation_details:${eventId}:${placeId}`;
 
@@ -192,7 +200,7 @@ class SeatReservationClient {
 					const details = JSON.parse(reservationDetails);
 
 					// Check if we should delete this reservation
-					const shouldDelete = !email || details.email === email;
+					const shouldDelete = !normalizedEmail || this._normalizeEmail(details.email) === normalizedEmail;
 
 					if (shouldDelete) {
 						// Use MULTI to delete both keys atomically
@@ -236,6 +244,7 @@ class SeatReservationClient {
 	 */
 	async deleteReservations(eventId, placeIds, email = null) {
 		try {
+			const normalizedEmail = this._normalizeEmail(email);
 			if (!placeIds || placeIds.length === 0) {
 				return 0;
 			}
@@ -254,7 +263,7 @@ class SeatReservationClient {
 						const details = JSON.parse(reservationDetails);
 
 						// Check if we should delete this reservation
-						const shouldDelete = !email || details.email === email;
+						const shouldDelete = !normalizedEmail || this._normalizeEmail(details.email) === normalizedEmail;
 
 						if (shouldDelete) {
 							// Use MULTI to delete both keys atomically
@@ -278,7 +287,7 @@ class SeatReservationClient {
 				}
 			}
 
-			info(`Deleted ${totalDeleted} seat reservations for event ${eventId}${email ? ` (email: ${email})` : ''}`);
+			info(`Deleted ${totalDeleted} seat reservations for event ${eventId}${normalizedEmail ? ` (email: ${normalizedEmail})` : ''}`);
 			return totalDeleted;
 		} catch (err) {
 			error(`Error deleting seat reservations for ${eventId}:`, err);

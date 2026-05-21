@@ -19,7 +19,7 @@ import {
     validateScanCountOrderQuantity,
     validateTicketPurchaseInventory
 } from '../util/ticketQuantity.js'
-import { computeTicketLinePricing, roundMoney, moneyPercentOfExactSum } from '../util/money.js'
+import { computeTicketLinePricing, roundMoney, moneyPercentOfExactSum, moneyPercentOf, moneyAdd } from '../util/money.js'
 import * as sendMail from '../util/sendMail.js'
 import Stripe from 'stripe'
 const stripe = new Stripe(process.env.STRIPE_KEY)
@@ -35,6 +35,7 @@ import { SETTINGS_CACHE_KEY } from '../const.js'
 import { manifestUpdateService } from '../src/services/manifestUpdateService.js'
 import { seatReservationService } from '../src/services/seatReservationService.js'
 import { resolveSoldPlaceIdsForPayment } from '../src/services/paymentSeatResolutionService.js'
+import { fulfillSeatPurchaseBeforeTicket, assertSeatsAvailableForPurchase } from '../src/services/seatPurchaseFulfillmentService.js'
 import { loadVenueSectionContext } from '../src/services/venueSectionContextService.js'
 import * as seatController from './seat.controller.js'
 import { EventManifest, Manifest, PlatformMarketingConsent, Survey, SurveyResponse } from '../model/mongoModel.js';
@@ -43,6 +44,29 @@ import { PersonalDataRequest } from '../model/personalDataRequest.js'
 import { getPresalePayload, consumePresaleToken } from '../util/presaleToken.js'
 import { getSurveyTokenPayload, consumeSurveyToken } from '../util/surveyToken.js'
 import { buildPublicSiteConfigPayload } from '../util/publicSiteConfig.js'
+import {
+    validateCouponOnEvent,
+    applyCouponDiscountToMetadata,
+    computeDiscountAmount,
+    getBaseSubtotalForCoupon,
+    normalizeCouponCode,
+    eventHasActiveDiscountCodes,
+    computeTicketInfoOrderPricing,
+} from '../util/couponPricing.js'
+import { publishDiscountCodeRedeemed } from '../util/couponRedeem.js'
+import {
+    attachCouponFieldsToTicketInfo,
+    enrichMetadataWithCouponPricing
+} from '../util/ticketDiscountDisplay.js'
+import {
+    createSeatCheckoutSession,
+    deleteSeatCheckoutSession,
+    getSeatCheckoutSessionByToken,
+    getSeatEmailTrust,
+    refreshSeatEmailVerified,
+    removePlaceIdsFromSeatCheckoutSession,
+    setSeatEmailVerified
+} from '../util/seatCheckoutSession.js'
 import { validateBusinessLandingConfig } from '../util/businessLanding.js'
 import {
     parseRequestMarketCountryCode,
@@ -408,6 +432,8 @@ export const getEventById = async (req, res, next) => {
                 }
             }
             const eventPayload = { ...restOfEvent, presaleAccess }
+            delete eventPayload.discountCodes
+            eventPayload.hasDiscountCodes = eventHasActiveDiscountCodes(restOfEvent?.discountCodes)
 
             // waitlistConfig, event_end_date, pre_sale_waitlist_count and pre_sale_waitlist_cap are synced from event-merchant-service via RabbitMQ (event.created / event.updated / waitlist.status_updated)
             const data = { event: eventPayload };
@@ -738,10 +764,11 @@ const validatePaymentRequest = (reqBody) => {
     const { amount, metadata = {} } = reqBody;
     let currency = normalizeStripeCurrency(reqBody.currency);
     console.log('reqBody', reqBody);
-    // Validate required fields
-    if (!amount || !reqBody.currency) {
+    // Validate required fields (amount may be 0 for fully discounted orders)
+    if (amount == null || !Number.isFinite(Number(amount)) || !reqBody.currency) {
         throw new Error('Missing required fields: amount and currency are required');
     }
+    const normalizedAmount = Math.round(Number(amount));
 
     // Validate required fields
     // For pricing_configuration model, ticketId can be null if seatTickets is provided
@@ -759,8 +786,8 @@ const validatePaymentRequest = (reqBody) => {
         throw new Error('Missing required metadata: ticketId is required (or seatTickets for pricing_configuration model)');
     }
 
-    // Validate amount range (prevent extremely large amounts)
-    if (amount <= 1 || amount > 10000000) { // Max 100,000.00 in cents
+    // Validate amount range (prevent extremely large amounts; allow 0 for fully discounted orders)
+    if (normalizedAmount < 0 || normalizedAmount > 10000000) { // Max 100,000.00 in cents
         throw new Error('Invalid amount range');
     }
 
@@ -782,7 +809,15 @@ const validatePaymentRequest = (reqBody) => {
         country: sanitizeString(metadata.country, 50),
         fullName: metadata.fullName ? sanitizeString(metadata.fullName, 200) : null,
         nonce: metadata.nonce ? sanitizeString(metadata.nonce, 128) : null, // Preserve nonce for duplicate submission prevention
-        presaleToken: metadata.presaleToken ? sanitizeString(metadata.presaleToken, 200) : null // One-time presale link token; consumed after successful payment
+        presaleToken: metadata.presaleToken ? sanitizeString(metadata.presaleToken, 200) : null, // One-time presale link token; consumed after successful payment
+        couponCode:
+            metadata.couponCode != null && String(metadata.couponCode).trim()
+                ? sanitizeString(String(metadata.couponCode).trim(), 64)
+                : null,
+        couponId:
+            metadata.couponId != null && String(metadata.couponId).trim()
+                ? sanitizeString(String(metadata.couponId).trim(), 32)
+                : null
     };
 
     // Preserve seatTickets and placeIds for pricing_configuration model
@@ -821,6 +856,15 @@ const validatePaymentRequest = (reqBody) => {
     if (metadata.totalServiceFee !== undefined) sanitizedMetadata.totalServiceFee = parseFloat(metadata.totalServiceFee) || 0;
     if (metadata.totalVatAmount !== undefined) sanitizedMetadata.totalVatAmount = parseFloat(metadata.totalVatAmount) || 0;
     if (metadata.totalAmount !== undefined) sanitizedMetadata.totalAmount = parseFloat(metadata.totalAmount) || 0;
+    if (metadata.couponDiscountAmount !== undefined) {
+        sanitizedMetadata.couponDiscountAmount = parseFloat(metadata.couponDiscountAmount) || 0;
+    }
+    if (metadata.marketingOptIn !== undefined) {
+        sanitizedMetadata.marketingOptIn = sanitizeBoolean(metadata.marketingOptIn);
+    }
+    if (metadata.locale) {
+        sanitizedMetadata.locale = sanitizeString(metadata.locale, 20);
+    }
 
     // Validate quantity
     if (sanitizedMetadata.quantity && (parseInt(sanitizedMetadata.quantity) < 1 || parseInt(sanitizedMetadata.quantity) > 100)) {
@@ -850,7 +894,7 @@ const validatePaymentRequest = (reqBody) => {
         throw new Error('Invalid merchant ID format - must be numeric');
     }
 
-    return { amount, currency, metadata: sanitizedMetadata };
+    return { amount: normalizedAmount, currency, metadata: sanitizedMetadata };
 };
 
 const assertTicketPurchasable = (ticketConfig) => {
@@ -969,34 +1013,63 @@ const validateMerchantAndEvent = async (metadata) => {
     return { merchant, event, ticket: ticketConfig };
 };
 
-const calculateExpectedPrice = (ticket, event, quantity, metadata = {}) => {
-    // Pricing from ticket only; amount comes from frontend — server computes expected from ticket then compares in validatePriceCalculation.
-    const ticketPrice =   parseFloat(ticket.price) ?? 0;
-    const serviceFee =  parseFloat(ticket.serviceFee) ?? 0;
-    const entertainmentTax = parseFloat(ticket.entertainmentTax) || 0;
-    // Prefer entertainmentTax over vat for price calculation (Stripe + Paytrail)
-    const vatRate = entertainmentTax || parseFloat(ticket.vat) || 0;
+const parseMoneyField = (value, fallback = 0) => {
+    const parsed = parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+};
 
-    const serviceTax =   parseFloat(ticket.serviceTax) ?? 0;
-    const orderFee =   parseFloat(ticket.orderFee) ?? 0;
+const calculateExpectedPrice = (ticket, event, quantity, metadata = {}) => {
     const qty = parseInt(metadata.quantity || quantity, 10) || 1;
 
     // Check if this is a seat-based purchase
-    // 1. Check if placeIds are present in metadata
     const hasPlaceIds = metadata.placeIds && (
         (Array.isArray(metadata.placeIds) && metadata.placeIds.length > 0) ||
         (typeof metadata.placeIds === 'string' && metadata.placeIds.trim().length > 0 && metadata.placeIds !== '[]' && metadata.placeIds !== 'null')
     );
 
-    // 2. Check if event has seat selection enabled
     const eventHasSeatSelection = event?.venue?.hasSeatSelection || event?.venue?.venueId;
-
-    // 3. Check if pricing model is 'pricing_configuration' (individual seat pricing)
     const isPricingConfiguration = event?.venue?.pricingModel === 'pricing_configuration';
+    const hasSeatSelection = (hasPlaceIds || eventHasSeatSelection) && (
+        parseMoneyField(ticket?.entertainmentTax, parseMoneyField(metadata.entertainmentTax)) > 0 ||
+        parseMoneyField(ticket?.serviceTax, parseMoneyField(metadata.serviceTax)) > 0 ||
+        parseMoneyField(ticket?.orderFee, parseMoneyField(metadata.orderFee)) > 0 ||
+        isPricingConfiguration
+    );
 
+    // Standard ticket_info checkout: server computes full line from catalog ticket + optional couponCode
+    if (!hasSeatSelection) {
+        const orderPricing = computeTicketInfoOrderPricing(ticket, event, qty, metadata);
+        if (orderPricing.couponCode) {
+            metadata.couponCode = orderPricing.couponCode;
+            metadata.couponId = orderPricing.couponId;
+            metadata.couponDiscountAmount = orderPricing.couponDiscountAmount;
+            metadata.catalogBaseSubtotal = orderPricing.catalogBaseSubtotal;
+        }
+        console.log('Ticket info order pricing:', {
+            catalogUnitBase: orderPricing.catalogUnitBase,
+            effectiveUnitBase: orderPricing.effectiveUnitBase,
+            couponCode: orderPricing.couponCode,
+            couponDiscountAmount: orderPricing.couponDiscountAmount,
+            totalAmount: orderPricing.totalAmount
+        });
+        return {
+            perUnitSubtotal: orderPricing.perUnitSubtotal,
+            perUnitVat: orderPricing.perUnitVat,
+            perUnitTotal: orderPricing.perUnitTotal,
+            totalAmount: orderPricing.totalAmount
+        };
+    }
 
-    // 4. Use new pricing model if either condition is true AND (ticket has new tax fields OR it's pricing_configuration mode)
-    const hasSeatSelection = (hasPlaceIds || eventHasSeatSelection) && (entertainmentTax > 0 || serviceTax > 0 || orderFee > 0 || isPricingConfiguration);
+    const ticketPrice = parseMoneyField(ticket.price);
+    const serviceFee =
+        parseMoneyField(ticket.serviceFee, parseMoneyField(metadata.serviceFee));
+    const entertainmentTax =
+        parseMoneyField(ticket.entertainmentTax, parseMoneyField(metadata.entertainmentTax));
+    const metadataTaxRate =
+        parseMoneyField(metadata.entertainmentTax) || parseMoneyField(metadata.vatRate) || parseMoneyField(metadata.vat);
+    const vatRate = entertainmentTax || parseMoneyField(ticket.vat) || metadataTaxRate || 0;
+    const serviceTax = parseMoneyField(ticket.serviceTax, parseMoneyField(metadata.serviceTax));
+    const orderFee = parseMoneyField(ticket.orderFee, parseMoneyField(metadata.orderFee));
 
     console.log('calculateExpectedPrice - seat selection check:', {
         hasPlaceIds: !!metadata.placeIds,
@@ -1649,6 +1722,259 @@ async function logConnectedAccountWalletPrerequisites(stripeAccountId) {
     }
 }
 
+/** Fulfill a paid-event order when server-validated total is €0 (e.g. 100% discount code). */
+const completeZeroAmountCheckout = async (req, res, { metadata, parsedMetadata, event, currency }) => {
+    const clientId = getClientIdentifier(req);
+    const otp = await commonUtil.createCode(8);
+
+    const finalPlaceIds = Array.isArray(parsedMetadata.placeIds) ? parsedMetadata.placeIds : [];
+    const finalSeatTickets = Array.isArray(parsedMetadata.seatTickets) ? parsedMetadata.seatTickets : [];
+    const finalSectionSelections = Array.isArray(parsedMetadata.sectionSelections)
+        ? parsedMetadata.sectionSelections
+        : [];
+
+    const ticketTypeConfig = findTicketTypeConfig(event, metadata.ticketId);
+    const fulfillmentMetadata = enrichMetadataWithCouponPricing(
+        { ...metadata, ...parsedMetadata },
+        event,
+        ticketTypeConfig
+    );
+    const ticketTypeName = ticketTypeConfig?.name || fulfillmentMetadata.ticketName;
+
+    const ticketInfo = {
+        eventName: fulfillmentMetadata.eventName,
+        ticketName: fulfillmentMetadata.ticketName,
+        price: 0,
+        totalAmount: 0,
+        totalPrice: 0,
+        currency: currency.toLowerCase(),
+        purchaseDate: new Date().toISOString(),
+        paymentProvider: 'discount',
+        email: fulfillmentMetadata.email,
+        merchantId: fulfillmentMetadata.merchantId,
+        eventId: fulfillmentMetadata.eventId,
+        ticketId: fulfillmentMetadata.ticketId || null,
+        fullName: fulfillmentMetadata.fullName || null,
+        basePrice: fulfillmentMetadata.basePrice != null ? String(fulfillmentMetadata.basePrice) : '0',
+        serviceFee: fulfillmentMetadata.serviceFee != null ? String(fulfillmentMetadata.serviceFee) : '0',
+        vatRate: fulfillmentMetadata.vatRate != null ? String(fulfillmentMetadata.vatRate) : null,
+        vatAmount: fulfillmentMetadata.vatAmount != null ? String(fulfillmentMetadata.vatAmount) : '0',
+        entertainmentTax: fulfillmentMetadata.entertainmentTax != null ? String(fulfillmentMetadata.entertainmentTax) : null,
+        entertainmentTaxAmount: fulfillmentMetadata.entertainmentTaxAmount != null ? String(fulfillmentMetadata.entertainmentTaxAmount) : '0',
+        serviceTax: fulfillmentMetadata.serviceTax != null ? String(fulfillmentMetadata.serviceTax) : null,
+        serviceTaxAmount: fulfillmentMetadata.serviceTaxAmount != null ? String(fulfillmentMetadata.serviceTaxAmount) : '0',
+        orderFee: fulfillmentMetadata.orderFee != null ? String(fulfillmentMetadata.orderFee) : '0',
+        orderFeeServiceTax: fulfillmentMetadata.orderFeeServiceTax != null ? String(fulfillmentMetadata.orderFeeServiceTax) : '0',
+        totalBasePrice: fulfillmentMetadata.totalBasePrice != null ? String(fulfillmentMetadata.totalBasePrice) : '0',
+        totalServiceFee: fulfillmentMetadata.totalServiceFee != null ? String(fulfillmentMetadata.totalServiceFee) : '0',
+        country: fulfillmentMetadata.country || null,
+        marketingOptIn: fulfillmentMetadata.marketingOptIn || false,
+    };
+    attachCouponFieldsToTicketInfo(ticketInfo, fulfillmentMetadata);
+
+    if (event?.venue) {
+        ticketInfo.venue = {
+            venueId: event.venue.venueId || null,
+            externalVenueId: event.venue.externalVenueId || null,
+            venueName: event.venue.name || null,
+            hasSeatSelection: event.venue.venueId || false
+        };
+    }
+    if (finalSeatTickets.length > 0) {
+        ticketInfo.seatTickets = finalSeatTickets;
+    }
+    if (finalSectionSelections.length > 0) {
+        ticketInfo.sectionSelections = finalSectionSelections;
+    }
+    if (event?.venue?.venueId && finalPlaceIds.length > 0) {
+        ticketInfo.seats = finalPlaceIds.map((placeId) => ({ placeId }));
+    }
+
+    const seatCount = resolveSeatCountFromMetadata(parsedMetadata);
+    const scanCount = getScanCountFromTicketType(ticketTypeConfig);
+    const scanValidation = validateScanCountOrderQuantity(fulfillmentMetadata.quantity, scanCount);
+    if (!scanValidation.valid) {
+        return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            success: false,
+            error: scanValidation.error
+        });
+    }
+
+    const { ticketInfo: ticketInfoWithQty, quantities } = applyTicketQuantitiesToTicketInfo(ticketInfo, {
+        orderQuantity: fulfillmentMetadata.quantity,
+        ticketTypeConfig,
+        seatCount
+    });
+    Object.assign(ticketInfo, ticketInfoWithQty);
+
+    if (fulfillmentMetadata.ticketId) {
+        try {
+            validateTicketPurchaseInventory(event, ticketTypeConfig, {
+                orderQuantity: fulfillmentMetadata.quantity,
+                seatCount,
+                metadata: parsedMetadata
+            });
+        } catch (invErr) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                error: formatInventoryErrorMessage(invErr)
+            });
+        }
+    }
+
+    const emailCrypto = await hash.getCryptoBySearchIndex(fulfillmentMetadata.email, 'email');
+    let emailHash = null;
+    if (emailCrypto.length === 0) {
+        const tempEmailHash = await hash.createHashData(fulfillmentMetadata.email, 'email');
+        emailHash = tempEmailHash._id;
+    } else {
+        emailHash = emailCrypto[0]._id;
+    }
+    const ticketFor = emailHash;
+    await PlatformMarketingConsent.getOrCreatePlatformConsent(ticketFor);
+
+    const isVenueEvent = !!event?.venue?.venueId;
+    if (isVenueEvent) {
+        try {
+            await fulfillSeatPurchaseBeforeTicket({
+                eventId: fulfillmentMetadata.eventId,
+                event,
+                sessionId: fulfillmentMetadata.sessionId,
+                placeIds: finalPlaceIds,
+                sectionSelections: finalSectionSelections,
+                checkoutToken: fulfillmentMetadata.checkoutToken || metadata.checkoutToken || null,
+                logPrefix: '[completeZeroAmountCheckout]',
+            });
+        } catch (seatError) {
+            if (seatError?.code === 'SEATS_ALREADY_SOLD') {
+                return res.status(consts.HTTP_STATUS_CONFLICT).json({
+                    success: false,
+                    error: 'SEATS_ALREADY_SOLD',
+                    message: seatError.message || 'One or more seats are already sold',
+                });
+            }
+            throw seatError;
+        }
+    }
+
+    if (fulfillmentMetadata.ticketId) {
+        const inventoryDecrement = await Event.decrementTicketTypeAvailable(
+            event._id,
+            fulfillmentMetadata.ticketId,
+            quantities.admissionQuantity,
+            ticketTypeConfig
+        );
+        if (!inventoryDecrement.success) {
+            if (isVenueEvent) {
+                error(`[completeZeroAmountCheckout] Ticket type inventory drift after seat fulfillment (continuing to honor reserved seats)`, {
+                    eventId: fulfillmentMetadata.eventId,
+                    ticketId: fulfillmentMetadata.ticketId,
+                    admissionQuantity: quantities.admissionQuantity,
+                    reason: inventoryDecrement.reason,
+                });
+            } else {
+                return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                    error: 'Not enough tickets remaining for this purchase.'
+                });
+            }
+        }
+    }
+
+    let ticket = await Ticket.createTicket(
+        null,
+        ticketFor,
+        fulfillmentMetadata.eventId,
+        ticketTypeName,
+        ticketInfo,
+        otp,
+        fulfillmentMetadata.merchantId,
+        fulfillmentMetadata.externalMerchantId
+    ).catch((err) => {
+        console.error('[completeZeroAmountCheckout] Error creating ticket:', err);
+        throw err;
+    });
+
+    if (!ticket?._id && !ticket?.id) {
+        throw new Error('Ticket creation failed');
+    }
+
+    await ticketMaster.provisionGroupChildQRCodes(
+        ticket,
+        event,
+        quantities.admissionQuantity,
+        {
+            eventId: fulfillmentMetadata.eventId,
+            merchantId: fulfillmentMetadata.merchantId,
+            externalMerchantId: fulfillmentMetadata.externalMerchantId
+        }
+    );
+    ticket = await Ticket.getTicketById(ticket._id, false);
+
+    if (fulfillmentMetadata.presaleToken) {
+        const consumed = await consumePresaleToken(redisClient, fulfillmentMetadata.presaleToken);
+        if (consumed) {
+            info('[completeZeroAmountCheckout] Presale token consumed');
+        }
+    }
+
+    const paymentReference = `zero_${fulfillmentMetadata.nonce}`;
+    if (fulfillmentMetadata.couponCode) {
+        try {
+            const redeemResult = await Event.decrementCouponUsesLeft(fulfillmentMetadata.eventId, fulfillmentMetadata.couponCode);
+            if (redeemResult.ok && event?.externalMerchantId && event?.externalEventId) {
+                await publishDiscountCodeRedeemed({
+                    externalMerchantId: event.externalMerchantId,
+                    externalEventId: String(event.externalEventId),
+                    discountCodeId: fulfillmentMetadata.couponId,
+                    paymentReference,
+                    email: fulfillmentMetadata.email,
+                    discountAmount: fulfillmentMetadata.couponDiscountAmount
+                });
+            } else if (!redeemResult.ok) {
+                error('[completeZeroAmountCheckout] Coupon uses_left decrement failed', {
+                    eventId: fulfillmentMetadata.eventId,
+                    couponCode: fulfillmentMetadata.couponCode,
+                    paymentReference
+                });
+            }
+        } catch (couponErr) {
+            error('[completeZeroAmountCheckout] Coupon redeem error (non-blocking)', couponErr);
+        }
+    }
+
+    const { normalizeLocale } = await import('../util/common.js');
+    const locale = fulfillmentMetadata.locale ? normalizeLocale(fulfillmentMetadata.locale) : commonUtil.extractLocaleFromRequest(req);
+
+    console.log('[completeZeroAmountCheckout] Order fulfilled:', {
+        ticketId: ticket._id,
+        eventId: fulfillmentMetadata.eventId,
+        clientId,
+        couponCode: fulfillmentMetadata.couponCode || null
+    });
+
+    ticket = await Ticket.getTicketById(ticket._id, false);
+
+    res.status(consts.HTTP_STATUS_OK).json({
+        zeroAmountCheckout: true,
+        success: true,
+        ticket,
+        message: 'Order completed successfully'
+    });
+
+    ticketMaster.sendTicketEmailInBackground(event, ticket, fulfillmentMetadata.email, otp, locale, {
+        marketCountryCode: parseRequestMarketCountryCode(req)
+    });
+
+    try {
+        if (event?.event_end_date) {
+            ticket.validUntil = new Date(event.event_end_date);
+        }
+        const ticketForPublish = await Ticket.getTicketById(ticket._id, false);
+        await publishTicketCreationEvent(ticketForPublish || ticket, event, fulfillmentMetadata, paymentReference);
+    } catch (publishError) {
+        console.error('[completeZeroAmountCheckout] Failed to publish ticket creation event:', publishError);
+    }
+};
+
 export const createPaymentIntent = async (req, res, next) => {
     try {
         // Security Layer 1: Request size validation
@@ -1764,6 +2090,38 @@ export const createPaymentIntent = async (req, res, next) => {
         const expectedPrice = calculateExpectedPrice(ticket, event, parseInt(metadata.quantity), parsedMetadata);
         validatePriceCalculation(amount / 100, expectedPrice);
 
+        if (event?.venue?.venueId) {
+            try {
+                await assertSeatsAvailableForPurchase({
+                    eventId: metadata.eventId,
+                    event,
+                    sessionId: parsedMetadata.sessionId,
+                    placeIds: parsedMetadata.placeIds,
+                    sectionSelections: parsedMetadata.sectionSelections,
+                    logPrefix: '[createPaymentIntent]',
+                });
+            } catch (seatError) {
+                if (seatError?.code === 'SEATS_ALREADY_SOLD') {
+                    return res.status(consts.HTTP_STATUS_CONFLICT).json({
+                        success: false,
+                        error: 'SEATS_ALREADY_SOLD',
+                        message: seatError.message || 'One or more seats are already sold',
+                        alreadySold: seatError.alreadySold,
+                    });
+                }
+                throw seatError;
+            }
+        }
+
+        if (amount === 0 && roundMoney(expectedPrice.totalAmount) === 0) {
+            return await completeZeroAmountCheckout(req, res, {
+                metadata: { ...metadata, ...parsedMetadata },
+                parsedMetadata,
+                event,
+                currency
+            });
+        }
+
         // Security Layer 5: Timeout protection for external API calls
         const stripeTimeout = new Promise((_, reject) => {
             setTimeout(() => reject(new Error('Stripe API timeout')), 10000); // 10 second timeout
@@ -1797,7 +2155,18 @@ export const createPaymentIntent = async (req, res, next) => {
         // Extract locale from metadata for email templates
         const { normalizeLocale } = await import('../util/common.js');
         const locale = metadata.locale ? normalizeLocale(metadata.locale) : 'en-US';
-        const { seatTickets, placeIds, locale: _, ...stripeMetadata } = metadata;
+        const { seatTickets, placeIds, locale: _, ...stripeMetadataBase } = metadata;
+        const stripeMetadata = {
+            ...stripeMetadataBase,
+            ...(parsedMetadata.couponCode ? { couponCode: parsedMetadata.couponCode } : {}),
+            ...(parsedMetadata.couponId ? { couponId: parsedMetadata.couponId } : {}),
+            ...(parsedMetadata.couponDiscountAmount != null
+                ? { couponDiscountAmount: String(parsedMetadata.couponDiscountAmount) }
+                : {}),
+            ...(parsedMetadata.catalogBaseSubtotal != null
+                ? { catalogBaseSubtotal: String(parsedMetadata.catalogBaseSubtotal) }
+                : {}),
+        };
 
         // Only apply connected account logic if merchant is NOT the platform account
         if(merchant.stripeAccount !== process.env.STRIPE_PLATFORM_ACCOUNT_ID) {
@@ -2006,6 +2375,29 @@ const _createPaytrailPaymentInternal = async (req, res, next, { redirectSuccessU
             throw new Error('Paytrail is not enabled for this merchant');
         }
 
+        if (event?.venue?.venueId) {
+            try {
+                await assertSeatsAvailableForPurchase({
+                    eventId: parsedMetadata.eventId,
+                    event,
+                    sessionId: parsedMetadata.sessionId,
+                    placeIds: parsedMetadata.placeIds,
+                    sectionSelections: parsedMetadata.sectionSelections,
+                    logPrefix: '[createPaytrailPayment]',
+                });
+            } catch (seatError) {
+                if (seatError?.code === 'SEATS_ALREADY_SOLD') {
+                    return res.status(consts.HTTP_STATUS_CONFLICT).json({
+                        success: false,
+                        error: 'SEATS_ALREADY_SOLD',
+                        message: seatError.message || 'One or more seats are already sold',
+                        alreadySold: seatError.alreadySold,
+                    });
+                }
+                throw seatError;
+            }
+        }
+
         // Calculate and validate price - use parsedMetadata instead of metadata
         const expectedPrice = calculateExpectedPrice(ticket, event, parseInt(parsedMetadata.quantity), parsedMetadata);
         validatePriceCalculation(amount / 100, expectedPrice);
@@ -2173,7 +2565,7 @@ const _createPaytrailPaymentInternal = async (req, res, next, { redirectSuccessU
             vatAmount: redisPaymentData.vatAmount,
             amount: redisPaymentData.amount
         });
-        await redisClient.set(paymentKey, JSON.stringify(redisPaymentData), 'EX', 600); // 10 minutes TTL
+        await redisClient.set(paymentKey, JSON.stringify(redisPaymentData), { EX: 600 }); // 10 minutes TTL
 
         if (isShopInShopEnabled) {
             info(`Paytrail shop-in-shop payment created: ${paytrailPayment.transactionId} for sub-merchant ${merchant.paytrailSubMerchantId}`);
@@ -2261,7 +2653,8 @@ export const handlePaytrailPaymentFailure = async (req, res, next) => {
             placeIds,
             sessionId,
             email,
-            nonce // Nonce for duplicate submission protection
+            nonce, // Nonce for duplicate submission protection
+            checkoutToken
         } = req.body;
 
         // Security Layer 2: Validate required fields
@@ -2330,6 +2723,8 @@ export const handlePaytrailPaymentFailure = async (req, res, next) => {
                 const verifiedEmail = email || paymentData.email;
                 const verifiedEventId = eventId || paymentData.eventId;
                 const verifiedPlaceIds = placeIds || paymentData.placeIds || [];
+                const verifiedSessionId = sessionId || paymentData.sessionId || null;
+                const verifiedCheckoutToken = req.body.checkoutToken || paymentData.checkoutToken || null;
 
                 console.log('[handlePaytrailPaymentFailure] Payment failure verified:', {
                     stamp,
@@ -2415,9 +2810,21 @@ export const handlePaytrailPaymentFailure = async (req, res, next) => {
                     }
                 }
 
-                // Release seat reservations if placeIds are provided
+                // Release seat reservations (prefer session-based release for seated checkout)
                 let releasedCount = 0;
-                if (verifiedEventId && verifiedPlaceIds && Array.isArray(verifiedPlaceIds) && verifiedPlaceIds.length > 0) {
+                if (verifiedEventId && verifiedSessionId && verifiedEmail) {
+                    try {
+                        const { released } = await seatReservationService.releaseReservationsBySession(
+                            verifiedEventId,
+                            verifiedSessionId,
+                            verifiedEmail
+                        );
+                        releasedCount = released;
+                        console.log(`[handlePaytrailPaymentFailure] Released ${releasedCount} seat reservations by session for event ${verifiedEventId}`);
+                    } catch (reservationError) {
+                        console.error('[handlePaytrailPaymentFailure] Error releasing reservations by session:', reservationError);
+                    }
+                } else if (verifiedEventId && verifiedPlaceIds && Array.isArray(verifiedPlaceIds) && verifiedPlaceIds.length > 0) {
                     try {
                         const seatReservationService = (await import('../src/services/seatReservationService.js')).default;
 
@@ -2450,6 +2857,14 @@ export const handlePaytrailPaymentFailure = async (req, res, next) => {
                     } catch (reservationError) {
                         console.error('[handlePaytrailPaymentFailure] Error releasing reservations:', reservationError);
                         // Don't fail the entire operation if reservation release fails
+                    }
+                }
+
+                if (verifiedCheckoutToken) {
+                    try {
+                        await deleteSeatCheckoutSession(verifiedCheckoutToken);
+                    } catch (checkoutSessionError) {
+                        console.error('[handlePaytrailPaymentFailure] Error deleting checkout session:', checkoutSessionError);
                     }
                 }
 
@@ -2514,6 +2929,39 @@ export const handlePaytrailPaymentFailure = async (req, res, next) => {
             });
 
             // Still try to release reservations if provided (defensive)
+            if (eventId && sessionId && email) {
+                try {
+                    const { released } = await seatReservationService.releaseReservationsBySession(
+                        eventId,
+                        sessionId,
+                        email
+                    );
+                    console.log(`[handlePaytrailPaymentFailure] Released ${released} reservations by session (no payment data found)`);
+                    if (checkoutToken) {
+                        await deleteSeatCheckoutSession(checkoutToken);
+                    }
+
+                    // Mark as processed
+                    const failureKey = `paytrail_failure_processed:${stamp}`;
+                    await redisClient.set(failureKey, JSON.stringify({
+                        stamp,
+                        transactionId,
+                        eventId,
+                        released,
+                        timestamp: new Date().toISOString(),
+                        clientId
+                    }), { EX: 3600 });
+
+                    return res.status(consts.HTTP_STATUS_OK).json({
+                        success: true,
+                        message: 'Payment failure handled (session release)',
+                        data: { released, status: status || 'fail' }
+                    });
+                } catch (reservationError) {
+                    console.error('[handlePaytrailPaymentFailure] Error releasing reservations by session (no payment data):', reservationError);
+                }
+            }
+
             if (eventId && placeIds && Array.isArray(placeIds) && placeIds.length > 0 && email) {
                 try {
                     const seatReservationService = (await import('../src/services/seatReservationService.js')).default;
@@ -2568,6 +3016,7 @@ export const handlePaytrailPaymentFailure = async (req, res, next) => {
 // Verify Paytrail payment by stamp and return ticket if payment was successful
 // If webhook hasn't processed yet, verify payment status directly with Paytrail API
 export const verifyPaytrailPayment = async (req, res, next) => {
+    let lockKey = null;
     try {
         console.log('=== verifyPaytrailPayment CALLED ===');
         console.log('Body:', JSON.stringify(req.body));
@@ -2698,14 +3147,14 @@ export const verifyPaytrailPayment = async (req, res, next) => {
         }
 
         // 1. IDEMPOTENCY CHECK WITH REDIS LOCK - prevent race conditions from multiple simultaneous requests
-        const lockKey = `paytrail_verify_lock:${stamp}`;
+        lockKey = `paytrail_verify_lock:${stamp}`;
         const lockValue = transactionId;
         const lockTTL = 30; // 30 seconds lock
 
         // Try to acquire lock (SET with NX - only set if not exists)
-        const lockAcquired = await redisClient.set(lockKey, lockValue, 'EX', lockTTL, 'NX');
+        const lockAcquired = await redisClient.set(lockKey, lockValue, { EX: lockTTL, NX: true });
 
-        if (!lockAcquired) {
+        if (lockAcquired === null) {
             // Another request is processing this payment - wait a bit and check if ticket was created
             console.log(`[verifyPaytrailPayment] Lock already exists, waiting for other request to complete...`);
             await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
@@ -3110,7 +3559,18 @@ export const verifyPaytrailPayment = async (req, res, next) => {
             // Include seatTickets for proper display (has ticketName with human-readable format)
             seatTickets: useRedisData ? (redisData.seatTickets || []) : (parsedSeatTickets || []),
             sectionSelections: finalSectionSelections,
-            sessionId: finalSessionId
+            sessionId: finalSessionId,
+            couponCode: useRedisData ? redisData.couponCode : req.body.couponCode,
+            couponId: useRedisData ? redisData.couponId : req.body.couponId,
+            couponDiscountAmount: useRedisData
+                ? redisData.couponDiscountAmount
+                : req.body.couponDiscountAmount,
+            catalogBaseSubtotal: useRedisData
+                ? redisData.catalogBaseSubtotal
+                : req.body.catalogBaseSubtotal,
+            checkoutToken: useRedisData
+                ? (redisData.checkoutToken || null)
+                : (req.body.checkoutToken || null),
         };
 
         console.log('[verifyPaytrailPayment] Payment data being passed to createTicketFromPaytrailPayment:', {
@@ -3127,7 +3587,34 @@ export const verifyPaytrailPayment = async (req, res, next) => {
         });
 
         const paytrailWebhook = await import('./paytrail.webhook.js');
-        ticket = await paytrailWebhook.createTicketFromPaytrailPayment(paymentData, transactionId, stamp);
+        try {
+            ticket = await paytrailWebhook.createTicketFromPaytrailPayment(paymentData, transactionId, stamp);
+        } catch (ticketError) {
+            if (ticketError?.code === 'SEATS_ALREADY_SOLD') {
+                ticket = await Ticket.genericSearch({ paytrailStamp: stamp });
+                if (!ticket && transactionId) {
+                    ticket = await Ticket.genericSearch({ paytrailTransactionId: transactionId });
+                }
+                if (ticket) {
+                    console.log(`[verifyPaytrailPayment] Ticket found after seat conflict: ${ticket._id}`);
+                    ticket = await Ticket.getTicketById(ticket._id);
+                    return res.status(consts.HTTP_STATUS_OK).json({ success: true, ticket });
+                }
+                error('[verifyPaytrailPayment] Payment confirmed but seats unavailable', {
+                    stamp,
+                    transactionId,
+                    email: paymentData.email,
+                    placeIds: paymentData.placeIds,
+                });
+                return res.status(consts.HTTP_STATUS_CONFLICT).json({
+                    success: false,
+                    error: 'SEATS_ALREADY_SOLD',
+                    message: 'Payment was received but these seats are no longer available. Please contact support for a refund.',
+                    requiresRefund: true,
+                });
+            }
+            throw ticketError;
+        }
 
         if (!ticket) {
             return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
@@ -3143,6 +3630,27 @@ export const verifyPaytrailPayment = async (req, res, next) => {
             const consumed = await consumePresaleToken(redisClient, presaleTokenToConsume);
             if (consumed) {
                 info('[verifyPaytrailPayment] Presale token consumed after successful payment');
+            }
+        }
+
+        const couponCode = useRedisData ? redisData.couponCode : req.body.couponCode;
+        const couponId = useRedisData ? redisData.couponId : req.body.couponId;
+        const couponDiscountAmount = useRedisData ? redisData.couponDiscountAmount : req.body.couponDiscountAmount;
+        if (couponCode) {
+            try {
+                const redeemResult = await Event.decrementCouponUsesLeft(finalEventId, couponCode);
+                if (redeemResult.ok && event?.externalMerchantId && event?.externalEventId) {
+                    await publishDiscountCodeRedeemed({
+                        externalMerchantId: event.externalMerchantId,
+                        externalEventId: String(event.externalEventId),
+                        discountCodeId: couponId,
+                        paymentReference: stamp || transactionId,
+                        email: paymentData.email,
+                        discountAmount: couponDiscountAmount
+                    });
+                }
+            } catch (couponErr) {
+                error('[verifyPaytrailPayment] Coupon redeem error (non-blocking)', couponErr);
             }
         }
 
@@ -3170,9 +3678,16 @@ export const verifyPaytrailPayment = async (req, res, next) => {
 
     } catch (err) {
         console.error('Error verifying Paytrail payment:', err);
-        // Release lock on error (if it was acquired)
         if (lockKey) {
             await redisClient.del(lockKey).catch(() => {});
+        }
+        if (err?.code === 'SEATS_ALREADY_SOLD') {
+            return res.status(consts.HTTP_STATUS_CONFLICT).json({
+                success: false,
+                error: 'SEATS_ALREADY_SOLD',
+                message: err.message || 'One or more seats are already sold',
+                requiresRefund: true,
+            });
         }
         return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
             error: err.message
@@ -3322,7 +3837,23 @@ export const handlePaymentSuccess = async (req, res, next) => {
             orderFeeServiceTax: mergedMetadata.orderFeeServiceTax ? sanitizeString(mergedMetadata.orderFeeServiceTax, 20) : null,
             serviceTaxAmount: mergedMetadata.serviceTaxAmount ? sanitizeString(mergedMetadata.serviceTaxAmount, 20) : null,
             totalBasePrice: mergedMetadata.totalBasePrice !== undefined && mergedMetadata.totalBasePrice !== null ? sanitizeString(String(mergedMetadata.totalBasePrice), 20) : null,
-            totalServiceFee: mergedMetadata.totalServiceFee !== undefined && mergedMetadata.totalServiceFee !== null ? sanitizeString(String(mergedMetadata.totalServiceFee), 20) : null
+            totalServiceFee: mergedMetadata.totalServiceFee !== undefined && mergedMetadata.totalServiceFee !== null ? sanitizeString(String(mergedMetadata.totalServiceFee), 20) : null,
+            couponCode:
+                mergedMetadata.couponCode != null && String(mergedMetadata.couponCode).trim()
+                    ? sanitizeString(String(mergedMetadata.couponCode).trim(), 64)
+                    : null,
+            couponId:
+                mergedMetadata.couponId != null && String(mergedMetadata.couponId).trim()
+                    ? sanitizeString(String(mergedMetadata.couponId).trim(), 32)
+                    : null,
+            couponDiscountAmount:
+                mergedMetadata.couponDiscountAmount !== undefined && mergedMetadata.couponDiscountAmount !== null
+                    ? parseFloat(mergedMetadata.couponDiscountAmount) || 0
+                    : undefined,
+            catalogBaseSubtotal:
+                mergedMetadata.catalogBaseSubtotal !== undefined && mergedMetadata.catalogBaseSubtotal !== null
+                    ? parseFloat(mergedMetadata.catalogBaseSubtotal) || 0
+                    : undefined,
         };
 
         console.log('sanitizedMetadata', sanitizedMetadata);
@@ -3401,6 +3932,14 @@ export const handlePaymentSuccess = async (req, res, next) => {
             totalServiceFee: sanitizedMetadata.totalServiceFee !== undefined ? sanitizedMetadata.totalServiceFee : null
         };
 
+        const ticketTypeConfig = findTicketTypeConfig(event, sanitizedMetadata.ticketId);
+        const couponMetadata = enrichMetadataWithCouponPricing(
+            sanitizedMetadata,
+            event,
+            ticketTypeConfig
+        );
+        attachCouponFieldsToTicketInfo(ticketInfo, couponMetadata);
+
         // Add venue information if available
         if (event && event.venue) {
             ticketInfo.venue = {
@@ -3427,7 +3966,6 @@ export const handlePaymentSuccess = async (req, res, next) => {
             }));
         }
 
-        const ticketTypeConfig = findTicketTypeConfig(event, sanitizedMetadata.ticketId);
         const seatCount = resolveSeatCountFromMetadata(sanitizedMetadata);
         const scanCount = getScanCountFromTicketType(ticketTypeConfig);
         const scanValidation = validateScanCountOrderQuantity(sanitizedMetadata.quantity, scanCount);
@@ -3454,17 +3992,6 @@ export const handlePaymentSuccess = async (req, res, next) => {
             } catch (invErr) {
                 return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
                     error: formatInventoryErrorMessage(invErr)
-                });
-            }
-            const inventoryDecrement = await Event.decrementTicketTypeAvailable(
-                event._id,
-                sanitizedMetadata.ticketId,
-                quantities.admissionQuantity,
-                ticketTypeConfig
-            );
-            if (!inventoryDecrement.success) {
-                return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
-                    error: 'Not enough tickets remaining for this purchase.'
                 });
             }
         }
@@ -3525,6 +4052,58 @@ export const handlePaymentSuccess = async (req, res, next) => {
         const ticketFor = emailHash;
         // Platform marketing: default opt-in for every new email
         await PlatformMarketingConsent.getOrCreatePlatformConsent(ticketFor);
+
+        const isVenueEvent = !!(event && event.venue && event.venue.venueId);
+        if (isVenueEvent) {
+            try {
+                await fulfillSeatPurchaseBeforeTicket({
+                    eventId: sanitizedMetadata.eventId,
+                    event,
+                    sessionId: sanitizedMetadata.sessionId,
+                    placeIds: finalPlaceIds,
+                    sectionSelections: finalSectionSelections,
+                    checkoutToken: mergedMetadata.checkoutToken || requestMetadata.checkoutToken || null,
+                    logPrefix: '[handlePaymentSuccess]',
+                });
+            } catch (seatError) {
+                if (seatError?.code === 'SEATS_ALREADY_SOLD') {
+                    await redisClient.del(paymentIntentReserveKey).catch(() => {});
+                    return res.status(consts.HTTP_STATUS_CONFLICT).json({
+                        success: false,
+                        error: 'SEATS_ALREADY_SOLD',
+                        message: 'Payment was received but these seats are no longer available. Please contact support for a refund.',
+                        requiresRefund: true,
+                    });
+                }
+                throw seatError;
+            }
+        }
+
+        if (sanitizedMetadata.ticketId) {
+            const inventoryDecrement = await Event.decrementTicketTypeAvailable(
+                event._id,
+                sanitizedMetadata.ticketId,
+                quantities.admissionQuantity,
+                ticketTypeConfig
+            );
+            if (!inventoryDecrement.success) {
+                if (isVenueEvent) {
+                    error(`[handlePaymentSuccess] Ticket type inventory drift after seat fulfillment (continuing to honor paid seats)`, {
+                        eventId: sanitizedMetadata.eventId,
+                        ticketId: sanitizedMetadata.ticketId,
+                        admissionQuantity: quantities.admissionQuantity,
+                        reason: inventoryDecrement.reason,
+                        paymentIntentId,
+                    });
+                } else {
+                    await redisClient.del(paymentIntentReserveKey).catch(() => {});
+                    return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                        error: 'Not enough tickets remaining for this purchase.'
+                    });
+                }
+            }
+        }
+
         // Create the ticket using the same pattern as completeOrderTicket
         let ticket = await Ticket.createTicket(
             null, // qrCode - will be generated later
@@ -3565,76 +4144,35 @@ export const handlePaymentSuccess = async (req, res, next) => {
             }
         }
 
+        if (sanitizedMetadata.couponCode) {
+            try {
+                const redeemResult = await Event.decrementCouponUsesLeft(sanitizedMetadata.eventId, sanitizedMetadata.couponCode);
+                if (redeemResult.ok && event?.externalMerchantId && event?.externalEventId) {
+                    await publishDiscountCodeRedeemed({
+                        externalMerchantId: event.externalMerchantId,
+                        externalEventId: String(event.externalEventId),
+                        discountCodeId: sanitizedMetadata.couponId,
+                        paymentReference: paymentIntentId,
+                        email: sanitizedMetadata.email,
+                        discountAmount: couponMetadata.couponDiscountAmount
+                    });
+                } else if (!redeemResult.ok) {
+                    error('[handlePaymentSuccess] Coupon uses_left decrement failed after payment', {
+                        eventId: sanitizedMetadata.eventId,
+                        couponCode: sanitizedMetadata.couponCode,
+                        paymentIntentId
+                    });
+                }
+            } catch (couponErr) {
+                error('[handlePaymentSuccess] Coupon redeem error (non-blocking)', couponErr);
+            }
+        }
+
         // Generate email payload and send ticket (same as completeOrderTicket)
         // Event is already loaded above
         // Extract locale from mergedMetadata (prefer request body, fallback to Stripe metadata)
         const { normalizeLocale } = await import('../util/common.js');
         const locale = mergedMetadata.locale ? normalizeLocale(mergedMetadata.locale) : 'en-US';
-        const emailPayload = await ticketMaster.createEmailPayload(event, ticket, sanitizedMetadata.email, otp, locale, {
-            marketCountryCode: parseRequestMarketCountryCode(req)
-        });
-        await new Promise(resolve => setTimeout(resolve, 100)); // intentional delay
-        await sendMail.forward(emailPayload).then(async data => {
-            // Update the ticket to mark as sent
-            ticket = await Ticket.updateTicketById(ticket._id, { isSend: true });
-        }).catch(err => {
-            console.error('Error sending ticket email:', err);
-            // Don't throw here - ticket is created successfully even if email fails
-        });
-
-        // Handle seat marking for seat-based events
-        if (event && event.venue && event.venue.venueId) {
-            try {
-                const { placeIds: placeIdsToMarkSold, areaSoldIncrements, unresolvedSelections } = await resolveSoldPlaceIdsForPayment({
-                    eventId: sanitizedMetadata.eventId,
-                    sessionId: sanitizedMetadata.sessionId,
-                    placeIds: sanitizedMetadata.placeIds,
-                    sectionSelections: sanitizedMetadata.sectionSelections
-                });
-
-                if (!placeIdsToMarkSold || placeIdsToMarkSold.length === 0) {
-                    info(`[handlePaymentSuccess] No placeIds resolved for sold update (event ${sanitizedMetadata.eventId})`);
-                }
-                if (unresolvedSelections.length > 0) {
-                    error('[handlePaymentSuccess] Could not fully resolve some sectionSelections:', unresolvedSelections);
-                }
-
-                // Find EventManifest by eventId (more reliable than using lockedManifestId)
-                const eventMongoId = String(event._id);
-                const eventManifest = await EventManifest.findOne({ eventId: eventMongoId });
-
-                if (eventManifest && areaSoldIncrements.length > 0) {
-                    await manifestUpdateService.markAreaSelectionsSold(
-                        eventManifest._id.toString(),
-                        areaSoldIncrements
-                    );
-                }
-
-                if (eventManifest && placeIdsToMarkSold.length > 0) {
-                    // Mark seats as sold in EventManifest
-                    await manifestUpdateService.markSeatsAsSold(
-                        eventManifest._id.toString(),
-                        placeIdsToMarkSold
-                    );
-
-                    // Release Redis reservations
-                    await seatReservationService.releaseReservations(
-                        sanitizedMetadata.eventId,
-                        placeIdsToMarkSold
-                    );
-
-                    info(`Seats marked as sold for event ${sanitizedMetadata.eventId}: ${placeIdsToMarkSold.length} seats`);
-                } else {
-                    if (!eventManifest) {
-                        error(`EventManifest not found for event ${sanitizedMetadata.eventId}. Cannot mark seats as sold.`);
-                    }
-                }
-            } catch (seatError) {
-                error(`Error marking seats as sold for event ${sanitizedMetadata.eventId}:`, seatError);
-                // Don't fail the entire operation if seat marking fails
-                // Ticket is already created, seats can be marked manually if needed
-            }
-        }
 
         const clientId = getClientIdentifier(req);
         console.log('Payment success handled:', {
@@ -3668,6 +4206,10 @@ export const handlePaymentSuccess = async (req, res, next) => {
             success: true,
             data: ticket,
             message: "Payment processed successfully"
+        });
+
+        ticketMaster.sendTicketEmailInBackground(event, ticket, sanitizedMetadata.email, otp, locale, {
+            marketCountryCode: parseRequestMarketCountryCode(req)
         });
 
         // Publish ticket creation event to notify other systems
@@ -4465,24 +5007,6 @@ export const handleFreeEventRegistration = async (req, res, next) => {
         );
         ticket = await Ticket.getTicketById(ticket._id, false);
 
-        // Generate email payload and send ticket (same as handlePaymentSuccess)
-        // Extract locale from request
-        const locale = commonUtil.extractLocaleFromRequest(req);
-        const emailPayload = await ticketMaster.createEmailPayload(event, ticket, sanitizedData.email, otp, locale, {
-            marketCountryCode: parseRequestMarketCountryCode(req)
-        });
-        if (!emailPayload?.to) {
-            throw new Error('Ticket email recipient is missing');
-        }
-        await new Promise(resolve => setTimeout(resolve, 100)); // intentional delay
-        await sendMail.forward(emailPayload).then(async data => {
-            // Update the ticket to mark as sent
-            ticket = await Ticket.updateTicketById(ticket._id, { isSend: true });
-        }).catch(err => {
-            console.error('Error sending ticket email:', err);
-            // Don't throw here - ticket is created successfully even if email fails
-        });
-
         const clientId = getClientIdentifier(req);
         console.log('Free event registration handled:', {
             ticketId: ticket._id,
@@ -4494,6 +5018,11 @@ export const handleFreeEventRegistration = async (req, res, next) => {
             success: true,
             data: ticket,
             message: "Free event registration successful"
+        });
+
+        const locale = commonUtil.extractLocaleFromRequest(req);
+        ticketMaster.sendTicketEmailInBackground(event, ticket, sanitizedData.email, otp, locale, {
+            marketCountryCode: parseRequestMarketCountryCode(req)
         });
 
         // Publish ticket creation event to notify other systems
@@ -4700,6 +5229,10 @@ function decodePosition(positionCode) {
 export const getEventSeatsPublic = async (req, res, next) => {
 	try {
 		const externalEventId = req.params.eventId; // External event ID from route
+		const queryEmail = typeof req.query.email === 'string' ? req.query.email.trim().toLowerCase() : '';
+		const querySessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId.trim() : '';
+		const queryCheckoutToken =
+			typeof req.query.checkoutToken === 'string' ? req.query.checkoutToken.trim() : '';
 
 		// 1. Get event by external ID to check if it has seat selection enabled
 		// Use .lean() for faster queries (returns plain objects, not Mongoose documents)
@@ -4764,6 +5297,62 @@ export const getEventSeatsPublic = async (req, res, next) => {
 		// 5. Get Redis reservations for event (using external event ID for Redis key)
 		const reservedMap = await seatReservationService.getReservedSeats(externalEventId);
 		const reservedPlaceIds = Array.from(reservedMap.keys());
+		const ownReservedSet = new Set();
+		let tokenCheckoutSession = null;
+		if (queryCheckoutToken) {
+			const tokenSession = await getSeatCheckoutSessionByToken(queryCheckoutToken);
+			if (tokenSession && String(tokenSession.eventId) === String(externalEventId)) {
+				tokenCheckoutSession = tokenSession;
+				const tokenSessionId =
+					typeof tokenSession.sessionId === 'string' ? tokenSession.sessionId.trim() : '';
+				if (tokenSessionId) {
+					for (const [placeId, holderSessionId] of reservedMap.entries()) {
+						if (holderSessionId === tokenSessionId) {
+							ownReservedSet.add(placeId);
+						}
+					}
+				}
+			}
+		}
+
+		const tokenEmail =
+			typeof tokenCheckoutSession?.email === 'string'
+				? tokenCheckoutSession.email.trim().toLowerCase()
+				: '';
+		const tokenSessionId =
+			typeof tokenCheckoutSession?.sessionId === 'string'
+				? tokenCheckoutSession.sessionId.trim()
+				: '';
+
+		if (queryEmail || querySessionId || tokenEmail || tokenSessionId) {
+			for (const placeId of reservedPlaceIds) {
+				if (ownReservedSet.has(placeId)) continue;
+				const emailCandidates = [queryEmail, tokenEmail].filter(Boolean);
+				let matchedByEmail = false;
+				for (const emailCandidate of emailCandidates) {
+					const ownedSessionId = await seatReservationService.getReservation(
+						externalEventId,
+						placeId,
+						emailCandidate
+					);
+					if (ownedSessionId) {
+						ownReservedSet.add(placeId);
+						matchedByEmail = true;
+						break;
+					}
+				}
+				if (matchedByEmail) continue;
+				const holderSessionId = reservedMap.get(placeId);
+				if (querySessionId && holderSessionId === querySessionId) {
+					ownReservedSet.add(placeId);
+					continue;
+				}
+				if (tokenSessionId && holderSessionId === tokenSessionId) {
+					ownReservedSet.add(placeId);
+				}
+			}
+		}
+		const ownReservedPlaceIds = Array.from(ownReservedSet);
 
 		// 6. Format sections from venue (contains polygon and spacingConfig)
 		let venuePlaces = Array.isArray(venueManifest.places) ? venueManifest.places : [];
@@ -4812,7 +5401,7 @@ export const getEventSeatsPublic = async (req, res, next) => {
 			.map((section) => {
 				const sectionPlaces = venuePlaces.filter((p) => p.section === section.name || p.section === section.id);
 				const soldCount = readAreaSoldCount(section.id) || readAreaSoldCount(section.name);
-				const reservedCount = sectionPlaces.filter((p) => reservedSet.has(p.placeId)).length;
+				const reservedCount = sectionPlaces.filter((p) => reservedSet.has(p.placeId) && !ownReservedSet.has(p.placeId)).length;
 				const inferredCapacity = sectionPlaces.length;
 				const capacity = Number(section.capacity || inferredCapacity || 0);
 				return {
@@ -4844,6 +5433,7 @@ export const getEventSeatsPublic = async (req, res, next) => {
 			// Availability
 			sold: encodedManifest.availability?.sold || [],
 			reserved: reservedPlaceIds, // From Redis
+			ownReserved: ownReservedPlaceIds,
 
 			// Pricing configuration (when pricing is encoded in placeIds)
 			pricingConfig: encodedManifest.pricingConfig || null,
@@ -4875,7 +5465,7 @@ export const getEventSeatsPublic = async (req, res, next) => {
 export const reserveSeatsPublic = async (req, res, next) => {
 	try {
 		const eventId = req.params.eventId;
-		const { placeIds, sectionSelections, sessionId, email } = req.body;
+		const { placeIds, sectionSelections, sessionId, email, fullName } = req.body;
 
 		let resolvedPlaceIds = Array.isArray(placeIds) ? [...placeIds] : [];
 
@@ -4958,6 +5548,26 @@ export const reserveSeatsPublic = async (req, res, next) => {
 			});
 		}
 
+		const eventForSoldCheck = await Event.getEventById(eventId);
+		if (!eventForSoldCheck) {
+			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+				message: 'Event not found',
+				error: RESOURCE_NOT_FOUND
+			});
+		}
+		const manifestForSoldCheck = await EventManifest.findOne({
+			eventId: String(eventForSoldCheck._id),
+		}).lean();
+		const soldSet = new Set(manifestForSoldCheck?.availability?.sold || []);
+		const alreadySold = resolvedPlaceIds.filter((placeId) => soldSet.has(placeId));
+		if (alreadySold.length > 0) {
+			return res.status(consts.HTTP_STATUS_CONFLICT).json({
+				message: 'Some seats are already sold',
+				error: 'SEATS_ALREADY_SOLD',
+				data: { sold: alreadySold },
+			});
+		}
+
 		// Validate sessionId format (UUID)
 		const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 		if (!uuidRegex.test(sessionId)) {
@@ -4991,12 +5601,27 @@ export const reserveSeatsPublic = async (req, res, next) => {
 			});
 		}
 
+		await refreshSeatEmailVerified(eventId, normalizedEmail);
+
+		const checkoutSession = await createSeatCheckoutSession({
+			eventId,
+			email: normalizedEmail,
+			fullName: typeof fullName === 'string' ? fullName.trim() : '',
+			sessionId,
+			placeIds: Array.isArray(placeIds) ? placeIds : [],
+			sectionSelections: sectionSelections || [],
+			resolvedPlaceIds
+		});
+
 		return res.status(consts.HTTP_STATUS_OK).json({
 			message: 'Seats reserved successfully',
 			data: {
 				...result,
 				resolvedPlaceIds,
-				sectionSelections: sectionSelections || []
+				sectionSelections: sectionSelections || [],
+				checkoutToken: checkoutSession.checkoutToken,
+				expiresAt: checkoutSession.expiresAt,
+				sessionId
 			}
 		});
 	} catch (err) {
@@ -5011,7 +5636,7 @@ export const reserveSeatsPublic = async (req, res, next) => {
 export const releaseSeatsPublic = async (req, res, next) => {
 	try {
 		const eventId = req.params.eventId;
-		const { placeIds, sessionId, email } = req.body;
+		const { placeIds, sessionId, email, checkoutToken } = req.body;
 
 		if (!placeIds || !Array.isArray(placeIds) || placeIds.length === 0) {
 			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -5057,6 +5682,10 @@ export const releaseSeatsPublic = async (req, res, next) => {
 
 		// Release reservations (pass email to release only this user's reservations)
 		const releasedCount = await seatReservationService.releaseReservations(eventId, placeIds, normalizedEmail);
+
+		if (checkoutToken && typeof checkoutToken === 'string' && checkoutToken.trim()) {
+			await removePlaceIdsFromSeatCheckoutSession(checkoutToken.trim(), placeIds);
+		}
 
 		return res.status(consts.HTTP_STATUS_OK).json({
 			message: 'Seat reservations released successfully',
@@ -5223,6 +5852,8 @@ export const verifySeatOTP = async (req, res, next) => {
 		// Delete OTP from Redis (one-time use)
 		await redisClient.del(otpKey);
 
+		const verifiedAt = await setSeatEmailVerified(eventId, normalizedEmail);
+
 		// Get user data
 		const userDataKey = `seat_user:${eventId}:${normalizedEmail}`;
 		const userDataStr = await redisClient.get(userDataKey);
@@ -5255,7 +5886,10 @@ export const verifySeatOTP = async (req, res, next) => {
 			success: true,
 			data: {
 				email: userData.email,
-				fullName: userData.fullName
+				fullName: userData.fullName,
+				emailTrusted: true,
+				verifiedAt,
+				trustExpiresAt: new Date(Date.now() + 600 * 1000).toISOString()
 			}
 		});
 	} catch (err) {
@@ -5264,7 +5898,179 @@ export const verifySeatOTP = async (req, res, next) => {
 	}
 };
 
+/**
+ * Check whether email is still within the 10-minute trust window (skip OTP).
+ */
+export const checkSeatEmailTrust = async (req, res, next) => {
+	try {
+		const eventId = req.params.eventId;
+		const { email } = req.body;
+
+		if (!email || typeof email !== 'string' || !email.includes('@')) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+				message: 'Valid email address is required',
+				error: 'INVALID_EMAIL'
+			});
+		}
+
+		const trust = await getSeatEmailTrust(eventId, email);
+		return res.status(consts.HTTP_STATUS_OK).json({
+			success: true,
+			data: trust
+		});
+	} catch (err) {
+		error('Error checking seat email trust:', err);
+		next(err);
+	}
+};
+
+/**
+ * Restore an in-progress checkout session by token.
+ */
+export const getSeatCheckoutSession = async (req, res, next) => {
+	try {
+		const eventId = req.params.eventId;
+		const checkoutToken = req.query.token;
+
+		if (!checkoutToken || typeof checkoutToken !== 'string') {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+				message: 'checkout token is required',
+				error: 'INVALID_DATA'
+			});
+		}
+
+		const session = await getSeatCheckoutSessionByToken(checkoutToken);
+		if (!session || String(session.eventId) !== String(eventId)) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+				message: 'Checkout session not found or expired',
+				error: 'SESSION_NOT_FOUND'
+			});
+		}
+
+		const placeIds = session.resolvedPlaceIds?.length
+			? session.resolvedPlaceIds
+			: session.placeIds;
+		const availability = await seatReservationService.checkAvailability(
+			eventId,
+			placeIds,
+			session.sessionId,
+			session.email
+		);
+
+		const holdsActive =
+			placeIds.length > 0 &&
+			availability.reserved.length === 0 &&
+			availability.available.length === placeIds.length;
+
+		if (!holdsActive) {
+			await deleteSeatCheckoutSession(checkoutToken);
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+				message: 'Seat holds expired or no longer available',
+				error: 'HOLDS_EXPIRED'
+			});
+		}
+
+		return res.status(consts.HTTP_STATUS_OK).json({
+			success: true,
+			data: {
+				...session,
+				holdsActive: true
+			}
+		});
+	} catch (err) {
+		error('Error getting seat checkout session:', err);
+		next(err);
+	}
+};
+
+/**
+ * Release all seats for a checkout session and clear checkout token.
+ */
+export const releaseSeatCheckoutSession = async (req, res, next) => {
+	try {
+		const eventId = req.params.eventId;
+		const { sessionId, email, checkoutToken } = req.body;
+
+		if (!sessionId) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+				message: 'sessionId is required',
+				error: 'INVALID_DATA'
+			});
+		}
+
+		if (!email || typeof email !== 'string' || !email.includes('@')) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+				message: 'Valid email address is required',
+				error: 'INVALID_EMAIL'
+			});
+		}
+
+		const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+		if (!uuidRegex.test(sessionId)) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+				message: 'Invalid sessionId format',
+				error: 'INVALID_SESSION_ID'
+			});
+		}
+
+		const normalizedEmail = email.trim().toLowerCase();
+		const { released, placeIds } = await seatReservationService.releaseReservationsBySession(
+			eventId,
+			sessionId,
+			normalizedEmail
+		);
+
+		if (checkoutToken) {
+			await deleteSeatCheckoutSession(checkoutToken);
+		}
+
+		return res.status(consts.HTTP_STATUS_OK).json({
+			message: 'Checkout session released successfully',
+			data: { released, placeIds }
+		});
+	} catch (err) {
+		error('Error releasing seat checkout session:', err);
+		next(err);
+	}
+};
+
 // ==================== Event-merchant-service proxies (waitlist, survey) ====================
+
+export const validateDiscountCode = async (req, res, next) => {
+	try {
+		const eventId = req.params.eventId;
+		const { code, orderBaseSubtotal } = req.body || {};
+		if (!code || typeof code !== 'string' || !code.trim()) {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({ valid: false, error: 'Discount code is required' });
+		}
+		const event = await Event.getEventById(eventId);
+		if (!event) {
+			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({ error: RESOURCE_NOT_FOUND });
+		}
+		const doc = event._doc ?? event;
+		const validation = validateCouponOnEvent(doc, code);
+		if (!validation.valid) {
+			return res.status(consts.HTTP_STATUS_OK).json({ valid: false, error: validation.error });
+		}
+		const ticket = doc.ticketInfo?.[0] || { price: 0 };
+		const baseSubtotal = orderBaseSubtotal != null
+			? Number(orderBaseSubtotal)
+			: getBaseSubtotalForCoupon(ticket, doc, 1, {});
+		const discountAmount = computeDiscountAmount(validation.coupon, baseSubtotal);
+		return res.status(consts.HTTP_STATUS_OK).json({
+			valid: true,
+			code: validation.coupon.code,
+			name: validation.coupon.name,
+			discountType: validation.coupon.discount_type,
+			discountValue: validation.coupon.discount_value,
+			discountAmount,
+			couponId: validation.coupon.id
+		});
+	} catch (err) {
+		error('validateDiscountCode:', err);
+		next(err);
+	}
+};
 
 const WAITLIST_OTP_TTL = 300; // 5 minutes
 const WAITLIST_SEND_COOLDOWN = 60; // 1 minute between send-code per email per event

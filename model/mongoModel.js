@@ -386,6 +386,17 @@ const eventSchema = new mongoose.Schema({
 	event_end_date: { type: Date },
 	pre_sale_waitlist_count: { type: Number },
 	pre_sale_waitlist_cap: { type: Number },
+	discountCodes: [{
+		id: { type: String },
+		code: { type: String },
+		name: { type: String },
+		discount_type: { type: String, enum: ['fixed', 'percentage'] },
+		discount_value: { type: Number },
+		max_uses: { type: Number },
+		uses_left: { type: Number },
+		active: { type: Boolean, default: true },
+		source: { type: String }
+	}],
 	createdAt: { type: Date, default: Date.now },
 	updatedAt:{ type:Date, default:Date.now }
 })

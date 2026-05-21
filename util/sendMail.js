@@ -5,74 +5,94 @@ import dotenv from 'dotenv'
 dotenv.config()
 import {TicketReport} from '../model/reporting.js'
 
-let transport = createTransport({
-    host: process.env.EMAIL_SERVER,
-    port: process.env.EMAIL_PORT,
-    auth: {
-        user: process.env.EMAIL_USERNAME,
-        pass: process.env.EMAIL_PASSWORD
-    },
-    tls: {
-        chipers: 'SSLv3'
-    },
-    secure: false,
-    ignoreTLS: false
+const EMAIL_SEND_TIMEOUT_MS = Number(process.env.EMAIL_SEND_TIMEOUT_MS) || 15000;
+const EMAIL_CONNECTION_TIMEOUT_MS = Number(process.env.EMAIL_CONNECTION_TIMEOUT_MS) || 10000;
 
-});
-
-
-export const forward = async (emailData) =>{
-    if(process.env.SEND_MAIL){
-        try{
-            return await new Promise((resolve, reject)=>{
-                transport.sendMail(emailData, async function (err, data) {
-                    if(err){
-                        const msg ={
-                            emailData: emailData,
-                            isSend:false,
-                            retryCount:0,
-                        }
-                        const reporting = TicketReport(msg)
-                        await reporting.save()
-                        error('error sending email %s', err?.stack || err?.message || String(err))
-                        return reject(err)
-                    }
-                    info('email sent %s', data)
-                    return resolve(data)
-                })
-            })
-        }catch(err){
-            const msg ={
-                emailData: emailData,
-                isSend:false,
-                retryCount:0,
-            }
-            const reporting = TicketReport(msg)
-            await reporting.save()
-            throw err
-        }
-    }
-
+async function persistFailedEmail(emailData, retryCount = 0) {
+    const reporting = TicketReport({
+        emailData,
+        isSend: false,
+        retryCount,
+    });
+    await reporting.save();
 }
+
+function createMailTransport() {
+    return createTransport({
+        host: process.env.EMAIL_SERVER,
+        port: process.env.EMAIL_PORT,
+        auth: {
+            user: process.env.EMAIL_USERNAME,
+            pass: process.env.EMAIL_PASSWORD
+        },
+        tls: {
+            chipers: 'SSLv3'
+        },
+        secure: false,
+        ignoreTLS: false,
+        connectionTimeout: EMAIL_CONNECTION_TIMEOUT_MS,
+        greetingTimeout: EMAIL_CONNECTION_TIMEOUT_MS,
+        socketTimeout: EMAIL_SEND_TIMEOUT_MS,
+    });
+}
+
+let transport = createMailTransport();
+
+async function sendWithTimeout(emailData, timeoutMs = EMAIL_SEND_TIMEOUT_MS) {
+    const sendPromise = new Promise((resolve, reject) => {
+        transport.sendMail(emailData, (err, data) => {
+            if (err) reject(err);
+            else resolve(data);
+        });
+    });
+
+    const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(
+            () => reject(new Error(`Email send timed out after ${timeoutMs}ms`)),
+            timeoutMs
+        );
+    });
+
+    return Promise.race([sendPromise, timeoutPromise]);
+}
+
+export const forward = async (emailData, options = {}) => {
+    if (!process.env.SEND_MAIL) return;
+
+    const timeoutMs = options.timeoutMs ?? EMAIL_SEND_TIMEOUT_MS;
+
+    try {
+        const data = await sendWithTimeout(emailData, timeoutMs);
+        info('email sent %s', data);
+        return data;
+    } catch (err) {
+        await persistFailedEmail(emailData);
+        error('error sending email %s', err?.stack || err?.message || String(err));
+        throw err;
+    }
+};
+
+export const forwardInBackground = (emailData, callbacks = {}) => {
+    if (!process.env.SEND_MAIL) return;
+    void forward(emailData).then((data) => {
+        callbacks.onSuccess?.(data);
+    }).catch((err) => {
+        callbacks.onError?.(err);
+    });
+};
 
 export const retryForward = async (id, emailData, retryCount) => {
-    return await new Promise((resolve, reject)=>{
-        transport.sendMail(emailData, async function (err, data) {
-            if(err){
-                const msg ={
-                    retryCount:retryCount+1,
-                }
-                await TicketReport.findByIdAndUpdate(id, { $set:  msg },
-                    { new: true }).catch(err=>{return {error:err.stack}})
-                    error('error sending email %s', err?.stack || err?.message || String(err))
-                return reject(err)
-            }
-            info('email sent %s', data)
-            return resolve(data)
-        })
-    })
-
-}
+    try {
+        const data = await sendWithTimeout(emailData);
+        info('email sent %s', data);
+        return data;
+    } catch (err) {
+        await TicketReport.findByIdAndUpdate(id, { $set: { retryCount: retryCount + 1 } }, { new: true })
+            .catch(updateErr => ({ error: updateErr.stack }));
+        error('error sending email %s', err?.stack || err?.message || String(err));
+        throw err;
+    }
+};
 
 /**
  * Send pricing sync error email notification

@@ -85,7 +85,14 @@ class MessageConsumer {
             return;
         }
 
-        const { durable = true, prefetch = 1, deadLetterExchange, deadLetterRoutingKey } = options;
+        const {
+            durable = true,
+            prefetch = 1,
+            deadLetterExchange,
+            deadLetterRoutingKey,
+            /** After assertQueue, bind to this topic exchange (optional). Use when FEB starts before EMS so queue is still wired to the broker. */
+            topicExchangeBindings = []
+        } = options;
 
         // Configure queue options with dead letter exchange if provided
         const queueOptions = { durable };
@@ -100,6 +107,21 @@ class MessageConsumer {
 
         info(`Creating queue ${queueName} with options:`, queueOptions);
         await this.consumeChannel.assertQueue(queueName, queueOptions);
+
+        if (Array.isArray(topicExchangeBindings) && topicExchangeBindings.length > 0) {
+            const defaultExchange = process.env.RABBITMQ_EXCHANGE || 'event-merchant-exchange';
+            for (const b of topicExchangeBindings) {
+                const ex = typeof b.exchange === 'string' && b.exchange ? b.exchange : defaultExchange;
+                const rk = b.routingKey;
+                if (!rk) {
+                    continue;
+                }
+                await this.consumeChannel.assertExchange(ex, 'topic', { durable: true });
+                await this.consumeChannel.bindQueue(queueName, ex, rk);
+                info(`Bound queue ${queueName} to exchange ${ex} with routing key ${rk}`);
+            }
+        }
+
         await this.consumeChannel.prefetch(prefetch);
 
         info(`Starting to consume queue: ${queueName}`);

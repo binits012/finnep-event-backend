@@ -3,6 +3,7 @@ import * as Event from '../model/event.js';
 import * as Merchant from '../model/merchant.js';
 import * as hash from '../util/createHash.js';
 import * as ticketMaster from '../util/ticketMaster.js';
+import { attachCouponFieldsToTicketInfo, enrichMetadataWithCouponPricing } from '../util/ticketDiscountDisplay.js';
 import * as commonUtil from '../util/common.js';
 import redisClient from '../model/redisConnect.js';
 import { info, error } from '../model/logger.js';
@@ -16,10 +17,8 @@ import {
     validateScanCountOrderQuantity,
     validateTicketPurchaseInventory
 } from '../util/ticketQuantity.js';
-import { EventManifest, PlatformMarketingConsent } from '../model/mongoModel.js';
-import { manifestUpdateService } from '../src/services/manifestUpdateService.js';
-import { seatReservationService } from '../src/services/seatReservationService.js';
-import { resolveSoldPlaceIdsForPayment } from '../src/services/paymentSeatResolutionService.js';
+import { PlatformMarketingConsent } from '../model/mongoModel.js';
+import { fulfillSeatPurchaseBeforeTicket } from '../src/services/seatPurchaseFulfillmentService.js';
 
 export const handlePaytrailWebhook = async (req, res, next) => {
     try {
@@ -129,6 +128,45 @@ export async function createTicketFromPaytrailPayment(paymentData, transactionId
         }
     }
 
+    const ticketLockKey = `paytrail_ticket_create_lock:${stamp}`;
+    const ticketLockAcquired = await redisClient.set(ticketLockKey, transactionId || stamp, {
+        NX: true,
+        EX: 60
+    });
+    if (ticketLockAcquired === null) {
+        for (let attempt = 0; attempt < 6; attempt++) {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            const inProgressTicket = await Ticket.genericSearch({ paytrailStamp: stamp })
+                || (transactionId ? await Ticket.genericSearch({ paytrailTransactionId: transactionId }) : null);
+            if (inProgressTicket) {
+                info(`Ticket created by parallel Paytrail request for stamp: ${stamp}`);
+                return inProgressTicket;
+            }
+        }
+        const err = new Error('Ticket creation already in progress for this payment');
+        err.code = 'TICKET_CREATION_IN_PROGRESS';
+        throw err;
+    }
+
+    try {
+        return await _createTicketFromPaytrailPaymentBody(paymentData, transactionId, stamp);
+    } finally {
+        await redisClient.del(ticketLockKey).catch(() => {});
+    }
+}
+
+async function _createTicketFromPaytrailPaymentBody(paymentData, transactionId, stamp) {
+    const existingTicket = await Ticket.genericSearch({ paytrailStamp: stamp });
+    if (existingTicket) {
+        return existingTicket;
+    }
+    if (transactionId) {
+        const existingByTransaction = await Ticket.genericSearch({ paytrailTransactionId: transactionId });
+        if (existingByTransaction) {
+            return existingByTransaction;
+        }
+    }
+
     const placeIds = paymentData.placeIds || paymentData.seats || [];
     const seatTickets = Array.isArray(paymentData.seatTickets) ? paymentData.seatTickets : (paymentData.seatTickets ? (typeof paymentData.seatTickets === 'string' ? (() => { try { return JSON.parse(paymentData.seatTickets); } catch { return []; } })() : []) : []);
 
@@ -204,25 +242,22 @@ export async function createTicketFromPaytrailPayment(paymentData, transactionId
     }
 
     const ticketTypeConfig = findTicketTypeConfig(event, paymentData.ticketId);
+    const enrichedPaymentData = enrichMetadataWithCouponPricing(
+        { ...paymentData, quantity: paymentData.quantity },
+        event,
+        ticketTypeConfig
+    );
+    attachCouponFieldsToTicketInfo(ticketInfoDraft, enrichedPaymentData);
     const seatCount = Math.max(placeIds.length, seatTickets.length);
 
+    let inventoryAdmissionQuantity = null;
     if (ticketTypeConfig && event && paymentData.ticketId) {
         const inventoryCheck = validateTicketPurchaseInventory(event, ticketTypeConfig, {
             orderQuantity: paymentData.quantity,
             seatCount,
             metadata: paymentData
         });
-        const inventoryDecrement = await Event.decrementTicketTypeAvailable(
-            event._id,
-            paymentData.ticketId,
-            inventoryCheck.admissionQuantity,
-            ticketTypeConfig
-        );
-        if (!inventoryDecrement.success) {
-            const err = new Error('INSUFFICIENT_TICKET_INVENTORY');
-            err.code = 'INSUFFICIENT_TICKET_INVENTORY';
-            throw err;
-        }
+        inventoryAdmissionQuantity = inventoryCheck.admissionQuantity;
     }
 
     const scanCount = getScanCountFromTicketType(ticketTypeConfig);
@@ -241,6 +276,43 @@ export async function createTicketFromPaytrailPayment(paymentData, transactionId
 
     // Platform marketing: default opt-in for every new email
     await PlatformMarketingConsent.getOrCreatePlatformConsent(emailHash);
+
+    const isVenueEvent = !!(event && event.venue && event.venue.venueId);
+    if (isVenueEvent) {
+        await fulfillSeatPurchaseBeforeTicket({
+            eventId: paymentData.eventId,
+            event,
+            sessionId: paymentData.sessionId,
+            placeIds,
+            sectionSelections: paymentData.sectionSelections,
+            checkoutToken: paymentData.checkoutToken || null,
+            logPrefix: '[createTicketFromPaytrailPayment]',
+        });
+    }
+
+    if (ticketTypeConfig && paymentData.ticketId && inventoryAdmissionQuantity != null) {
+        const inventoryDecrement = await Event.decrementTicketTypeAvailable(
+            event._id,
+            paymentData.ticketId,
+            inventoryAdmissionQuantity,
+            ticketTypeConfig
+        );
+        if (!inventoryDecrement.success) {
+            if (isVenueEvent) {
+                error(`[createTicketFromPaytrailPayment] Ticket type inventory drift after seat fulfillment (continuing to honor paid seats)`, {
+                    eventId: paymentData.eventId,
+                    ticketId: paymentData.ticketId,
+                    admissionQuantity: inventoryAdmissionQuantity,
+                    reason: inventoryDecrement.reason,
+                    stamp,
+                });
+            } else {
+                const err = new Error('INSUFFICIENT_TICKET_INVENTORY');
+                err.code = 'INSUFFICIENT_TICKET_INVENTORY';
+                throw err;
+            }
+        }
+    }
 
     let ticket = await Ticket.createTicket(
         null,
@@ -292,96 +364,6 @@ export async function createTicketFromPaytrailPayment(paymentData, transactionId
         }
     } else {
         info(`Email already sent for ticket: ${ticket._id} - skipping email queue`);
-    }
-
-    // Mark seats as sold for seat-based events (same as Stripe flow)
-    console.log('[createTicketFromPaytrailPayment] Checking seat marking:', {
-        hasEvent: !!event,
-        hasVenue: !!(event && event.venue),
-        hasVenueId: !!(event && event.venue && event.venue.venueId),
-        venueId: event && event.venue ? event.venue.venueId : null,
-        placeIdsFromPlaceIds: paymentData.placeIds,
-        placeIdsFromSeats: paymentData.seats,
-        finalPlaceIds: placeIds,
-        placeIdsLength: placeIds.length,
-        eventId: paymentData.eventId
-    });
-
-    if (event && event.venue && event.venue.venueId) {
-        try {
-            const { placeIds: placeIdsToMarkSold, areaSoldIncrements, unresolvedSelections } = await resolveSoldPlaceIdsForPayment({
-                eventId: paymentData.eventId,
-                sessionId: paymentData.sessionId,
-                placeIds,
-                sectionSelections: paymentData.sectionSelections
-            });
-
-            if (!placeIdsToMarkSold || placeIdsToMarkSold.length === 0) {
-                info(`[createTicketFromPaytrailPayment] No placeIds resolved for sold update (event ${paymentData.eventId})`);
-            }
-            if (unresolvedSelections.length > 0) {
-                error('[createTicketFromPaytrailPayment] Could not fully resolve some sectionSelections:', unresolvedSelections);
-            }
-
-            // Find EventManifest by eventId
-            const eventMongoId = String(event._id);
-            const eventManifest = await EventManifest.findOne({ eventId: eventMongoId });
-
-            console.log('[createTicketFromPaytrailPayment] EventManifest lookup:', {
-                eventMongoId,
-                eventIdFromPaymentData: paymentData.eventId,
-                foundManifest: !!eventManifest,
-                manifestId: eventManifest ? eventManifest._id.toString() : null,
-                manifestEventId: eventManifest ? eventManifest.eventId : null,
-                eventIdMatches: eventManifest ? (eventManifest.eventId === eventMongoId) : false
-            });
-
-            if (eventManifest && areaSoldIncrements.length > 0) {
-                await manifestUpdateService.markAreaSelectionsSold(
-                    eventManifest._id.toString(),
-                    areaSoldIncrements
-                );
-            }
-
-            if (eventManifest && placeIdsToMarkSold.length > 0) {
-                // Mark seats as sold in EventManifest
-                console.log('[createTicketFromPaytrailPayment] Marking seats as sold:', {
-                    manifestId: eventManifest._id.toString(),
-                    placeIds: placeIdsToMarkSold,
-                    placeIdsCount: placeIdsToMarkSold.length
-                });
-
-                await manifestUpdateService.markSeatsAsSold(
-                    eventManifest._id.toString(),
-                    placeIdsToMarkSold
-                );
-
-                // Release Redis reservations
-                await seatReservationService.releaseReservations(
-                    paymentData.eventId,
-                    placeIdsToMarkSold
-                );
-
-                info(`Seats marked as sold for Paytrail payment - event: ${paymentData.eventId}, seats: ${placeIdsToMarkSold.length}`);
-            } else {
-                if (!eventManifest) {
-                    error(`EventManifest not found for event ${paymentData.eventId}. Cannot mark seats as sold.`);
-                }
-            }
-        } catch (seatError) {
-            error(`Error marking seats as sold for Paytrail payment - event: ${paymentData.eventId}:`, seatError);
-            console.error('[createTicketFromPaytrailPayment] Seat marking error details:', seatError);
-            // Don't fail the entire operation if seat marking fails
-            // Ticket is already created, seats can be marked manually if needed
-        }
-    } else {
-        console.warn('[createTicketFromPaytrailPayment] Seat marking skipped:', {
-            reason: !event ? 'no event' : (!event.venue ? 'no venue' : (!event.venue.venueId ? 'no venueId' : 'no placeIds')),
-            hasEvent: !!event,
-            hasVenue: !!(event && event.venue),
-            hasVenueId: !!(event && event.venue && event.venue.venueId),
-            placeIdsLength: placeIds.length
-        });
     }
 
     // Publish ticket creation event to RabbitMQ (same as Stripe and free events)

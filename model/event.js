@@ -284,6 +284,35 @@ export const decrementTicketTypeAvailable = async (eventId, ticketTypeId, admiss
     return { success: true, admissionQuantity: qty };
 };
 
+export const decrementCouponUsesLeft = async (eventMongoId, couponCode) => {
+    const normalized = String(couponCode || '').trim().toUpperCase();
+    if (!eventMongoId || !normalized) {
+        return { ok: false };
+    }
+    const updated = await model.Event.findOneAndUpdate(
+        {
+            _id: eventMongoId,
+            discountCodes: {
+                $elemMatch: {
+                    code: { $regex: new RegExp(`^${normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+                    uses_left: { $gt: 0 },
+                    active: { $ne: false }
+                }
+            }
+        },
+        { $inc: { 'discountCodes.$[elem].uses_left': -1 } },
+        {
+            arrayFilters: [{
+                'elem.code': { $regex: new RegExp(`^${normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+                'elem.uses_left': { $gt: 0 }
+            }],
+            new: true
+        }
+    ).lean().exec();
+
+    return { ok: !!updated, event: updated };
+};
+
 export const updateEventById = async (id, obj) =>{
     try {
         return await model.Event.findByIdAndUpdate(id, {

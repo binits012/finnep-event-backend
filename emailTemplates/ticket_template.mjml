@@ -183,6 +183,12 @@
                 <td style="padding: 4px 0;"><p style="margin: 0; color: #475569; font-size: 14px;">{{t.price}}{{#if quantity}} (x{{quantity}}){{/if}}</p></td>
                 <td align="right" style="padding: 4px 0;"><p style="margin: 0; color: #0f172a; font-size: 14px; font-weight: 600;">{{basePrice}}</p></td>
               </tr>
+              {{#if couponDiscountAmount}}
+              <tr>
+                <td style="padding: 4px 0;"><p style="margin: 0; color: #475569; font-size: 14px;">{{t.discountCode}} ({{couponCode}})</p></td>
+                <td align="right" style="padding: 4px 0;"><p style="margin: 0; color: #059669; font-size: 14px; font-weight: 600;">-{{couponDiscountAmount}}</p></td>
+              </tr>
+              {{/if}}
               <tr>
                 <td style="padding: 4px 0;"><p style="margin: 0; color: #475569; font-size: 14px;">{{t.serviceFee}}{{#if quantity}} (x{{quantity}}){{/if}}</p></td>
                 <td align="right" style="padding: 4px 0;"><p style="margin: 0; color: #0f172a; font-size: 14px; font-weight: 600;">{{serviceFee}}</p></td>

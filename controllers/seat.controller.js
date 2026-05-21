@@ -249,7 +249,7 @@ export const getEventSeats = async (req, res, next) => {
 };
 
 /**
- * Reserve seats for an event (Redis, 7 min TTL)
+ * Reserve seats for an event (Redis, 10 min TTL)
  */
 export const reserveSeats = async (req, res, next) => {
 	try {
