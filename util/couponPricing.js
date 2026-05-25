@@ -68,6 +68,92 @@ export function computeDiscountAmount(coupon, baseSubtotal) {
   return roundMoney(Math.min(Math.max(0, amount), base));
 }
 
+/**
+ * Apply a validated discount code across per-seat/per-line catalog BASE prices only.
+ * Scales bases down proportionally after computing discount on summed catalog bases so the
+ * summed bases match `(sum - discount)`. Last line absorbs residual rounding drift.
+ *
+ * Used for seated flows (pricing_configuration + ticket_info with seatTickets) so taxes/fees stay
+ * on recalculated per-line bases/fees downstream.
+ *
+ * @param {unknown} event
+ * @param {string | null | undefined} couponCodeRaw
+ * @param {number[]} perSeatCatalogBases
+ * @returns {{
+ *   scaledBases: number[],
+ *   catalogBaseSubtotal: number,
+ *   discountedCatalogBaseSubtotal: number,
+ *   couponCode: string | null,
+ *   couponId: string | null,
+ *   couponDiscountAmount: number
+ * }}
+ */
+export function scaleSeatCatalogBasesWithCoupon(event, couponCodeRaw, perSeatCatalogBases) {
+  const bases = (Array.isArray(perSeatCatalogBases) ? perSeatCatalogBases : [])
+    .map((x) => roundMoney(parseMoneyField(x)))
+    .filter((_, __) => true);
+  const catalogBaseSubtotal = roundMoney(bases.reduce((acc, b) => roundMoney(acc + b), 0));
+
+  const normalizedCode = normalizeCouponCode(couponCodeRaw);
+  if (!normalizedCode || !(catalogBaseSubtotal > 0)) {
+    return {
+      scaledBases: bases,
+      catalogBaseSubtotal,
+      discountedCatalogBaseSubtotal: catalogBaseSubtotal,
+      couponCode: null,
+      couponId: null,
+      couponDiscountAmount: 0
+    };
+  }
+
+  const validation = validateCouponOnEvent(event, normalizedCode);
+  if (!validation.valid) {
+    throw new Error(validation.error || 'Invalid discount code');
+  }
+
+  const couponDiscountAmount = computeDiscountAmount(
+    validation.coupon,
+    catalogBaseSubtotal
+  );
+  const discountedCatalogBaseSubtotal = roundMoney(
+    Math.max(0, catalogBaseSubtotal - couponDiscountAmount)
+  );
+
+  if (bases.length === 0) {
+    throw new Error('Invalid seat catalog bases');
+  }
+  const scaled = new Array(bases.length);
+  if (bases.length === 1) {
+    scaled[0] = discountedCatalogBaseSubtotal;
+    return {
+      scaledBases: scaled,
+      catalogBaseSubtotal,
+      discountedCatalogBaseSubtotal,
+      couponCode: validation.coupon.code,
+      couponId: validation.coupon.id,
+      couponDiscountAmount
+    };
+  }
+
+  let accumulated = 0;
+  const sumSafe = catalogBaseSubtotal <= 0 ? 1 : catalogBaseSubtotal;
+  for (let i = 0; i < bases.length - 1; i += 1) {
+    const part = roundMoney((discountedCatalogBaseSubtotal * bases[i]) / sumSafe);
+    scaled[i] = part;
+    accumulated = roundMoney(accumulated + part);
+  }
+  scaled[bases.length - 1] = roundMoney(discountedCatalogBaseSubtotal - accumulated);
+
+  return {
+    scaledBases: scaled,
+    catalogBaseSubtotal,
+    discountedCatalogBaseSubtotal,
+    couponCode: validation.coupon.code,
+    couponId: validation.coupon.id,
+    couponDiscountAmount
+  };
+}
+
 /** Order base subtotal from catalog ticket price — never from client-discounted totals. */
 export function getBaseSubtotalForCoupon(ticket, event, quantity, metadata = {}) {
   const qty = Math.max(1, parseInt(metadata.quantity || quantity, 10) || 1);

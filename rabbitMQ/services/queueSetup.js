@@ -3,7 +3,7 @@ import { handleMerchantMessage } from '../handlers/merchantHandler.js';
 import { handleEventMessage } from '../handlers/eventHandler.js';
 import { handleExternalTicketSalesMessage } from '../handlers/externalTicketSalesHandler.js';
 import { handleSeatAvailabilityCheck } from '../handlers/seatAvailabilityHandler.js';
-import { handleSeatedEventTicketCreated } from '../handlers/seatedEventTicketHandler.js';
+import { handleSeatedEventTicketMessage } from '../handlers/seatedEventTicketHandler.js';
 import { handleSurveyMessage } from '../handlers/surveyHandler.js';
 import { handlePresaleSendEmails } from '../handlers/presaleSendEmailsHandler.js';
 import { handleWaitlistStatusUpdated } from '../handlers/waitlistStatusHandler.js';
@@ -100,11 +100,15 @@ const setupQueues = async (force = false) => {
         const externalSeatedEventTicketQueueOptions = {
             prefetch: QUEUE_PREFETCH,
             deadLetterExchange: 'event-merchant-dlx',
-            deadLetterRoutingKey: 'dlq.external.seated.event.ticket.retry-1'
+            deadLetterRoutingKey: 'dlq.external.seated.event.ticket.retry-1',
+            topicExchangeBindings: [
+                { routingKey: 'external.seated.event.ticket.created' },
+                { routingKey: 'external.seated.event.ticket.cancelled' }
+            ]
         };
         info('Setting up external.seated.event.ticket queue with options:', externalSeatedEventTicketQueueOptions);
         await messageConsumer.consumeQueue('external.seated.event.ticket', async (message) => {
-            await handleSeatedEventTicketCreated(message);
+            await handleSeatedEventTicketMessage(message);
         }, externalSeatedEventTicketQueueOptions);
 
         // Survey events (queue created and bound by event-merchant-service plugin)
