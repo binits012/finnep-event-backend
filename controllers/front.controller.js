@@ -3825,17 +3825,19 @@ export const handlePaymentSuccess = async (req, res, next) => {
             sectionSelections: finalSectionSelections,
             // Additional metadata fields for ticket record - use merged metadata
             fullName: mergedMetadata.fullName ? sanitizeString(mergedMetadata.fullName, 200) : null,
-            basePrice: mergedMetadata.basePrice ? sanitizeString(mergedMetadata.basePrice, 20) : null,
-            serviceFee: mergedMetadata.serviceFee ? sanitizeString(mergedMetadata.serviceFee, 20) : null,
-            vatRate: mergedMetadata.vatRate ? sanitizeString(mergedMetadata.vatRate, 20) : null,
+            basePrice: mergedMetadata.basePrice !== undefined && mergedMetadata.basePrice !== null ? sanitizeString(String(mergedMetadata.basePrice), 20) : null,
+            serviceFee: mergedMetadata.serviceFee !== undefined && mergedMetadata.serviceFee !== null ? sanitizeString(String(mergedMetadata.serviceFee), 20) : null,
+            vatRate: mergedMetadata.vatRate !== undefined && mergedMetadata.vatRate !== null ? sanitizeString(String(mergedMetadata.vatRate), 20) : null,
             vatAmount: mergedMetadata.vatAmount !== undefined && mergedMetadata.vatAmount !== null ? sanitizeString(String(mergedMetadata.vatAmount), 20) : null,
+            totalVatAmount: mergedMetadata.totalVatAmount !== undefined && mergedMetadata.totalVatAmount !== null ? sanitizeString(String(mergedMetadata.totalVatAmount), 20) : null,
             entertainmentTax: mergedMetadata.entertainmentTax !== undefined && mergedMetadata.entertainmentTax !== null ? sanitizeString(String(mergedMetadata.entertainmentTax), 20) : null,
-            serviceTax: mergedMetadata.serviceTax ? sanitizeString(mergedMetadata.serviceTax, 20) : null,
-            orderFee: mergedMetadata.orderFee ? sanitizeString(mergedMetadata.orderFee, 20) : null,
+            entertainmentTaxAmount: mergedMetadata.entertainmentTaxAmount !== undefined && mergedMetadata.entertainmentTaxAmount !== null ? sanitizeString(String(mergedMetadata.entertainmentTaxAmount), 20) : null,
+            serviceTax: mergedMetadata.serviceTax !== undefined && mergedMetadata.serviceTax !== null ? sanitizeString(String(mergedMetadata.serviceTax), 20) : null,
+            orderFee: mergedMetadata.orderFee !== undefined && mergedMetadata.orderFee !== null ? sanitizeString(String(mergedMetadata.orderFee), 20) : null,
             country: mergedMetadata.country ? sanitizeString(mergedMetadata.country, 100) : null,
             sessionId: mergedMetadata.sessionId ? sanitizeString(mergedMetadata.sessionId, 100) : null,
-            orderFeeServiceTax: mergedMetadata.orderFeeServiceTax ? sanitizeString(mergedMetadata.orderFeeServiceTax, 20) : null,
-            serviceTaxAmount: mergedMetadata.serviceTaxAmount ? sanitizeString(mergedMetadata.serviceTaxAmount, 20) : null,
+            orderFeeServiceTax: mergedMetadata.orderFeeServiceTax !== undefined && mergedMetadata.orderFeeServiceTax !== null ? sanitizeString(String(mergedMetadata.orderFeeServiceTax), 20) : null,
+            serviceTaxAmount: mergedMetadata.serviceTaxAmount !== undefined && mergedMetadata.serviceTaxAmount !== null ? sanitizeString(String(mergedMetadata.serviceTaxAmount), 20) : null,
             totalBasePrice: mergedMetadata.totalBasePrice !== undefined && mergedMetadata.totalBasePrice !== null ? sanitizeString(String(mergedMetadata.totalBasePrice), 20) : null,
             totalServiceFee: mergedMetadata.totalServiceFee !== undefined && mergedMetadata.totalServiceFee !== null ? sanitizeString(String(mergedMetadata.totalServiceFee), 20) : null,
             couponCode:
@@ -3914,6 +3916,9 @@ export const handlePaymentSuccess = async (req, res, next) => {
             vatRate: sanitizedMetadata.vatRate !== undefined ? sanitizedMetadata.vatRate : null,
             vat: sanitizedMetadata.vat !== undefined ? sanitizedMetadata.vat : null,
             vatAmount: sanitizedMetadata.vatAmount !== undefined ? sanitizedMetadata.vatAmount : null,
+            totalVatAmount: sanitizedMetadata.totalVatAmount !== undefined
+                ? sanitizedMetadata.totalVatAmount
+                : (sanitizedMetadata.vatAmount !== undefined ? sanitizedMetadata.vatAmount : null),
             entertainmentTax: sanitizedMetadata.entertainmentTax !== undefined ? sanitizedMetadata.entertainmentTax : stripeMetadata.vatRate,
             // Calculate entertainmentTaxAmount if not provided (for backward compatibility)
             // entertainmentTaxAmount = basePrice * (entertainmentTax / 100) * quantity
@@ -4899,7 +4904,7 @@ export const handleFreeEventRegistration = async (req, res, next) => {
             : (event.ticketInfo && event.ticketInfo.length > 0 ? event.ticketInfo[0] : null);
         assertTicketPurchasable(selectedTicket);
 
-        const ticketPrice = selectedTicket ? selectedTicket.price : 0;
+        const ticketPrice = selectedTicket ? (parseFloat(selectedTicket.price) || 0) : 0;
         const ticketType = selectedTicket ? selectedTicket.name : sanitizedData.ticketName;
 
         // Create ticketInfo object similar to handlePaymentSuccess
@@ -4907,12 +4912,15 @@ export const handleFreeEventRegistration = async (req, res, next) => {
             eventName: sanitizedData.eventName,
             ticketName: sanitizedData.ticketName,
             price: ticketPrice,
+            totalPrice: ticketPrice,
+            totalAmount: ticketPrice,
             currency: 'EUR', // Default currency for free events
             purchaseDate: new Date().toISOString(),
             email: sanitizedData.email,
             merchantId: sanitizedData.merchantId,
             eventId: sanitizedData.eventId,
             ticketId: sanitizedData.ticketId || null,
+            paymentProvider: 'free',
             isFree: true
         };
         if (Array.isArray(sanitizedData.sectionSelections) && sanitizedData.sectionSelections.length > 0) {

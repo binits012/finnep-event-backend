@@ -1,7 +1,7 @@
 import { generateICS, generateQRCode, loadEmailTemplate } from './common.js'
 import { resolvePlatformBrandingAsync } from './platformSettings.js'
 import * as Ticket from '../model/ticket.js'
-import {error} from '../model/logger.js'
+import { error, warn } from '../model/logger.js'
 import { forward } from './sendMail.js'
 import dotenv from 'dotenv'
 import moment from 'moment-timezone'
@@ -144,6 +144,156 @@ const ticketInfoToPlainObject = (ticketInfo) => {
     if (ticketInfo instanceof Map) return Object.fromEntries(ticketInfo);
     if (typeof ticketInfo === 'object') return { ...ticketInfo };
     return {};
+};
+
+const toFiniteNumber = (value, fallback = 0) => {
+    const parsed = parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const pickFirstFinite = (...values) => {
+    for (const value of values) {
+        const parsed = parseFloat(value);
+        if (Number.isFinite(parsed)) return parsed;
+    }
+    return NaN;
+};
+
+const resolveTicketEmailPricing = ({ ticketInfoData, event }) => {
+    const basePrice = toFiniteNumber(ticketInfoData.basePrice, toFiniteNumber(ticketInfoData.price, 0));
+    const serviceFee = toFiniteNumber(ticketInfoData.serviceFee, 0);
+    const quantity = parseInt(String(ticketInfoData.quantity || '1'), 10) || 1;
+    const orderFee = toFiniteNumber(ticketInfoData.orderFee, 0);
+    let entertainmentTax = toFiniteNumber(ticketInfoData.entertainmentTax, 0);
+    let serviceTax = toFiniteNumber(ticketInfoData.serviceTax, 0);
+    const vat = toFiniteNumber(ticketInfoData.vat, 0);
+    let vatRate = toFiniteNumber(ticketInfoData.vatRate, vat);
+
+    let seatTickets = ticketInfoData.seatTickets;
+    if (typeof seatTickets === 'string') {
+        try {
+            seatTickets = JSON.parse(seatTickets);
+        } catch (e) {
+            seatTickets = null;
+        }
+    }
+    const hasSeatTickets = Array.isArray(seatTickets) && seatTickets.length > 0;
+
+    let totalBasePrice = toFiniteNumber(ticketInfoData.totalBasePrice, NaN);
+    let totalServiceFee = toFiniteNumber(ticketInfoData.totalServiceFee, NaN);
+    let totalEntertainmentTaxAmount = toFiniteNumber(ticketInfoData.entertainmentTaxAmount, NaN);
+    let totalServiceTaxAmount = toFiniteNumber(ticketInfoData.serviceTaxAmount, NaN);
+    let totalVatAmount = toFiniteNumber(
+        pickFirstFinite(ticketInfoData.totalVatAmount, ticketInfoData.vatAmount),
+        NaN
+    );
+
+    const hasStoredTotals = [
+        totalBasePrice,
+        totalServiceFee,
+        totalEntertainmentTaxAmount,
+        totalServiceTaxAmount,
+        totalVatAmount
+    ].every(Number.isFinite);
+
+    // Legacy fallback: if totals are missing for seated tickets, derive from seat definitions.
+    if (!hasStoredTotals && hasSeatTickets && Array.isArray(event?.ticketInfo)) {
+        totalBasePrice = 0;
+        totalServiceFee = 0;
+        totalEntertainmentTaxAmount = 0;
+        totalServiceTaxAmount = 0;
+        totalVatAmount = 0;
+
+        let firstSeatEntertainmentTax = entertainmentTax;
+        let firstSeatServiceTax = serviceTax;
+
+        seatTickets.forEach((seatTicket, index) => {
+            const seatTicketId = seatTicket?.ticketId;
+            if (!seatTicketId) return;
+            const seatTicketConfig = event.ticketInfo.find(t => t._id?.toString() === seatTicketId.toString());
+            if (!seatTicketConfig) return;
+
+            const seatBasePrice = toFiniteNumber(seatTicketConfig.price, 0);
+            const seatServiceFee = toFiniteNumber(seatTicketConfig.serviceFee, 0);
+            const seatEntertainmentTax = toFiniteNumber(seatTicketConfig.entertainmentTax, 0);
+            const seatServiceTax = toFiniteNumber(seatTicketConfig.serviceTax, 0);
+            const seatVatRate = toFiniteNumber(seatTicketConfig.vatRate, vatRate);
+
+            if (index === 0) {
+                firstSeatEntertainmentTax = seatEntertainmentTax;
+                firstSeatServiceTax = seatServiceTax;
+            }
+
+            totalBasePrice += seatBasePrice;
+            totalServiceFee += seatServiceFee;
+            totalEntertainmentTaxAmount += (seatBasePrice * seatEntertainmentTax) / 100;
+            totalServiceTaxAmount += (seatServiceFee * seatServiceTax) / 100;
+            totalVatAmount += (seatBasePrice * seatVatRate) / 100;
+        });
+
+        entertainmentTax = firstSeatEntertainmentTax;
+        serviceTax = firstSeatServiceTax;
+    } else {
+        // Non-seated + stored-values-first behavior.
+        totalBasePrice = Number.isFinite(totalBasePrice) ? totalBasePrice : (basePrice * quantity);
+        totalServiceFee = Number.isFinite(totalServiceFee) ? totalServiceFee : (serviceFee * quantity);
+        totalEntertainmentTaxAmount = Number.isFinite(totalEntertainmentTaxAmount)
+            ? totalEntertainmentTaxAmount
+            : ((basePrice * entertainmentTax) / 100) * quantity;
+        totalServiceTaxAmount = Number.isFinite(totalServiceTaxAmount)
+            ? totalServiceTaxAmount
+            : ((serviceFee * serviceTax) / 100) * quantity;
+        totalVatAmount = Number.isFinite(totalVatAmount)
+            ? totalVatAmount
+            : ((basePrice * vatRate) / 100) * quantity;
+    }
+
+    if (totalVatAmount === 0 && totalEntertainmentTaxAmount > 0) {
+        totalVatAmount = totalEntertainmentTaxAmount;
+        if (vatRate === 0 && entertainmentTax > 0) {
+            vatRate = entertainmentTax;
+        }
+    }
+
+    if (totalVatAmount > 0 && (vatRate === 0 || !vatRate) && totalBasePrice > 0) {
+        const calculatedVatRate = (totalVatAmount / totalBasePrice) * 100;
+        if (calculatedVatRate > 0 && !isNaN(calculatedVatRate)) {
+            vatRate = calculatedVatRate;
+        }
+    }
+
+    const orderFeeServiceTax = Number.isFinite(toFiniteNumber(ticketInfoData.orderFeeServiceTax, NaN))
+        ? toFiniteNumber(ticketInfoData.orderFeeServiceTax, 0)
+        : roundMoney((orderFee * serviceTax) / 100);
+
+    const storedPaidTotal = pickFirstFinite(
+        ticketInfoData.totalAmount,
+        ticketInfoData.totalPrice,
+        ticketInfoData.price
+    );
+    const hasAuthoritativePaidTotal = Number.isFinite(storedPaidTotal);
+    const totalAmount = hasAuthoritativePaidTotal
+        ? roundMoney(storedPaidTotal)
+        : roundMoney(totalBasePrice + totalServiceFee + totalServiceTaxAmount + totalVatAmount + orderFee + orderFeeServiceTax);
+
+    return {
+        basePrice,
+        serviceFee,
+        quantity,
+        orderFee,
+        entertainmentTax,
+        serviceTax,
+        vatRate,
+        seatTickets,
+        totalBasePrice,
+        totalServiceFee,
+        totalEntertainmentTaxAmount,
+        totalServiceTaxAmount,
+        totalVatAmount,
+        orderFeeServiceTax,
+        totalAmount,
+        usedFallbackTotal: !hasAuthoritativePaidTotal
+    };
 };
 
 /**
@@ -296,19 +446,6 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
         const formattedEventTime = formatEventTime(eventDate, eventTimezone);
         const doorsOpenTime = eventDate ? moment(eventDate).tz(eventTimezone).subtract(15, 'minutes').format('h:mm A') : '';
 
-        // Extract pricing information from ticketInfoData (the converted Map)
-        // Use stored calculated values from DB, fallback to calculation if not available
-        // NOTE: basePrice and serviceFee are stored as PER-UNIT values
-        //       serviceTaxAmount and vatAmount are stored as TOTAL values (already multiplied by quantity)
-        const basePrice = parseFloat(getValue(ticketInfoData, 'basePrice')) ||
-                         parseFloat(getValue(ticketInfoData, 'price')) || 0;
-        const serviceFee = parseFloat(getValue(ticketInfoData, 'serviceFee')) || 0;
-        let orderFee = parseFloat(getValue(ticketInfoData, 'orderFee')) || 0;
-        let entertainmentTax = parseFloat(getValue(ticketInfoData, 'entertainmentTax')) || 0;
-        let serviceTax = parseFloat(getValue(ticketInfoData, 'serviceTax')) || 0;
-        const vat = parseFloat(getValue(ticketInfoData, 'vat')) || 0;
-        let vatRate = parseFloat(getValue(ticketInfoData, 'vatRate')) || vat; // Use let to allow recalculation if vatAmount exists but vatRate is 0
-
         const quantity = parseInt(getValue(ticketInfoData, 'quantity') || '1', 10) || 1;
         const provisioned = await provisionGroupChildQRCodes(ticket, event, quantity, {
             eventId: event?._id,
@@ -316,229 +453,32 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
             externalMerchantId: ticket.externalMerchantId
         });
         ticketInfoData = provisioned?.ticketInfo ?? ticketInfoData;
+        const pricing = resolveTicketEmailPricing({ ticketInfoData, event });
+        const {
+            quantity: resolvedQuantity,
+            orderFee,
+            entertainmentTax,
+            serviceTax,
+            vatRate,
+            seatTickets,
+            totalBasePrice,
+            totalServiceFee,
+            totalEntertainmentTaxAmount,
+            totalServiceTaxAmount,
+            totalVatAmount,
+            orderFeeServiceTax,
+            totalAmount,
+            usedFallbackTotal
+        } = pricing;
 
-        // Check if we have seatTickets (for seated events with different ticket types per seat)
-        let seatTickets = getValue(ticketInfoData, 'seatTickets');
-        if (typeof seatTickets === 'string') {
-            try {
-                seatTickets = JSON.parse(seatTickets);
-            } catch (e) {
-                seatTickets = null;
-            }
+        if (usedFallbackTotal) {
+            warn(
+                '[createEmailPayload] missing authoritative paid total; using recomputed fallback. ticketId=%s eventId=%s email=%s',
+                String(ticketId || ''),
+                String(event?._id || ''),
+                String(getValue(ticketInfoData, 'email', '') || '')
+            );
         }
-        const hasSeatTickets = seatTickets && Array.isArray(seatTickets) && seatTickets.length > 0;
-
-        let totalBasePrice, totalServiceFee, totalEntertainmentTaxAmount, totalServiceTaxAmount, totalVatAmount;
-
-        if (hasSeatTickets && event && event.ticketInfo) {
-            // Check if we have pre-calculated totals stored (prefer stored values to avoid rounding)
-            const storedTotalBasePrice = getValue(ticketInfoData, 'totalBasePrice');
-            const storedTotalServiceFee = getValue(ticketInfoData, 'totalServiceFee');
-            const storedEntertainmentTaxAmount = getValue(ticketInfoData, 'entertainmentTaxAmount');
-            const storedServiceTaxAmount = getValue(ticketInfoData, 'serviceTaxAmount');
-            const storedVatAmount = getValue(ticketInfoData, 'vatAmount');
-
-            let hasStoredValues = false;
-
-            // Use stored totals if available (preserve exact decimal values)
-            if (storedTotalBasePrice !== null && storedTotalBasePrice !== undefined && storedTotalBasePrice !== '') {
-                const parsed = parseFloat(storedTotalBasePrice);
-                if (!isNaN(parsed)) {
-                    totalBasePrice = parsed;
-                    hasStoredValues = true;
-                }
-            }
-            if (storedTotalServiceFee !== null && storedTotalServiceFee !== undefined && storedTotalServiceFee !== '') {
-                const parsed = parseFloat(storedTotalServiceFee);
-                if (!isNaN(parsed)) {
-                    totalServiceFee = parsed;
-                    hasStoredValues = true;
-                }
-            }
-            if (storedEntertainmentTaxAmount !== null && storedEntertainmentTaxAmount !== undefined && storedEntertainmentTaxAmount !== '') {
-                const parsed = parseFloat(storedEntertainmentTaxAmount);
-                if (!isNaN(parsed)) {
-                    totalEntertainmentTaxAmount = parsed;
-                    hasStoredValues = true;
-                }
-            }
-            if (storedServiceTaxAmount !== null && storedServiceTaxAmount !== undefined && storedServiceTaxAmount !== '') {
-                const parsed = parseFloat(storedServiceTaxAmount);
-                if (!isNaN(parsed)) {
-                    totalServiceTaxAmount = parsed;
-                    hasStoredValues = true;
-                }
-            }
-            if (storedVatAmount !== null && storedVatAmount !== undefined && storedVatAmount !== '') {
-                const parsed = parseFloat(storedVatAmount);
-                if (!isNaN(parsed)) {
-                    totalVatAmount = parsed;
-                    hasStoredValues = true;
-                }
-            }
-
-            // Only recalculate if stored values are not available
-            if (!hasStoredValues) {
-                // Calculate from individual seat tickets (for seated events with different ticket types)
-                totalBasePrice = 0;
-                totalServiceFee = 0;
-                totalEntertainmentTaxAmount = 0;
-                totalServiceTaxAmount = 0;
-                totalVatAmount = 0;
-
-                // Track entertainmentTax and serviceTax rates from first seat for display
-                let firstSeatEntertainmentTax = entertainmentTax;
-                let firstSeatServiceTax = serviceTax;
-
-                seatTickets.forEach((seatTicket, index) => {
-                    const seatTicketId = seatTicket.ticketId;
-                    if (!seatTicketId) return;
-
-                    const seatTicketConfig = event.ticketInfo.find(t => t._id?.toString() === seatTicketId.toString());
-                    if (!seatTicketConfig) return;
-
-                    const seatBasePrice = parseFloat(seatTicketConfig.price) || 0;
-                    const seatServiceFee = parseFloat(seatTicketConfig.serviceFee) || 0;
-                    const seatEntertainmentTax = parseFloat(seatTicketConfig.entertainmentTax) || 0;
-                    const seatServiceTax = parseFloat(seatTicketConfig.serviceTax) || 0;
-                    const seatVatRate = parseFloat(seatTicketConfig.vatRate) || vatRate || 0;
-
-                    // Use first seat's rates for display
-                    if (index === 0) {
-                        firstSeatEntertainmentTax = seatEntertainmentTax;
-                        firstSeatServiceTax = seatServiceTax;
-                    }
-
-                    totalBasePrice += seatBasePrice;
-                    totalServiceFee += seatServiceFee;
-                    totalEntertainmentTaxAmount += (seatBasePrice * seatEntertainmentTax) / 100;
-                    totalServiceTaxAmount += (seatServiceFee * seatServiceTax) / 100;
-                    totalVatAmount += (seatBasePrice * seatVatRate) / 100;
-                });
-
-                // Update rates for display (use first seat's rates)
-                entertainmentTax = firstSeatEntertainmentTax;
-                serviceTax = firstSeatServiceTax;
-            } else {
-                // Use rates from stored data or first seat ticket for display
-                const firstSeatTicketId = seatTickets[0]?.ticketId;
-                if (firstSeatTicketId) {
-                    const firstSeatTicketConfig = event.ticketInfo.find(t => t._id?.toString() === firstSeatTicketId.toString());
-                    if (firstSeatTicketConfig) {
-                        entertainmentTax = parseFloat(firstSeatTicketConfig.entertainmentTax) || entertainmentTax;
-                        serviceTax = parseFloat(firstSeatTicketConfig.serviceTax) || serviceTax;
-                    }
-                }
-            }
-
-            // Use stored orderFee if available
-            if (orderFee === 0) {
-                const firstSeatTicketId = seatTickets[0]?.ticketId;
-                if (firstSeatTicketId) {
-                    const firstSeatTicketConfig = event.ticketInfo.find(t => t._id?.toString() === firstSeatTicketId.toString());
-                    if (firstSeatTicketConfig) {
-                        orderFee = parseFloat(firstSeatTicketConfig.orderFee) || 0;
-                    }
-                }
-            }
-        } else {
-            // Check if we have pre-calculated totals stored (for both pricing_configuration and ticket_info)
-            const storedTotalBasePrice = getValue(ticketInfoData, 'totalBasePrice');
-            const storedTotalServiceFee = getValue(ticketInfoData, 'totalServiceFee');
-
-            // Use stored totals if available (pre-calculated from frontend)
-            // Check for null/undefined, but allow 0 as a valid value
-            if (storedTotalBasePrice !== null && storedTotalBasePrice !== undefined && storedTotalBasePrice !== '') {
-                const parsed = parseFloat(storedTotalBasePrice);
-                if (!isNaN(parsed)) {
-                    totalBasePrice = parsed;
-                } else {
-                    // Fallback: multiply per-unit by quantity
-                    totalBasePrice = basePrice * quantity;
-                }
-            } else {
-                // Fallback: multiply per-unit by quantity
-                totalBasePrice = basePrice * quantity;
-            }
-
-            if (storedTotalServiceFee !== null && storedTotalServiceFee !== undefined && storedTotalServiceFee !== '') {
-                const parsed = parseFloat(storedTotalServiceFee);
-                if (!isNaN(parsed)) {
-                    totalServiceFee = parsed;
-                } else {
-                    // Fallback: multiply per-unit by quantity
-                    totalServiceFee = serviceFee * quantity;
-                }
-            } else {
-                // Fallback: multiply per-unit by quantity
-                totalServiceFee = serviceFee * quantity;
-            }
-
-            // Use stored calculated amounts from DB (already calculated and stored during ticket creation)
-            // These are already totals (not per-unit)
-            // Preserve exact decimal values without rounding
-            const storedEntertainmentTaxAmount = getValue(ticketInfoData, 'entertainmentTaxAmount');
-            if (storedEntertainmentTaxAmount !== null && storedEntertainmentTaxAmount !== undefined && storedEntertainmentTaxAmount !== '') {
-                const parsed = parseFloat(storedEntertainmentTaxAmount);
-                if (!isNaN(parsed)) {
-                    totalEntertainmentTaxAmount = parsed; // Use stored value as-is, preserve all decimals
-                } else {
-                    totalEntertainmentTaxAmount = ((basePrice * entertainmentTax) / 100) * quantity;
-                }
-            } else {
-                totalEntertainmentTaxAmount = ((basePrice * entertainmentTax) / 100) * quantity;
-            }
-
-            const storedServiceTaxAmount = getValue(ticketInfoData, 'serviceTaxAmount');
-            if (storedServiceTaxAmount !== null && storedServiceTaxAmount !== undefined && storedServiceTaxAmount !== '') {
-                const parsed = parseFloat(storedServiceTaxAmount);
-                if (!isNaN(parsed)) {
-                    totalServiceTaxAmount = parsed; // Use stored value as-is, preserve all decimals
-                } else {
-                    totalServiceTaxAmount = ((serviceFee * serviceTax) / 100) * quantity;
-                }
-            } else {
-                totalServiceTaxAmount = ((serviceFee * serviceTax) / 100) * quantity;
-            }
-
-            const storedVatAmount = getValue(ticketInfoData, 'vatAmount');
-            if (storedVatAmount !== null && storedVatAmount !== undefined && storedVatAmount !== '') {
-                const parsed = parseFloat(storedVatAmount);
-                if (!isNaN(parsed)) {
-                    totalVatAmount = parsed; // Use stored value as-is, preserve all decimals
-                } else {
-                    totalVatAmount = ((basePrice * vatRate) / 100) * quantity;
-                }
-            } else {
-                totalVatAmount = ((basePrice * vatRate) / 100) * quantity;
-            }
-
-            // For pricing_configuration, VAT = entertainmentTax (both are tax on base price)
-            // If vatAmount is not set but entertainmentTaxAmount is, use entertainmentTaxAmount as vatAmount
-            if (totalVatAmount === 0 && totalEntertainmentTaxAmount > 0) {
-                totalVatAmount = totalEntertainmentTaxAmount;
-                if (vatRate === 0 && entertainmentTax > 0) {
-                    vatRate = entertainmentTax;
-                }
-            }
-
-            // If we have vatAmount but vatRate is 0, try to calculate vatRate from vatAmount
-            if (totalVatAmount > 0 && (vatRate === 0 || !vatRate) && totalBasePrice > 0) {
-                const calculatedVatRate = (totalVatAmount / totalBasePrice) * 100;
-                if (calculatedVatRate > 0 && !isNaN(calculatedVatRate)) {
-                    vatRate = calculatedVatRate;
-                }
-            }
-        }
-
-        const storedOrderFeeServiceTax = getValue(ticketInfoData, 'orderFeeServiceTax');
-        const orderFeeServiceTax = storedOrderFeeServiceTax !== 0 && storedOrderFeeServiceTax !== null && storedOrderFeeServiceTax !== undefined
-            ? parseFloat(storedOrderFeeServiceTax)
-            : (orderFee * serviceTax) / 100;
-
-        // Order fee and its service tax are per transaction (not multiplied by quantity)
-        // Total = (per-unit totals) + (per-transaction fees)
-        const totalAmount = totalBasePrice + totalServiceFee + totalServiceTaxAmount + totalVatAmount + orderFee + orderFeeServiceTax;
 
         // Get currency (stored value may be non-string; coerce before toUpperCase)
         const currency = String(
@@ -659,7 +599,7 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
             // Order & Pricing
             purchaseDate: purchaseDate,
             ticketName: ticketName,
-            quantity: quantity.toString(),
+            quantity: resolvedQuantity.toString(),
             // Total values for display with "(x3)" in template
             // basePrice and serviceFee are per-unit, so we multiply by quantity
             // serviceTaxAmount and vatAmount from DB are already totals (from frontend metadata)
