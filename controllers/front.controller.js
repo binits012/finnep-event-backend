@@ -43,7 +43,7 @@ import { Venue } from '../model/mongoModel.js'
 import { PersonalDataRequest } from '../model/personalDataRequest.js'
 import { getPresalePayload, consumePresaleToken } from '../util/presaleToken.js'
 import { getSurveyTokenPayload, consumeSurveyToken } from '../util/surveyToken.js'
-import { buildPublicSiteConfigPayload } from '../util/publicSiteConfig.js'
+import { buildPublicSiteConfigPayload, resolveHostEntry } from '../util/publicSiteConfig.js'
 import {
     validateCouponOnEvent,
     applyCouponDiscountToMetadata,
@@ -311,6 +311,43 @@ function pickPublicBrandingFromOtherInfo(oiPlain, canonicalBaseUrl) {
     }
 }
 
+function pickPublicAppStoreRow(raw) {
+    if (!raw || typeof raw !== 'object') return null
+    const scanner = typeof raw.scanner === 'string' ? raw.scanner.trim() : ''
+    const client = typeof raw.client === 'string' ? raw.client.trim() : ''
+    if (!scanner && !client) return null
+    return {
+        ...(scanner ? { scanner } : {}),
+        ...(client ? { client } : {}),
+    }
+}
+
+/** Public mobile app store links from platform settings (same shape as consumer storefront footer). */
+function pickPublicAppDownloads(oiPlain) {
+    if (!oiPlain || typeof oiPlain !== 'object') return null
+    const googlePlay = pickPublicAppStoreRow(oiPlain.googlePlay)
+    const appleStore = pickPublicAppStoreRow(oiPlain.appleStore)
+    if (!googlePlay && !appleStore) return null
+    return {
+        ...(googlePlay ? { googlePlay } : {}),
+        ...(appleStore ? { appleStore } : {}),
+    }
+}
+
+/** Public Stripe card-fee table from platform settings (country key → { percentage, fixed in cents }). */
+function pickPublicStripeFees(raw) {
+    if (!raw || typeof raw !== 'object') return null
+    const out = {}
+    for (const [key, val] of Object.entries(raw)) {
+        if (!val || typeof val !== 'object') continue
+        const pct = Number(val.percentage)
+        const fixed = Number(val.fixed)
+        if (!Number.isFinite(pct) || !Number.isFinite(fixed)) continue
+        out[String(key).toLowerCase()] = { percentage: pct, fixed }
+    }
+    return Object.keys(out).length ? out : null
+}
+
 /** Public B2B landing JSON: structured copy + slim site hints — cacheable, no auth */
 export const getBusinessLandingPublic = async (req, res, next) => {
     try {
@@ -338,6 +375,10 @@ export const getBusinessLandingPublic = async (req, res, next) => {
             }
         }
         const sitePayload = buildPublicSiteConfigPayload(setting, slice.otherInfo)
+        const requestHostRaw =
+            req.headers['x-forwarded-host'] || req.headers['X-Forwarded-Host'] || req.headers.host || null
+        const requestHost = Array.isArray(requestHostRaw) ? requestHostRaw[0] : requestHostRaw
+        const resolvedHost = resolveHostEntry(requestHost, sitePayload.hosts)
         const rows = Array.isArray(setting) ? setting : []
         const defaultDoc = pickDefaultPlatformDoc(rows) || rows[0]
         const updatedAt =
@@ -361,12 +402,23 @@ export const getBusinessLandingPublic = async (req, res, next) => {
             businessLanding,
             site: {
                 primaryCanonicalBaseUrl: sitePayload.primaryCanonicalBaseUrl,
-                siteCluster: sitePayload.hosts?.[0]?.siteCluster ?? null,
+                hosts: sitePayload.hosts,
+                hreflangAlternates: sitePayload.hreflangAlternates,
+                resolved: resolvedHost
+                    ? {
+                          hostname: resolvedHost.hostname,
+                          publicBaseUrl: resolvedHost.publicBaseUrl,
+                          siteCluster: resolvedHost.siteCluster,
+                          market: resolvedHost.market ?? null,
+                      }
+                    : null,
             },
             contactInfo: slice.contactInfo,
             socialMedia: slice.socialMedia,
             branding: pickPublicBrandingFromOtherInfo(oiPlain, sitePayload.primaryCanonicalBaseUrl),
             aboutSection,
+            stripeFees: pickPublicStripeFees(oiPlain.stripeFees),
+            appDownloads: pickPublicAppDownloads(oiPlain),
         })
     } catch (err) {
         error('getBusinessLandingPublic %s', err?.stack || err)

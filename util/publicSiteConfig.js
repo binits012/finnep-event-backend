@@ -13,8 +13,8 @@ export const DEFAULT_PUBLIC_SITE_CONFIG = {
 		{ hostname: 'www.okazzo.com.au', publicBaseUrl: 'https://www.okazzo.com.au', siteCluster: 'au' },
 		{ hostname: 'okazzo.eu', publicBaseUrl: 'https://okazzo.eu', siteCluster: 'eu' },
 		{ hostname: 'www.okazzo.eu', publicBaseUrl: 'https://www.okazzo.eu', siteCluster: 'eu' },
-		{ hostname: 'okazzo.fi', publicBaseUrl: 'https://okazzo.fi', siteCluster: 'eu' },
-		{ hostname: 'www.okazzo.fi', publicBaseUrl: 'https://www.okazzo.fi', siteCluster: 'eu' },
+		{ hostname: 'okazzo.fi', publicBaseUrl: 'https://okazzo.fi', siteCluster: 'eu', market: 'FI' },
+		{ hostname: 'www.okazzo.fi', publicBaseUrl: 'https://www.okazzo.fi', siteCluster: 'eu', market: 'FI' },
 		{ hostname: 'okazzo.se', publicBaseUrl: 'https://okazzo.se', siteCluster: 'eu' },
 		{ hostname: 'www.okazzo.se', publicBaseUrl: 'https://www.okazzo.se', siteCluster: 'eu' },
 		{ hostname: 'okazzo.no', publicBaseUrl: 'https://okazzo.no', siteCluster: 'eu' },
@@ -24,7 +24,9 @@ export const DEFAULT_PUBLIC_SITE_CONFIG = {
 		{ hostname: 'business.okazzo.eu', publicBaseUrl: 'https://business.okazzo.eu', siteCluster: 'eu' },
 		{ hostname: 'www.business.okazzo.eu', publicBaseUrl: 'https://www.business.okazzo.eu', siteCluster: 'eu' },
 		{ hostname: 'business.okazzo.com.au', publicBaseUrl: 'https://business.okazzo.com.au', siteCluster: 'au' },
-		{ hostname: 'www.business.okazzo.com.au', publicBaseUrl: 'https://www.business.okazzo.com.au', siteCluster: 'au' }
+		{ hostname: 'www.business.okazzo.com.au', publicBaseUrl: 'https://www.business.okazzo.com.au', siteCluster: 'au' },
+		{ hostname: 'business.okazzo.fi', publicBaseUrl: 'https://business.okazzo.fi', siteCluster: 'eu', market: 'FI' },
+		{ hostname: 'www.business.okazzo.fi', publicBaseUrl: 'https://www.business.okazzo.fi', siteCluster: 'eu', market: 'FI' }
 	],
 	hreflangAlternates: [
 		{ hreflang: 'en-US', publicBaseUrl: 'https://okazzo.com.au' },
@@ -41,6 +43,8 @@ export const DEFAULT_PUBLIC_SITE_CONFIG = {
 		'https://www.business.okazzo.eu',
 		'https://business.okazzo.com.au',
 		'https://www.business.okazzo.com.au',
+		'https://business.okazzo.fi',
+		'https://www.business.okazzo.fi',
 	],
 }
 
@@ -207,6 +211,13 @@ export function validatePublicSiteConfig(input) {
 	}
 
 	return { ok: true, normalized }
+}
+
+/** Match incoming request host to a CMS publicSiteConfig host row. */
+export function resolveHostEntry(requestHost, hosts) {
+	const hn = normalizeHostname(requestHost)
+	if (!hn || !Array.isArray(hosts)) return null
+	return hosts.find((h) => h && normalizeHostname(h.hostname) === hn) ?? null
 }
 
 export function mergePublicSiteConfigWithDefaults(raw) {

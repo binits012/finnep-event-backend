@@ -1,6 +1,7 @@
 import { describe, it, expect } from '@jest/globals'
 import {
 	validateBusinessLandingConfig,
+	mergeBusinessLandingBeforeValidate,
 	canMutateBusinessLanding,
 	prepareIncomingOtherInfoForCreate,
 } from '../../../util/businessLanding.js'
@@ -23,6 +24,39 @@ describe('businessLanding util', () => {
 			hero: { primaryCtaUrl: 'javascript:alert(1)' },
 		})
 		expect(v.ok).toBe(false)
+	})
+
+	it('mergeBusinessLandingBeforeValidate keeps organiserVoices when incoming omits them', () => {
+		const prev = {
+			version: 1,
+			hero: { title: 'Old title' },
+			organiserVoices: {
+				items: [{ quote: 'CMS quote stays', author: 'A', role: 'B' }],
+			},
+		}
+		const incoming = {
+			version: 1,
+			hero: { title: 'New title' },
+		}
+		const merged = mergeBusinessLandingBeforeValidate(prev, incoming)
+		expect(merged.hero.title).toBe('New title')
+		expect(merged.organiserVoices.items[0].quote).toBe('CMS quote stays')
+	})
+
+	it('validateBusinessLandingConfig accepts organiserVoices block', () => {
+		const v = validateBusinessLandingConfig({
+			version: 1,
+			organiserVoices: {
+				eyebrow: 'Organiser voices',
+				title: 'Trusted by teams',
+				subtitle: 'What organisers say.',
+				items: [{ quote: 'Great platform.', author: 'Promoter', role: 'Live music' }],
+			},
+		})
+		expect(v.ok).toBe(true)
+		expect(v.normalized.organiserVoices.items).toHaveLength(1)
+		expect(v.normalized.testimonials).toHaveLength(1)
+		expect(v.normalized.testimonials[0].quote).toBe('Great platform.')
 	})
 
 	it('validateBusinessLandingConfig accepts promoVideo with https URL', () => {
@@ -81,5 +115,49 @@ describe('businessLanding util', () => {
 			businessLanding: { version: 1 },
 		})
 		expect(r.ok).toBe(false)
+	})
+
+	it('validateBusinessLandingConfig accepts trustAndData with https ctaUrl', () => {
+		const v = validateBusinessLandingConfig({
+			version: 1,
+			trustAndData: {
+				eyebrow: 'Trust & data',
+				title: 'Privacy built in',
+				items: [{ title: 'GDPR-style data requests', body: 'Buyers can submit requests from the storefront.' }],
+				ctaLabel: 'See buyer data requests',
+				ctaUrl: 'https://okazzo.eu/request-data',
+			},
+		})
+		expect(v.ok).toBe(true)
+		expect(v.normalized.trustAndData.items).toHaveLength(1)
+		expect(v.normalized.trustAndData.ctaUrl).toBe('https://okazzo.eu/request-data')
+	})
+
+	it('validateBusinessLandingConfig rejects bad trustAndData ctaUrl', () => {
+		const v = validateBusinessLandingConfig({
+			version: 1,
+			trustAndData: {
+				items: [{ title: 'Test', body: 'Body' }],
+				ctaUrl: 'javascript:alert(1)',
+			},
+		})
+		expect(v.ok).toBe(false)
+		expect(v.errors.some((e) => e.includes('trustAndData'))).toBe(true)
+	})
+
+	it('mergeBusinessLandingBeforeValidate keeps trustAndData when incoming omits it', () => {
+		const prev = {
+			version: 1,
+			trustAndData: {
+				items: [{ title: 'Kept card', body: 'Kept body' }],
+			},
+		}
+		const incoming = {
+			version: 1,
+			hero: { title: 'New hero' },
+		}
+		const merged = mergeBusinessLandingBeforeValidate(prev, incoming)
+		expect(merged.hero.title).toBe('New hero')
+		expect(merged.trustAndData.items[0].title).toBe('Kept card')
 	})
 })

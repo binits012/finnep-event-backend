@@ -30,6 +30,7 @@ export const STATIC_APP_ORIGINS = [
 	'http://localhost:3000',
 	'http://localhost:3002',
 	'http://localhost:3003',
+	'http://localhost:3010',
 	'http://192.168.1.107:3003'
 ]
 

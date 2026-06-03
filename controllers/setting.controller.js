@@ -8,6 +8,7 @@ import {
     validateBusinessLandingConfig,
     canMutateBusinessLanding,
     prepareIncomingOtherInfoForCreate,
+	mergeBusinessLandingBeforeValidate,
 } from '../util/businessLanding.js'
 import { refreshCorsOriginsFromDb } from '../util/corsAllowlist.js'
 import { normalizeIso3166Alpha2 } from '../util/iso3166Alpha2.js'
@@ -279,7 +280,11 @@ export const updateSettingById = async(req,res,next)=>{
                                 error: appText.INSUFFICENT_ROLE,
                             })
                         }
-                        const vBl = validateBusinessLandingConfig(merged.businessLanding)
+                        const mergedBl = mergeBusinessLandingBeforeValidate(
+                            prevPlain.businessLanding,
+                            merged.businessLanding,
+                        )
+                        const vBl = validateBusinessLandingConfig(mergedBl)
                         if (!vBl.ok) {
                             return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
                                 message: 'Invalid businessLanding',

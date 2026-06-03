@@ -122,11 +122,14 @@ function normalizeTestimonials(arr) {
 	for (let i = 0; i < arr.length && out.length < 20; i++) {
 		const row = arr[i]
 		if (!row || typeof row !== 'object' || Array.isArray(row)) continue
-		const quote = trimStr(row.quote, 2000)
+		const quote = trimStr(row.quote ?? row.text, 2000)
 		const author = trimStr(row.author, 200)
 		const role = trimStr(row.role, 200)
+		const logoUrl = trimStr(row.logoUrl ?? row.iconUrl, 2000)
 		if (!quote) continue
-		out.push({ quote, author, role })
+		const item = { quote, author, role }
+		if (logoUrl && isHttpsOrMailtoOrPathUrl(logoUrl)) item.logoUrl = logoUrl
+		out.push(item)
 	}
 	return out
 }
@@ -174,6 +177,43 @@ function normalizeHowItWorks(input) {
 	}
 	if (!steps.length) return null
 	const out = { steps }
+	if (eyebrow) out.eyebrow = eyebrow
+	if (title) out.title = title
+	if (subtitle) out.subtitle = subtitle
+	return out
+}
+
+/** @returns {{ ok: true, value: object|null } | { ok: false, error: string }} */
+function normalizeTrustAndData(input) {
+	if (!input || typeof input !== 'object' || Array.isArray(input)) return { ok: true, value: null }
+	const eyebrow = trimStr(input.eyebrow, 120)
+	const title = trimStr(input.title, 200)
+	const subtitle = trimStr(input.subtitle, 500)
+	const items = normalizeFeatures(input.items)
+	const ctaLabel = trimStr(input.ctaLabel, 120)
+	const ctaUrl = trimStr(input.ctaUrl, 2000)
+	if (ctaUrl && !isHttpsOrMailtoOrPathUrl(ctaUrl)) {
+		return { ok: false, error: 'trustAndData.ctaUrl must be https, mailto:, or a path' }
+	}
+	if (!items.length) return { ok: true, value: null }
+	const out = { items }
+	if (eyebrow) out.eyebrow = eyebrow
+	if (title) out.title = title
+	if (subtitle) out.subtitle = subtitle
+	if (ctaLabel) out.ctaLabel = ctaLabel
+	if (ctaUrl) out.ctaUrl = ctaUrl
+	return { ok: true, value: out }
+}
+
+/** @returns {object|null} */
+function normalizeOrganiserVoices(input) {
+	if (!input || typeof input !== 'object' || Array.isArray(input)) return null
+	const eyebrow = trimStr(input.eyebrow, 120)
+	const title = trimStr(input.title, 200)
+	const subtitle = trimStr(input.subtitle, 500)
+	const items = normalizeTestimonials(input.items)
+	if (!items.length) return null
+	const out = { items }
 	if (eyebrow) out.eyebrow = eyebrow
 	if (title) out.title = title
 	if (subtitle) out.subtitle = subtitle
@@ -248,6 +288,94 @@ function normalizePromoVideo(input) {
 }
 
 /**
+ * Deep-merge partial CMS updates into stored businessLanding so saving hero-only
+ * JSON does not wipe organiserVoices, faq, and other sections.
+ * @param {unknown} prev
+ * @param {unknown} incoming
+ * @returns {object}
+ */
+export function mergeBusinessLandingBeforeValidate(prev, incoming) {
+	const p = prev && typeof prev === 'object' && !Array.isArray(prev) ? prev : {}
+	const i = incoming && typeof incoming === 'object' && !Array.isArray(incoming) ? incoming : {}
+	const out = { ...p, ...i }
+
+	if (i.hero && typeof i.hero === 'object' && !Array.isArray(i.hero)) {
+		out.hero = { ...(p.hero && typeof p.hero === 'object' ? p.hero : {}), ...i.hero }
+	}
+	if (i.seo && typeof i.seo === 'object' && !Array.isArray(i.seo)) {
+		out.seo = { ...(p.seo && typeof p.seo === 'object' ? p.seo : {}), ...i.seo }
+	}
+
+	const incOv = i.organiserVoices ?? i.organizerVoices
+	const prevOv = p.organiserVoices ?? p.organizerVoices
+	if (
+		incOv &&
+		typeof incOv === 'object' &&
+		!Array.isArray(incOv) &&
+		Array.isArray(incOv.items) &&
+		incOv.items.length
+	) {
+		out.organiserVoices = {
+			...(prevOv && typeof prevOv === 'object' ? prevOv : {}),
+			...incOv,
+		}
+	} else if (prevOv && typeof prevOv === 'object') {
+		out.organiserVoices = prevOv
+	}
+	delete out.organizerVoices
+
+	if (i.howItWorks && typeof i.howItWorks === 'object' && !Array.isArray(i.howItWorks)) {
+		const prevHiw = p.howItWorks && typeof p.howItWorks === 'object' ? p.howItWorks : {}
+		const steps =
+			Array.isArray(i.howItWorks.steps) && i.howItWorks.steps.length
+				? i.howItWorks.steps
+				: prevHiw.steps
+		out.howItWorks = { ...prevHiw, ...i.howItWorks, ...(steps ? { steps } : {}) }
+	}
+
+	if (i.forOrganisers && typeof i.forOrganisers === 'object' && !Array.isArray(i.forOrganisers)) {
+		const prevFo = p.forOrganisers && typeof p.forOrganisers === 'object' ? p.forOrganisers : {}
+		out.forOrganisers = { ...prevFo, ...i.forOrganisers }
+		if (Array.isArray(i.forOrganisers.bullets) && i.forOrganisers.bullets.length) {
+			out.forOrganisers.bullets = i.forOrganisers.bullets
+		} else if (Array.isArray(prevFo.bullets) && prevFo.bullets.length) {
+			out.forOrganisers.bullets = prevFo.bullets
+		}
+	}
+
+	if (i.trustAndData && typeof i.trustAndData === 'object' && !Array.isArray(i.trustAndData)) {
+		const prevTd = p.trustAndData && typeof p.trustAndData === 'object' ? p.trustAndData : {}
+		const items =
+			Array.isArray(i.trustAndData.items) && i.trustAndData.items.length
+				? i.trustAndData.items
+				: prevTd.items
+		out.trustAndData = { ...prevTd, ...i.trustAndData, ...(items ? { items } : {}) }
+	} else if (p.trustAndData && typeof p.trustAndData === 'object') {
+		out.trustAndData = p.trustAndData
+	}
+
+	for (const k of ['highlights', 'features', 'faq', 'logoStrip', 'stats', 'testimonials']) {
+		if (Array.isArray(i[k]) && i[k].length) out[k] = i[k]
+		else if (Array.isArray(p[k]) && p[k].length) out[k] = p[k]
+	}
+
+	if (i.footer && typeof i.footer === 'object' && !Array.isArray(i.footer)) {
+		out.footer = { ...(p.footer && typeof p.footer === 'object' ? p.footer : {}), ...i.footer }
+	}
+	if (Object.prototype.hasOwnProperty.call(i, 'promoVideo')) {
+		out.promoVideo = i.promoVideo
+	}
+
+	const version = Number(i.version)
+	if (Number.isFinite(version) && version >= 1) out.version = Math.floor(version)
+	else if (!Number.isFinite(Number(out.version)) || Number(out.version) < 1) {
+		out.version = Number(p.version) >= 1 ? Math.floor(Number(p.version)) : 1
+	}
+
+	return out
+}
+
+/**
  * @param {unknown} input
  * @returns {{ ok: true, normalized: object|null } | { ok: false, errors: string[] }}
  */
@@ -283,6 +411,9 @@ export function validateBusinessLandingConfig(input) {
 	const promoVideoRaw = normalizePromoVideo(input.promoVideo)
 	if (!promoVideoRaw.ok) errors.push(promoVideoRaw.error)
 
+	const trustAndDataRaw = normalizeTrustAndData(input.trustAndData)
+	if (!trustAndDataRaw.ok) errors.push(trustAndDataRaw.error)
+
 	const unknown = Object.keys(input).filter(
 		(k) =>
 			![
@@ -296,9 +427,12 @@ export function validateBusinessLandingConfig(input) {
 				'seo',
 				'highlights',
 				'howItWorks',
+				'organiserVoices',
+				'organizerVoices',
 				'forOrganisers',
 				'footer',
 				'promoVideo',
+				'trustAndData',
 			].includes(k)
 	)
 	if (unknown.length) {
@@ -310,6 +444,10 @@ export function validateBusinessLandingConfig(input) {
 	if (errors.length) return { ok: false, errors }
 
 	const howItWorks = normalizeHowItWorks(input.howItWorks)
+	const organiserVoices = normalizeOrganiserVoices(
+		input.organiserVoices ?? input.organizerVoices,
+	)
+	const legacyTestimonials = normalizeTestimonials(input.testimonials)
 	const footer = normalizeFooter(input.footer)
 
 	const normalized = {
@@ -318,16 +456,20 @@ export function validateBusinessLandingConfig(input) {
 		features: normalizeFeatures(input.features),
 		logoStrip: normalizeLogoStrip(input.logoStrip),
 		stats: normalizeStats(input.stats),
-		testimonials: normalizeTestimonials(input.testimonials),
+		testimonials: organiserVoices?.items?.length ? organiserVoices.items : legacyTestimonials,
 		faq: normalizeFaq(input.faq),
 		seo: normalizeSeo(input.seo),
 		highlights,
 	}
 
 	if (howItWorks) normalized.howItWorks = howItWorks
+	if (organiserVoices) normalized.organiserVoices = organiserVoices
 	if (forOrgRaw.ok && forOrgRaw.value) normalized.forOrganisers = forOrgRaw.value
 	if (footer) normalized.footer = footer
 	if (promoVideoRaw.ok && promoVideoRaw.value) normalized.promoVideo = promoVideoRaw.value
+	if (trustAndDataRaw.ok && trustAndDataRaw.value?.items?.length) {
+		normalized.trustAndData = trustAndDataRaw.value
+	}
 
 	return { ok: true, normalized }
 }

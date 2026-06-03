@@ -1,6 +1,7 @@
 import * as Setting from '../model/setting.js';
 import { normalizeIso3166Alpha2 } from './iso3166Alpha2.js';
 import { resolveBrandingContactEmail, emailFooterBusinessFromEnv } from './common.js';
+import { mergeBusinessLandingBeforeValidate } from './businessLanding.js';
 
 const HEADER_COUNTRY = 'x-country-code';
 
@@ -48,7 +49,16 @@ export function pickCountryPlatformDoc(settingsArray, countryCode) {
 }
 
 function shallowMergeOtherInfo(a, b) {
-  return { ...otherInfoToPlain(a), ...otherInfoToPlain(b) };
+  const pa = otherInfoToPlain(a);
+  const pb = otherInfoToPlain(b);
+  const merged = { ...pa, ...pb };
+  if (pa.businessLanding || pb.businessLanding) {
+    merged.businessLanding = mergeBusinessLandingBeforeValidate(
+      pa.businessLanding,
+      pb.businessLanding,
+    );
+  }
+  return merged;
 }
 
 /**
