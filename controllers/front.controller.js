@@ -75,6 +75,7 @@ import {
     resolveMergedPlatformSettings,
     pickDefaultPlatformDoc,
 } from '../util/platformSettings.js'
+import { normalizeCountryCode, expandCountryAliases } from '../util/regionalAccess.js'
 
 /** ISO 3166-1 alpha-3 (or other mistaken 3-letter codes) → ISO 4217 for Stripe */
 const STRIPE_CURRENCY_ALIASES = {
@@ -176,21 +177,51 @@ const isExternalEvent = (event) => {
     return event?.otherInfo?.isExternalEvent === true;
 };
 
-/** Keep events with no country, matching detected country, or marked external. */
-const filterEventsForDetectedCountry = (events, detectedCountry) => {
+const summarizeEventsForGeoipLog = (events) => {
+    const byCountry = {};
+    let noCountry = 0;
+    let external = 0;
+    for (const e of events || []) {
+        const raw = e?.country ? String(e.country).trim() : '';
+        if (!raw) noCountry += 1;
+        else byCountry[raw] = (byCountry[raw] || 0) + 1;
+        if (isExternalEvent(e)) external += 1;
+    }
+    return {
+        total: Array.isArray(events) ? events.length : 0,
+        byCountry,
+        noCountry,
+        external,
+        sample: (events || []).slice(0, 8).map((e) => ({
+            id: e?._id,
+            title: e?.eventTitle,
+            country: e?.country ?? null,
+            external: isExternalEvent(e),
+        })),
+    };
+};
+
+/** Homepage only: keep events whose country matches detected GeoIP / x-country-code (code/name aliases). */
+const filterEventsForDetectedCountry = (events, detectedCountryCode) => {
     if (!Array.isArray(events) || events.length === 0) return events || [];
-    const detectedNorm = String(detectedCountry || '').trim().toLowerCase();
+    const detectedNorm = normalizeCountryCode(detectedCountryCode);
+    if (!detectedNorm) return events;
+    const aliasSet = new Set(
+        expandCountryAliases([detectedNorm]).map((a) => String(a).trim().toUpperCase())
+    );
     return events.filter((e) => {
-        if (isExternalEvent(e)) return true;
-        const eventCountry = e?.country ? String(e.country).trim().toLowerCase() : '';
-        return !eventCountry || eventCountry === detectedNorm;
+        const raw = e?.country;
+        if (!raw || !String(raw).trim()) return false;
+        const eventNorm = normalizeCountryCode(raw);
+        const rawUpper = String(raw).trim().toUpperCase();
+        if (eventNorm && eventNorm === detectedNorm) return true;
+        return aliasSet.has(rawUpper) || (eventNorm ? aliasSet.has(eventNorm) : false);
     });
 };
 
 export const getDataForFront = async (req, res, next) => {
-    // Get client IP (fast), then run country detection in parallel with main data fetch
-    const clientIP = getClientIdentifier(req);
-    const countryPromise = getCountryFromIP(clientIP); // Do not await – runs in parallel with Promise.all below
+    // GeoIP + x-country-code fallback; runs in parallel with main data fetch
+    const countryPromise = resolveCountryCodeForFrontFilter(req);
     // Fetch all data in parallel (country lookup runs alongside)
     const [photo, notification, event, setting] = await Promise.all([
         Photo.listPhoto(),
@@ -233,8 +264,19 @@ export const getDataForFront = async (req, res, next) => {
     let filteredEvents = event ? event.filter(e => e?.active !== false && isEventCurrentlyValid(e, now)) : [];
 
     const detectedCountry = await countryPromise;
+    const beforeGeoipSummary = summarizeEventsForGeoipLog(filteredEvents);
     filteredEvents = filterEventsForDetectedCountry(filteredEvents, detectedCountry);
-
+    console.log('[front-geoip] GET /front/', {
+        clientIP: getClientIdentifier(req),
+        xForwardedFor: req.headers['x-forwarded-for'] || null,
+        xRealIp: req.headers['x-real-ip'] || null,
+        xCountryCode: parseRequestMarketCountryCode(req),
+        detectedCountry,
+        beforeFilter: beforeGeoipSummary.total,
+        afterFilter: filteredEvents.length,
+        before: beforeGeoipSummary,
+        after: summarizeEventsForGeoipLog(filteredEvents),
+    });
 
     const notificationList = Array.isArray(notification)
         ? notification
@@ -743,6 +785,17 @@ const normalizeClientIp = (ip) => {
     return trimmed;
 };
 
+const isPrivateOrLocalIp = (ip) => {
+    if (!ip || ip === 'unknown') return true;
+    if (ip === '127.0.0.1' || ip === '::1') return true;
+    if (ip.startsWith('10.') || ip.startsWith('192.168.')) return true;
+    if (ip.startsWith('172.')) {
+        const second = parseInt(ip.split('.')[1], 10);
+        if (second >= 16 && second <= 31) return true;
+    }
+    return false;
+};
+
 const getClientIdentifier = (req) => {
     // Check proxy headers first (x-forwarded-for, x-real-ip)
     const forwardedFor = req.headers['x-forwarded-for'];
@@ -762,45 +815,78 @@ const getClientIdentifier = (req) => {
 };
 
 /**
- * Get country name from client IP using geoip-service
- * @param {string} clientIP - Client IP address
- * @returns {Promise<string>} Country name (e.g., 'Finland', 'United States'), defaults to 'Finland' if lookup fails
+ * GeoIP lookup via finnep-geoip-service.
+ * @returns {Promise<{ code: string, name: string|null }|null>}
  */
-const getCountryFromIP = async (clientIP) => {
+const lookupCountryFromIP = async (clientIP) => {
     try {
-        // Skip if IP is invalid or localhost - default to Finland
-        if (!clientIP || clientIP === 'unknown' || clientIP === '127.0.0.1' || clientIP === '::1') {
-            return 'Finland';
+        if (!clientIP || clientIP === 'unknown' || isPrivateOrLocalIp(clientIP)) {
+            return null;
         }
 
         const geoipServiceUrl = process.env.GEOIP_SERVICE_URL || 'http://localhost:3005';
         const apiKey = process.env.GEOIP_API_KEY;
 
         if (!apiKey) {
-            console.warn('⚠️  GEOIP_API_KEY not configured, defaulting to Finland');
-            return 'Finland';
+            console.warn('⚠️  GEOIP_API_KEY not configured');
+            return null;
         }
 
-        const response = await fetch(`${geoipServiceUrl}/api/lookup/${clientIP}`, {
+        const response = await fetch(`${geoipServiceUrl}/api/lookup/${encodeURIComponent(clientIP)}`, {
             method: 'GET',
             headers: {
                 'X-API-Key': apiKey,
                 'Content-Type': 'application/json'
             },
-            signal: AbortSignal.timeout(2000) // 2 second timeout
+            signal: AbortSignal.timeout(2000)
         });
 
         const data = await response.json();
-        if (data.success && data.data?.country?.name) {
-            return data.data.country.name;
+        const code = data?.data?.country?.code;
+        if (data.success && code) {
+            return {
+                code: String(code).trim().toUpperCase(),
+                name: data.data.country.name || null
+            };
         }
 
-        return 'Finland'; // Default to Finland if no country data
-    } catch (error) {
-        // Silently fail - default to Finland if geoip service is unavailable
-        console.warn(`⚠️  GeoIP lookup failed for ${clientIP}, defaulting to Finland:`, error.message);
-        return 'Finland';
+        return null;
+    } catch (err) {
+        console.warn(`⚠️  GeoIP lookup failed for ${clientIP}:`, err.message);
+        return null;
     }
+};
+
+/**
+ * Country for homepage event filter: GeoIP first, then FE x-country-code (hostname), else FI.
+ */
+const resolveCountryCodeForFrontFilter = async (req) => {
+    const clientIP = getClientIdentifier(req);
+    const geo = await lookupCountryFromIP(clientIP);
+    if (geo?.code) {
+        const code = normalizeCountryCode(geo.code);
+        console.log('[front-geoip] country resolved via GeoIP', {
+            clientIP,
+            geoCode: geo.code,
+            geoName: geo.name,
+            resolved: code,
+        });
+        return code;
+    }
+
+    const marketCc = parseRequestMarketCountryCode(req);
+    if (marketCc) {
+        const code = normalizeCountryCode(marketCc);
+        console.log('[front-geoip] country resolved via x-country-code', {
+            clientIP,
+            xCountryCode: marketCc,
+            resolved: code,
+        });
+        return code;
+    }
+
+    console.warn(`[front-geoip] no GeoIP or x-country-code for ${clientIP}, defaulting to FI`);
+    return 'FI';
 };
 
 const validateRequestSize = (reqBody) => {
