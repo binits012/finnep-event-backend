@@ -21,6 +21,7 @@ import {
 } from '../util/ticketQuantity.js'
 import { computeTicketLinePricing, roundMoney, moneyPercentOfExactSum, moneyPercentOf, moneyAdd } from '../util/money.js'
 import * as sendMail from '../util/sendMail.js'
+import { isPlatformStripeAccount } from '../util/stripePlatform.js'
 import Stripe from 'stripe'
 const stripe = new Stripe(process.env.STRIPE_KEY)
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET
@@ -175,6 +176,17 @@ const isExternalEvent = (event) => {
     return event?.otherInfo?.isExternalEvent === true;
 };
 
+/** Keep events with no country, matching detected country, or marked external. */
+const filterEventsForDetectedCountry = (events, detectedCountry) => {
+    if (!Array.isArray(events) || events.length === 0) return events || [];
+    const detectedNorm = String(detectedCountry || '').trim().toLowerCase();
+    return events.filter((e) => {
+        if (isExternalEvent(e)) return true;
+        const eventCountry = e?.country ? String(e.country).trim().toLowerCase() : '';
+        return !eventCountry || eventCountry === detectedNorm;
+    });
+};
+
 export const getDataForFront = async (req, res, next) => {
     // Get client IP (fast), then run country detection in parallel with main data fetch
     const clientIP = getClientIdentifier(req);
@@ -220,19 +232,8 @@ export const getDataForFront = async (req, res, next) => {
     const now = new Date();
     let filteredEvents = event ? event.filter(e => e?.active !== false && isEventCurrentlyValid(e, now)) : [];
 
-    // Await country detection only when needed for filtering
     const detectedCountry = await countryPromise;
-    if (filteredEvents.length > 0) {
-        filteredEvents = filteredEvents.filter(e => {
-            if (isExternalEvent(e)) {
-                return true;
-            }
-            // Show event if:
-            // 1. Event has no country set (available to all)
-            // 2. Event country matches detected country
-            return !e.country || String(e.country).trim().toLowerCase() === String(detectedCountry || '').trim().toLowerCase();
-        });
-    }
+    filteredEvents = filterEventsForDetectedCountry(filteredEvents, detectedCountry);
 
 
     const notificationList = Array.isArray(notification)
@@ -713,7 +714,7 @@ export const listEvent = async (req, res, next) => {
         const pageNum = Math.max(parseInt(pageStr, 10) || 1, 1);
         const limitNum = Math.min(Math.max(parseInt(limitStr, 10) || 1000, 1), 10000);
 
-        // Delegate to model for filtered, paginated query
+        // Full catalog for /events — no GeoIP filter (homepage uses getDataForFront for that).
         const { items, total } = await Event.listEventFiltered({ city, country, page: pageNum, limit: limitNum });
         const activeItems = Array.isArray(items) ? items.filter((item) => item?.active !== false) : [];
         const totalPages = Math.max(Math.ceil(total / limitNum), 1);
@@ -733,20 +734,31 @@ export const listEvent = async (req, res, next) => {
 
 // Request validation and security helpers
 /** Sync IP / client id from request (never was async — callers that omitted await stored a Promise in Stripe metadata). */
+const normalizeClientIp = (ip) => {
+    if (!ip || typeof ip !== 'string') return ip;
+    const trimmed = ip.trim();
+    if (trimmed.startsWith('::ffff:')) {
+        return trimmed.slice(7);
+    }
+    return trimmed;
+};
+
 const getClientIdentifier = (req) => {
     // Check proxy headers first (x-forwarded-for, x-real-ip)
     const forwardedFor = req.headers['x-forwarded-for'];
     if (forwardedFor) {
         // x-forwarded-for can contain multiple IPs, take the first one
-        const firstIP = forwardedFor.split(',')[0].trim();
+        const firstIP = normalizeClientIp(forwardedFor.split(',')[0]);
         if (firstIP) return firstIP;
     }
 
     const realIP = req.headers['x-real-ip'];
-    if (realIP) return realIP.trim();
+    if (realIP) return normalizeClientIp(realIP);
 
     // Fallback to Express req.ip or connection info
-    return req.ip || req.connection?.remoteAddress || req.socket?.remoteAddress || 'unknown';
+    return normalizeClientIp(
+        req.ip || req.connection?.remoteAddress || req.socket?.remoteAddress || 'unknown'
+    );
 };
 
 /**
@@ -2221,7 +2233,7 @@ export const createPaymentIntent = async (req, res, next) => {
         };
 
         // Only apply connected account logic if merchant is NOT the platform account
-        if(merchant.stripeAccount !== process.env.STRIPE_PLATFORM_ACCOUNT_ID) {
+        if (!isPlatformStripeAccount(merchant.stripeAccount)) {
 
             const configuredPlatformFee = typeof merchant?.otherInfo?.get === 'function'
                 ? merchant.otherInfo.get("stripe")
@@ -3781,7 +3793,7 @@ export const handlePaymentSuccess = async (req, res, next) => {
         let stripePaymentIntentOptions;
         const merchants = await Merchant.genericSearchMerchant(metadata.merchantId, metadata.externalMerchantId);
         const merchant = merchants.length > 0 ? merchants[0] : null;
-        if (merchant?.stripeAccount && merchant.stripeAccount !== process.env.STRIPE_PLATFORM_ACCOUNT_ID) {
+        if (merchant?.stripeAccount && !isPlatformStripeAccount(merchant.stripeAccount)) {
             stripePaymentIntentOptions = {
                 stripeAccount: merchant.stripeAccount
             };

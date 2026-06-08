@@ -148,38 +148,88 @@ async function handleMerchantCreated(message) {
     }
 }
 
+const BANKING_FIELDS = ['bank_name', 'bic_swift', 'bank_account', 'bank_address', 'account_holder_name'];
+
+function bankingInfoToObject(bankingInfo) {
+    if (!bankingInfo) return {};
+    if (bankingInfo instanceof Map) {
+        return Object.fromEntries(bankingInfo);
+    }
+    return { ...bankingInfo };
+}
+
+/**
+ * Build bankingInfo update from EMS orginfo fields (null clears a key; all null clears the map).
+ * @returns {object|null} null when message carries no bank fields
+ */
+function buildBankingInfoUpdate(message, existingMerchant) {
+    const fieldsInMessage = BANKING_FIELDS.filter((field) => message[field] !== undefined);
+    if (fieldsInMessage.length === 0) {
+        return null;
+    }
+
+    if (fieldsInMessage.every((field) => message[field] === null)) {
+        return {};
+    }
+
+    const merged = bankingInfoToObject(existingMerchant?.bankingInfo);
+    BANKING_FIELDS.forEach((field) => {
+        if (message[field] === null) {
+            delete merged[field];
+        } else if (message[field] !== undefined && message[field] !== null) {
+            merged[field] = message[field];
+        }
+    });
+
+    return merged;
+}
+
 async function handleMerchantUpdated(message) {
-    info('Updating merchant', { merchantId: message.merchantId, orgName: message.orgName });
+    const merchantId = message.merchantId != null ? String(message.merchantId) : null;
+    info('Updating merchant', { merchantId, orgName: message.orgName });
 
     try {
-        const merchant = await getMerchantByMerchantId(message.merchantId);
-
-        if (!merchant) {
-            throw new Error(`Merchant not found: ${message.merchantId}`);
+        if (!merchantId) {
+            throw new Error('merchantId is required');
         }
 
-        const updateData = { ...message };
-        delete updateData.merchantId; // Don't update the ID field
-        delete updateData.type;
-        delete updateData.routingKey;
+        const merchant = await getMerchantByMerchantId(merchantId);
 
-        // Extract banking-related fields and structure them into bankingInfo Map
-        const bankingFields = ['bank_name', 'bic_swift', 'bank_account', 'bank_address', 'account_holder_name'];
-        const bankingInfo = {};
+        if (!merchant) {
+            throw new Error(`Merchant not found: ${merchantId}`);
+        }
 
-        bankingFields.forEach(field => {
-            if (updateData[field] !== undefined && updateData[field] !== null) {
-                bankingInfo[field] = updateData[field];
-                delete updateData[field]; // Remove from direct update data
+        const updateData = {};
+        const scalarFields = [
+            'name', 'orgName', 'country', 'code', 'companyEmail', 'companyPhoneNumber',
+            'address', 'companyAddress', 'schemaName', 'status', 'website', 'logo'
+        ];
+
+        scalarFields.forEach((field) => {
+            if (message[field] !== undefined && message[field] !== null) {
+                updateData[field] = message[field];
             }
         });
 
-        // Add bankingInfo to updateData if there are any banking fields
-        if (Object.keys(bankingInfo).length > 0) {
-            updateData.bankingInfo = bankingInfo;
+        // EMS orginfo column is `name`; Mongo uses both name and orgName
+        if (message.name !== undefined && message.name !== null) {
+            updateData.name = message.name;
+            if (message.orgName === undefined || message.orgName === null) {
+                updateData.orgName = message.name;
+            }
         }
 
-        // needs sanitization
+        // EMS orginfo publishes stripe_account (snake_case); Mongo uses stripeAccount
+        const stripeAccount = message.stripeAccount ?? message.stripe_account;
+        if (stripeAccount !== undefined && stripeAccount !== null) {
+            updateData.stripeAccount = stripeAccount;
+        }
+
+        const bankingInfoUpdate = buildBankingInfoUpdate(message, merchant);
+        if (bankingInfoUpdate !== null) {
+            updateData.bankingInfo = bankingInfoUpdate;
+        }
+
         await updateMerchantById(merchant._id, updateData);
         await inboxModel.markProcessed(message?.metaData?.causationId);
 

@@ -173,6 +173,86 @@ describe('Merchant Handler', () => {
       expect(mockMerchant.updateMerchantById).toHaveBeenCalled();
     });
 
+    it('should map stripe_account to stripeAccount on merchant.updated', async () => {
+      const message = {
+        type: 'merchant.updated',
+        merchantId: 'merchant_123',
+        stripe_account: 'acct_new_connected',
+        metaData: {
+          causationId: 'msg_789'
+        }
+      };
+
+      const existingMerchant = {
+        _id: '507f1f77bcf86cd799439011',
+        merchantId: 'merchant_123',
+        stripeAccount: 'acct_platform'
+      };
+
+      mockInbox.isProcessed.mockResolvedValue(false);
+      mockInbox.saveMessage.mockResolvedValue({});
+      mockMerchant.getMerchantByMerchantId.mockResolvedValue(existingMerchant);
+      mockMerchant.updateMerchantById.mockResolvedValue({
+        ...existingMerchant,
+        stripeAccount: 'acct_new_connected'
+      });
+      mockInbox.markProcessed.mockResolvedValue(true);
+
+      await merchantHandler.handleMerchantMessage(message);
+
+      expect(mockMerchant.updateMerchantById).toHaveBeenCalledWith(
+        existingMerchant._id,
+        expect.objectContaining({
+          stripeAccount: 'acct_new_connected'
+        })
+      );
+      const updatePayload = mockMerchant.updateMerchantById.mock.calls[0][1];
+      expect(updatePayload.stripe_account).toBeUndefined();
+      expect(updatePayload.metaData).toBeUndefined();
+    });
+
+    it('should clear bankingInfo when EMS sends null bank fields on merchant.updated', async () => {
+      const message = {
+        type: 'merchant.updated',
+        merchantId: 'merchant_123',
+        stripe_account: 'acct_connected',
+        bank_account: null,
+        bic_swift: null,
+        account_holder_name: null,
+        bank_name: null,
+        bank_address: null,
+        metaData: {
+          causationId: 'msg_bank_clear'
+        }
+      };
+
+      const existingMerchant = {
+        _id: '507f1f77bcf86cd799439011',
+        merchantId: 'merchant_123',
+        stripeAccount: 'acct_platform',
+        bankingInfo: {
+          bank_account: 'FI2112345678901234',
+          bank_name: 'Old Bank'
+        }
+      };
+
+      mockInbox.isProcessed.mockResolvedValue(false);
+      mockInbox.saveMessage.mockResolvedValue({});
+      mockMerchant.getMerchantByMerchantId.mockResolvedValue(existingMerchant);
+      mockMerchant.updateMerchantById.mockResolvedValue(existingMerchant);
+      mockInbox.markProcessed.mockResolvedValue(true);
+
+      await merchantHandler.handleMerchantMessage(message);
+
+      expect(mockMerchant.updateMerchantById).toHaveBeenCalledWith(
+        existingMerchant._id,
+        expect.objectContaining({
+          stripeAccount: 'acct_connected',
+          bankingInfo: {}
+        })
+      );
+    });
+
     it('should skip already processed messages', async () => {
       // Arrange
       const message = {
