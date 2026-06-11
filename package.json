@@ -21,6 +21,8 @@
     "migrate": "node scripts/migrate-schemas.js",
     "migrate:user-regional-scopes": "node scripts/backfill-user-regional-scopes.mjs",
     "migrate:event-end-date": "node scripts/backfill-event-end-date.mjs",
+    "migrate:event-short-code": "node scripts/backfill-event-short-code.mjs",
+    "warm:shortlink-cache": "node scripts/warm-shortlink-cache.mjs",
     "preview:email": "node scripts/preview-email.js",
     "preview:email:list": "node scripts/preview-email.js --list",
     "test:email:templates": "node scripts/test-all-email-templates.js",

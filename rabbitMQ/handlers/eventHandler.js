@@ -1,10 +1,12 @@
 import { inboxModel } from '../../model/inboxMessage.js';
 import * as Event from '../../model/event.js';
+import { Event as EventModel } from '../../model/mongoModel.js';
 import { getMerchantByMerchantId } from '../../model/merchant.js';
 import { EventManifest } from '../../model/mongoModel.js';
 import { error, info, warn } from '../../model/logger.js';
 import { pricingManifestSyncService } from '../../src/services/pricingManifestSyncService.js';
 import { sendPricingSyncErrorEmail } from '../../util/sendMail.js';
+import { generateUniqueShortCode, cacheShortCodeMapping } from '../../util/shortCode.js';
 import moment from 'moment-timezone';
 
 function deriveEventEndOfDay({ eventDate, eventTimezone }) {
@@ -214,19 +216,26 @@ async function handleEventCreated(message) {
         title: eventTitle
     });
 
-    await Event.createEvent(
+    const shortCode = await generateUniqueShortCode(EventModel);
+
+    const savedEvent = await Event.createEvent(
         eventTitle, eventDescription, eventDate, occupancy,
         ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress,
         eventLocationGeoCode, transportLink, socialMedia, lang, position,
         active, eventName, videoUrl, otherInfo, eventTimezone,
         city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue,
-        waitlistConfig, event_end_date, isSeatedEvent
+        waitlistConfig, event_end_date, isSeatedEvent, shortCode
     );
+
+    if (savedEvent?._id && shortCode) {
+        await cacheShortCodeMapping(shortCode, savedEvent._id.toString());
+    }
 
     await inboxModel.markProcessed(message?.metaData?.causationId);
     console.log('[handleEventCreated] Successfully created event and marked inbox message processed', {
         externalEventId,
-        merchantId: externalMerchantId
+        merchantId: externalMerchantId,
+        shortCode
     });
 }
 

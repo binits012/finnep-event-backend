@@ -20,7 +20,7 @@ export class Event {
         eventLocationGeoCode, transportLink,
         socialMedia, lang, position, active, eventName, videoUrl, otherInfo,
         eventTimezone, city, country, venueInfo, externalMerchantId, merchant,
-        externalEventId, venue, waitlistConfig, event_end_date, isSeatedEvent
+        externalEventId, venue, waitlistConfig, event_end_date, isSeatedEvent, shortCode
     ) {
         this.eventTitle = eventTitle
         this.eventDescription = eventDescription
@@ -50,6 +50,7 @@ export class Event {
         this.waitlistConfig = waitlistConfig
         this.event_end_date = event_end_date
         this.isSeatedEvent = isSeatedEvent
+        this.shortCode = shortCode
     }
     async saveToDB() {
         try {
@@ -94,6 +95,7 @@ export class Event {
                 waitlistConfig: this.waitlistConfig,
                 event_end_date: this.event_end_date,
                 isSeatedEvent: this.isSeatedEvent,
+                shortCode: this.shortCode,
             })
             return await event.save()
         } catch (err) {
@@ -107,13 +109,13 @@ export class Event {
 export const createEvent = async (eventTitle, eventDescription, eventDate,
     occupancy, ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
     socialMedia, lang, position, active, eventName, videoUrl, otherInfo,
-    eventTimezone, city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue, waitlistConfig, event_end_date, isSeatedEvent
+    eventTimezone, city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue, waitlistConfig, event_end_date, isSeatedEvent, shortCode
     ) =>{
 
     const event = new Event(eventTitle, eventDescription, eventDate,
         occupancy, ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
         socialMedia, lang, position, active, eventName, videoUrl, otherInfo,
-        eventTimezone, city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue, waitlistConfig, event_end_date, isSeatedEvent)
+        eventTimezone, city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue, waitlistConfig, event_end_date, isSeatedEvent, shortCode)
     return await event.saveToDB()
 }
 

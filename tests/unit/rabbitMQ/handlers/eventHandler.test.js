@@ -82,7 +82,16 @@ beforeAll(async () => {
 
   const mongoModelPath = resolve(__dirname, '../../../../model/mongoModel.js');
   jest.unstable_mockModule(mongoModelPath, () => ({
-    EventManifest: mockEventManifest
+    EventManifest: mockEventManifest,
+    Event: {
+      findOne: jest.fn().mockResolvedValue(null),
+    },
+  }));
+
+  const shortCodePath = resolve(__dirname, '../../../../util/shortCode.js');
+  jest.unstable_mockModule(shortCodePath, () => ({
+    generateUniqueShortCode: jest.fn().mockResolvedValue('xK9mP2'),
+    cacheShortCodeMapping: jest.fn().mockResolvedValue(undefined),
   }));
 
   eventHandler = await import('../../../../rabbitMQ/handlers/eventHandler.js');
