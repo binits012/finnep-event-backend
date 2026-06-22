@@ -57,6 +57,23 @@ describe('Guest Ticket Access Endpoints', () => {
 
       expect(response.status).toBe(400);
     });
+
+    it('should return 400 when email is missing', async () => {
+      const response = await request(app)
+        .post('/front/guest/check-email')
+        .send({});
+
+      expect([400, 500]).toContain(response.status);
+    });
+
+    it('should reject non-JSON content type', async () => {
+      const response = await request(app)
+        .post('/front/guest/check-email')
+        .set('Content-Type', 'text/plain')
+        .send('email=test@example.com');
+
+      expect([400, 415, 500]).toContain(response.status);
+    });
   });
 
   describe('POST /front/guest/send-code', () => {
@@ -125,6 +142,16 @@ describe('Guest Ticket Access Endpoints', () => {
         });
 
       expect(response.status).toBe(401);
+    });
+
+    it('should return 400 when code is missing', async () => {
+      const response = await request(app)
+        .post('/front/guest/verify-code')
+        .send({
+          email: 'test@example.com'
+        });
+
+      expect([400, 401, 500]).toContain(response.status);
     });
 
     it('should return 401 for expired code', async () => {

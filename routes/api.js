@@ -8,7 +8,15 @@ import * as express from 'express'
 const router = express.Router()
 import * as api  from '../controllers/api.controller.js'
 import * as report from '../controllers/report.controller.js'
+import * as queueConfig from '../controllers/queueConfig.controller.js'
 import { authenticate, requireAdmin } from '../middleware/auth.middleware.js'
+import { authenticateInternalApiKey } from '../middleware/internalApiKey.middleware.js'
+
+// Internal queue-service configuration (service-to-service)
+router.route('/queue/config/metrics')
+	.get(authenticateInternalApiKey, queueConfig.getQueueMetrics)
+router.route('/queue/config/email')
+	.get(authenticateInternalApiKey, queueConfig.getQueueEmailConfig)
 
 router.route('/auth/user/login').post(api.login)
 router.route('/auth/user/changePassword').post(api.changePassword)

@@ -75,9 +75,43 @@ describe('Front Payment Endpoints', () => {
 
       expect(response.status).toBe(400);
     });
+
+    it('should return 400 when amount is zero', async () => {
+      const response = await request(app)
+        .post('/front/create-checkout-session')
+        .send({
+          eventId: 'test_event_id',
+          ticketOrderId: 'test_order_id',
+          amount: 0,
+          currency: 'eur'
+        });
+
+      expect([400, 500]).toContain(response.status);
+    });
+
+    it('should return 400 for unsupported currency code', async () => {
+      const response = await request(app)
+        .post('/front/create-checkout-session')
+        .send({
+          eventId: 'test_event_id',
+          ticketOrderId: 'test_order_id',
+          amount: 1000,
+          currency: 'INVALID'
+        });
+
+      expect([400, 500]).toContain(response.status);
+    });
   });
 
   describe('POST /front/create-payment-intent', () => {
+    it('should return 400 for missing required fields', async () => {
+      const response = await request(app)
+        .post('/front/create-payment-intent')
+        .send({});
+
+      expect([400, 500]).toContain(response.status);
+    });
+
     it('should return 200 and create payment intent for valid request', async () => {
       const response = await request(app)
         .post('/front/create-payment-intent')

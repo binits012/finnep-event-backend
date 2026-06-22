@@ -19,22 +19,23 @@ const stripe = new Stripe(process.env.STRIPE_KEY)
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET
 var app = express();
 
-// Add this block right after app initialization to test Redis early
-(async () => {
-    console.log('Testing Redis connection...');
-    console.log('REDIS_HOST:', process.env.REDIS_HOST);
-    console.log('REDIS_PORT:', process.env.REDIS_PORT);
-    console.log('REDIS_PWD set:', !!process.env.REDIS_PWD);
+// Add this block right after app initialization to test Redis early (skip in test mode)
+if (process.env.NODE_ENV !== 'test') {
+    (async () => {
+        console.log('Testing Redis connection...');
+        console.log('REDIS_HOST:', process.env.REDIS_HOST);
+        console.log('REDIS_PORT:', process.env.REDIS_PORT);
+        console.log('REDIS_PWD set:', !!process.env.REDIS_PWD);
 
-    try {
-        await redisClient.ping(); // Simple ping to test connection
-        console.log('Redis connection successful');
-    } catch (error) {
-        console.error('Redis connection failed:', error.message);
-        // Optionally, exit or handle gracefully
-        process.exit(1);
-    }
-})();
+        try {
+            await redisClient.ping(); // Simple ping to test connection
+            console.log('Redis connection successful');
+        } catch (error) {
+            console.error('Redis connection failed:', error.message);
+            process.exit(1);
+        }
+    })();
+}
 
 // Configure CORS to work with frontend CSP
 const corsOptions = {

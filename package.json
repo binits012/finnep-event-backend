@@ -19,12 +19,12 @@
     "esbuild": "node esbuild.config.js",
     "docs:generate": "node scripts/generateSwagger.js",
     "migrate": "node scripts/migrate-schemas.js",
-    "test": "NODE_OPTIONS=--experimental-vm-modules jest",
-    "test:watch": "NODE_OPTIONS=--experimental-vm-modules jest --watch",
-    "test:coverage": "NODE_OPTIONS=--experimental-vm-modules jest --coverage",
-    "test:unit": "NODE_OPTIONS=--experimental-vm-modules jest --testPathPattern=unit",
-    "test:integration": "NODE_OPTIONS=--experimental-vm-modules jest --testPathPattern=integration",
-    "test:ci": "NODE_OPTIONS=--experimental-vm-modules jest --ci --coverage --maxWorkers=2"
+    "test": "cross-env NODE_OPTIONS=--experimental-vm-modules jest",
+    "test:watch": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --watch",
+    "test:coverage": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --coverage",
+    "test:unit": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --testPathPattern=unit",
+    "test:integration": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --testPathPattern=integration",
+    "test:ci": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --ci --coverage --maxWorkers=2"
   },
   "type": "module",
   "dependencies": {
@@ -50,6 +50,7 @@
     "busboy": "^1.6.0",
     "copy-webpack-plugin": "^11.0.0",
     "cors": "^2.8.5",
+    "cross-env": "^7.0.3",
     "dotenv": "^16.3.1",
     "esbuild": "^0.25.9",
     "exceljs": "^4.4.0",
