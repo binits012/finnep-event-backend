@@ -9,6 +9,7 @@ import { handlePresaleSendEmails } from '../handlers/presaleSendEmailsHandler.js
 import { handleWaitlistStatusUpdated } from '../handlers/waitlistStatusHandler.js';
 import { handleDiscountCodesUpdated } from '../handlers/discountCodesSyncHandler.js';
 import { handleCustomerMessage } from '../handlers/customerHandler.js';
+import { handleSiloDeploymentRequest } from '../handlers/siloDeploymentHandler.js';
 import { info, error, warn } from '../../model/logger.js';
 
 // Track if queues have been set up to prevent duplicate setup
@@ -168,6 +169,22 @@ const setupQueues = async (force = false) => {
         await messageConsumer.consumeQueue('discount-codes-sync-queue', async (message) => {
             await handleDiscountCodesUpdated(message);
         }, discountCodesSyncQueueOptions);
+
+        const siloDeploymentQueueOptions = {
+            prefetch: 1,
+            deadLetterExchange: 'event-merchant-dlx',
+            deadLetterRoutingKey: 'dlq.silo-deployment-queue.retry-1',
+            topicExchangeBindings: [
+                {
+                    exchange: process.env.RABBITMQ_EXCHANGE || 'event-merchant-exchange',
+                    routingKey: 'external.merchant.status.updated'
+                }
+            ]
+        };
+        info('Setting up silo-deployment-queue with options:', siloDeploymentQueueOptions);
+        await messageConsumer.consumeQueue('silo-deployment-queue', async (message) => {
+            await handleSiloDeploymentRequest(message);
+        }, siloDeploymentQueueOptions);
 
         isSetupComplete = true;
         info('All queues set up and consuming messages');

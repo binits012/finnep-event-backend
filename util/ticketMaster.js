@@ -1,5 +1,6 @@
 import { generateICS, generateQRCode, loadEmailTemplate } from './common.js'
 import { resolvePlatformBrandingAsync } from './platformSettings.js'
+import { resolveSiloEmailBranding } from './siloEmailSettings.js'
 import * as Ticket from '../model/ticket.js'
 import { error, warn } from '../model/logger.js'
 import { forward } from './sendMail.js'
@@ -402,6 +403,21 @@ export const ensureTicketQrAndIcs = async (event, ticket) => {
     return updated || ticket;
 };
 
+/** Generate QR + ICS before returning ticket to checkout clients (download / success UI). */
+export const prepareTicketForClientResponse = async (event, ticket) => {
+    if (!event || !ticket) return ticket;
+    try {
+        const enriched = await ensureTicketQrAndIcs(event, ticket);
+        const ticketId = enriched?._id || enriched?.id || ticket?._id || ticket?.id;
+        if (!ticketId) return enriched || ticket;
+        const fresh = await Ticket.getTicketById(ticketId, false);
+        return fresh || enriched || ticket;
+    } catch (err) {
+        warn('[prepareTicketForClientResponse] Failed to ensure QR/ICS (non-blocking)', err?.message || err);
+        return ticket;
+    }
+};
+
 /**
  * @param {object} options
  * @param {string|null} [options.marketCountryCode] — ISO alpha-2; omit or null = platform default (e.g. webhooks)
@@ -558,13 +574,34 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
             options && Object.prototype.hasOwnProperty.call(options, 'marketCountryCode')
                 ? options.marketCountryCode
                 : null;
-        const branding = await resolvePlatformBrandingAsync(marketCountryCode);
-        const companyName = branding.companyName;
-        const companyLogo = branding.companyLogo;
-        const brandingContactEmail = branding.brandingContactEmail;
-        const businessId = branding.businessId;
-        const socialMedidFB = branding.socialMedidFB || event.socialMedia?.facebook;
-        const socialMedidLN = branding.socialMedidLN || event.socialMedia?.linkedin;
+        const useSiloEmail = options.channel === 'silo' && options.merchant;
+        let companyName;
+        let companyLogo;
+        let brandingContactEmail;
+        let businessId;
+        let socialMedidFB;
+        let socialMedidLN;
+
+        if (useSiloEmail) {
+            const siloBranding = resolveSiloEmailBranding(options.merchant);
+            companyName = siloBranding.companyName;
+            companyLogo = siloBranding.companyLogo;
+            brandingContactEmail = siloBranding.brandingContactEmail;
+            businessId = '';
+            const merchantObj = options.merchant && typeof options.merchant.toObject === 'function'
+                ? options.merchant.toObject()
+                : (options.merchant || event.merchant || {});
+            socialMedidFB = merchantObj?.socialMedia?.facebook || event.socialMedia?.facebook || '';
+            socialMedidLN = merchantObj?.socialMedia?.linkedin || event.socialMedia?.linkedin || '';
+        } else {
+            const branding = await resolvePlatformBrandingAsync(marketCountryCode);
+            companyName = branding.companyName;
+            companyLogo = branding.companyLogo;
+            brandingContactEmail = branding.brandingContactEmail;
+            businessId = branding.businessId;
+            socialMedidFB = branding.socialMedidFB || event.socialMedia?.facebook;
+            socialMedidLN = branding.socialMedidLN || event.socialMedia?.linkedin;
+        }
 
         // Public transport
         const publicTransportLink = event.transportLink || buildVenueMapLink(venue);
@@ -719,7 +756,6 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
         }
 
         const message = {
-            from: process.env.EMAIL_USERNAME,
             to: ticketFor,
             subject: event.eventTitle,
             html: typeof loadedData === 'string' ? loadedData : loadedData.toString(),
@@ -731,6 +767,12 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
             },
             attachments
         };
+        if (!useSiloEmail) {
+            message.from = process.env.EMAIL_USERNAME;
+        } else {
+            const siloBranding = resolveSiloEmailBranding(options.merchant);
+            message.replyTo = siloBranding.replyTo || undefined;
+        }
         return message;
 
     } catch (err) {
@@ -743,6 +785,18 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
  * Send ticket email without blocking the caller (e.g. checkout response).
  * Failed sends are persisted by sendMail.forward for scheduler retry.
  */
+async function deliverTicketEmailPayload(ticketId, emailPayload, options = {}) {
+    if (options.channel === 'silo' && options.merchant) {
+        const { sendSiloEmail } = await import('./siloMail.js');
+        await sendSiloEmail(options.merchant, emailPayload);
+    } else {
+        await forward(emailPayload);
+    }
+    if (ticketId) {
+        await Ticket.updateTicketById(ticketId, { isSend: true });
+    }
+}
+
 export const sendTicketEmailInBackground = (event, ticket, ticketForEmail, otp, locale = 'en-US', options = {}) => {
     const ticketId = ticket?._id || ticket?.id;
     void (async () => {
@@ -754,10 +808,7 @@ export const sendTicketEmailInBackground = (event, ticket, ticketForEmail, otp, 
                 error('[sendTicketEmailInBackground] missing recipient for ticket %s', ticketId);
                 return;
             }
-            await forward(emailPayload);
-            if (ticketId) {
-                await Ticket.updateTicketById(ticketId, { isSend: true });
-            }
+            await deliverTicketEmailPayload(ticketId, emailPayload, options);
         } catch (err) {
             error(
                 '[sendTicketEmailInBackground] failed for ticket %s: %s',
@@ -766,4 +817,8 @@ export const sendTicketEmailInBackground = (event, ticket, ticketForEmail, otp, 
             );
         }
     })();
-};;
+};
+
+export const queueTicketEmailDelivery = async (ticketId, emailPayload, options = {}) => {
+    await deliverTicketEmailPayload(ticketId, emailPayload, options);
+};

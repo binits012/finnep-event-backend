@@ -1,5 +1,6 @@
 import * as Setting from '../model/setting.js'
 import { buildPublicSiteConfigPayload } from './publicSiteConfig.js'
+import { getAllPartnerCorsOrigins } from '../model/merchant.js'
 
 /** Trim + strip trailing slashes (env mistakes like https://host/); Origin header has no path. */
 export function normalizeCorsOrigin(raw) {
@@ -31,20 +32,26 @@ export const STATIC_APP_ORIGINS = [
 	'http://localhost:3002',
 	'http://localhost:3003',
 	'http://localhost:3010',
-	'http://192.168.1.107:3003'
+	'http://192.168.1.107:3003',
+	'http://localhost:3020'
 ]
 
 let dynamicCorsOrigins = []
+let partnerCorsOrigins = []
 
 export function getDynamicCorsOrigins() {
 	return dynamicCorsOrigins
+}
+
+export function getPartnerCorsOrigins() {
+	return partnerCorsOrigins
 }
 
 export function getMergedCorsOrigins() {
 	const fromEnv = process.env.CORS_ORIGINS
 		? process.env.CORS_ORIGINS.split(',').map((url) => url.trim()).filter((url) => url.length > 0)
 		: []
-	const merged = [...STATIC_APP_ORIGINS, ...fromEnv, process.env.FRONTEND_URL, ...dynamicCorsOrigins]
+	const merged = [...STATIC_APP_ORIGINS, ...fromEnv, process.env.FRONTEND_URL, ...dynamicCorsOrigins, ...partnerCorsOrigins]
 		.filter(Boolean)
 		.map(normalizeCorsOrigin)
 		.filter((o) => o.length > 0)
@@ -71,5 +78,14 @@ export async function refreshCorsOriginsFromDb() {
 	} catch (e) {
 		console.error('[CORS] refreshCorsOriginsFromDb failed:', e.message || e)
 		dynamicCorsOrigins = []
+	}
+}
+
+export async function refreshPartnerCorsOriginsFromMerchants() {
+	try {
+		partnerCorsOrigins = await getAllPartnerCorsOrigins()
+	} catch (e) {
+		console.error('[CORS] refreshPartnerCorsOriginsFromMerchants failed:', e.message || e)
+		partnerCorsOrigins = []
 	}
 }

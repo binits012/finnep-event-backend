@@ -12,6 +12,7 @@ import { RESOURCE_NOT_FOUND, INTERNAL_SERVER_ERROR } from '../applicationTexts.j
 import * as ticketMaster from '../util/ticketMaster.js'
 import {
     applyTicketQuantitiesToTicketInfo,
+    eventHasSeatSelection,
     findTicketTypeConfig,
     formatInventoryErrorMessage,
     getScanCountFromTicketType,
@@ -37,7 +38,8 @@ import { manifestUpdateService } from '../src/services/manifestUpdateService.js'
 import { seatReservationService } from '../src/services/seatReservationService.js'
 import { resolveSoldPlaceIdsForPayment } from '../src/services/paymentSeatResolutionService.js'
 import { fulfillSeatPurchaseBeforeTicket, assertSeatsAvailableForPurchase } from '../src/services/seatPurchaseFulfillmentService.js'
-import { loadVenueSectionContext } from '../src/services/venueSectionContextService.js'
+import { downloadPricingFromS3 } from '../util/aws.js'
+import { loadVenueSectionContext, deriveSectionsFromPlaces } from '../src/services/venueSectionContextService.js'
 import * as seatController from './seat.controller.js'
 import { EventManifest, Manifest, PlatformMarketingConsent, Survey, SurveyResponse } from '../model/mongoModel.js';
 import { Venue } from '../model/mongoModel.js'
@@ -75,7 +77,13 @@ import {
     resolveMergedPlatformSettings,
     pickDefaultPlatformDoc,
 } from '../util/platformSettings.js'
+import { resolveTicketEmailOptions, extractCheckoutHostname, shouldUseSiloTicketEmail } from '../util/siloCheckoutEmail.js'
 import { normalizeCountryCode, expandCountryAliases } from '../util/regionalAccess.js'
+import {
+    assertDualPaymentV1Allowed,
+    isDualPaymentMerchant,
+    resolveStripeCurrency,
+} from '../util/nepalPayment.js'
 
 /** ISO 3166-1 alpha-3 (or other mistaken 3-letter codes) → ISO 4217 for Stripe */
 const STRIPE_CURRENCY_ALIASES = {
@@ -220,6 +228,7 @@ const filterEventsForDetectedCountry = (events, detectedCountryCode) => {
 };
 
 export const getDataForFront = async (req, res, next) => {
+    try {
     // GeoIP + x-country-code fallback; runs in parallel with main data fetch
     const countryPromise = resolveCountryCodeForFrontFilter(req);
     // Fetch all data in parallel (country lookup runs alongside)
@@ -236,7 +245,12 @@ export const getDataForFront = async (req, res, next) => {
         })()
     ]);
 
-    const photosWithCloudFrontUrls = await Promise.all(photo.map(async el => {
+    const photoList = Array.isArray(photo) ? photo : [];
+    if (!Array.isArray(photo) && photo?.error) {
+        error('getDataForFront: listPhoto failed %s', photo.error);
+    }
+
+    const photosWithCloudFrontUrls = await Promise.all(photoList.map(async el => {
 
         const cacheKey = `signedUrl:${el.id}`;
         const cached = await commonUtil.getCacheByKey(redisClient, cacheKey);
@@ -261,7 +275,8 @@ export const getDataForFront = async (req, res, next) => {
 
     // Keep validity-window behavior, but still hard-exclude explicitly inactive events.
     const now = new Date();
-    let filteredEvents = event ? event.filter(e => e?.active !== false && isEventCurrentlyValid(e, now)) : [];
+    const eventList = Array.isArray(event) ? event : [];
+    let filteredEvents = eventList.filter(e => e?.active !== false && isEventCurrentlyValid(e, now));
 
     const detectedCountry = await countryPromise;
     const beforeGeoipSummary = summarizeEventsForGeoipLog(filteredEvents);
@@ -294,6 +309,15 @@ export const getDataForFront = async (req, res, next) => {
         companyTitle: process.env.COMPANY_TITLE || 'Okazzo'
     }
     res.status(consts.HTTP_STATUS_OK).json(data)
+    } catch (err) {
+        error('getDataForFront %s', err?.stack || err);
+        if (!res.headersSent) {
+            return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
+                message: 'Failed to load front page data',
+                error: INTERNAL_SERVER_ERROR
+            });
+        }
+    }
 }
 
 /** Slim JSON for storefront: hosts, SEO, CSP manifest origins — cacheable */
@@ -969,6 +993,8 @@ const validatePaymentRequest = (reqBody) => {
                 ? sanitizeString(String(metadata.couponId).trim(), 32)
                 : null
     };
+    sanitizedMetadata.useStripePrice =
+        metadata.useStripePrice === true || String(metadata.useStripePrice || '').trim() === '1';
 
     // Preserve seatTickets and placeIds for pricing_configuration model
     if (metadata.seatTickets) {
@@ -1014,6 +1040,13 @@ const validatePaymentRequest = (reqBody) => {
     }
     if (metadata.locale) {
         sanitizedMetadata.locale = sanitizeString(metadata.locale, 20);
+    }
+    const paymentProvider = reqBody.paymentProvider || metadata.paymentProvider;
+    if (paymentProvider) {
+        const normalizedProvider = sanitizeString(String(paymentProvider), 20);
+        if (['stripe', 'paytrail', 'nabil'].includes(normalizedProvider)) {
+            sanitizedMetadata.paymentProvider = normalizedProvider;
+        }
     }
 
     // Validate quantity
@@ -1168,7 +1201,21 @@ const parseMoneyField = (value, fallback = 0) => {
     return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const resolveTicketForProviderPricing = (ticket, metadata = {}) => {
+    const useStripePrice =
+        metadata.useStripePrice === true || String(metadata.useStripePrice || '').trim() === '1';
+    if (useStripePrice) {
+        // stripePrice is major units in event stripeCurrency (e.g. 6 = €6.00); Stripe PI amount is total * 100.
+        const stripePrice = ticket?.stripePrice ?? ticket?.stripe_price;
+        if (stripePrice != null && Number(stripePrice) > 0) {
+            return { ...ticket, price: Number(stripePrice) };
+        }
+    }
+    return ticket;
+};
+
 const calculateExpectedPrice = (ticket, event, quantity, metadata = {}) => {
+    const ticketForPricing = resolveTicketForProviderPricing(ticket, metadata);
     const qty = parseInt(metadata.quantity || quantity, 10) || 1;
 
     // Check if this is a seat-based purchase
@@ -1177,9 +1224,9 @@ const calculateExpectedPrice = (ticket, event, quantity, metadata = {}) => {
         (typeof metadata.placeIds === 'string' && metadata.placeIds.trim().length > 0 && metadata.placeIds !== '[]' && metadata.placeIds !== 'null')
     );
 
-    const eventHasSeatSelection = event?.venue?.hasSeatSelection || event?.venue?.venueId;
+    const seatedEvent = eventHasSeatSelection(event);
     const isPricingConfiguration = event?.venue?.pricingModel === 'pricing_configuration';
-    const hasSeatSelection = (hasPlaceIds || eventHasSeatSelection) && (
+    const hasSeatSelection = (hasPlaceIds || seatedEvent) && (
         parseMoneyField(ticket?.entertainmentTax, parseMoneyField(metadata.entertainmentTax)) > 0 ||
         parseMoneyField(ticket?.serviceTax, parseMoneyField(metadata.serviceTax)) > 0 ||
         parseMoneyField(ticket?.orderFee, parseMoneyField(metadata.orderFee)) > 0 ||
@@ -1188,7 +1235,7 @@ const calculateExpectedPrice = (ticket, event, quantity, metadata = {}) => {
 
     // Standard ticket_info checkout: server computes full line from catalog ticket + optional couponCode
     if (!hasSeatSelection) {
-        const orderPricing = computeTicketInfoOrderPricing(ticket, event, qty, metadata);
+        const orderPricing = computeTicketInfoOrderPricing(ticketForPricing, event, qty, metadata);
         if (orderPricing.couponCode) {
             metadata.couponCode = orderPricing.couponCode;
             metadata.couponId = orderPricing.couponId;
@@ -1226,7 +1273,7 @@ const calculateExpectedPrice = (ticket, event, quantity, metadata = {}) => {
         placeIds: metadata.placeIds,
         placeIdsType: typeof metadata.placeIds,
         isArray: Array.isArray(metadata.placeIds),
-        eventHasSeatSelection,
+        seatedEvent,
         entertainmentTax,
         serviceTax,
         orderFee,
@@ -1873,7 +1920,7 @@ async function logConnectedAccountWalletPrerequisites(stripeAccountId) {
 }
 
 /** Fulfill a paid-event order when server-validated total is €0 (e.g. 100% discount code). */
-const completeZeroAmountCheckout = async (req, res, { metadata, parsedMetadata, event, currency }) => {
+const completeZeroAmountCheckout = async (req, res, { metadata, parsedMetadata, event, currency, merchant = null }) => {
     const clientId = getClientIdentifier(req);
     const otp = await commonUtil.createCode(8);
 
@@ -2102,6 +2149,7 @@ const completeZeroAmountCheckout = async (req, res, { metadata, parsedMetadata, 
     });
 
     ticket = await Ticket.getTicketById(ticket._id, false);
+    ticket = await ticketMaster.prepareTicketForClientResponse(event, ticket);
 
     res.status(consts.HTTP_STATUS_OK).json({
         zeroAmountCheckout: true,
@@ -2110,9 +2158,12 @@ const completeZeroAmountCheckout = async (req, res, { metadata, parsedMetadata, 
         message: 'Order completed successfully'
     });
 
-    ticketMaster.sendTicketEmailInBackground(event, ticket, fulfillmentMetadata.email, otp, locale, {
+    ticketMaster.sendTicketEmailInBackground(event, ticket, fulfillmentMetadata.email, otp, locale, await resolveTicketEmailOptions({
+        req,
+        merchant,
+        metadata: fulfillmentMetadata,
         marketCountryCode: parseRequestMarketCountryCode(req)
-    });
+    }));
 
     try {
         if (event?.event_end_date) {
@@ -2132,6 +2183,20 @@ export const createPaymentIntent = async (req, res, next) => {
 
         // Security Layer 2: Input validation and sanitization
         const { amount, currency, metadata } = validatePaymentRequest(req.body);
+        const paymentProvider = req.body.paymentProvider || metadata.paymentProvider || 'stripe';
+
+        if (paymentProvider === 'nabil') {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                error: 'NPR payments must use /create-nabil-payment',
+            });
+        }
+
+        const normalizedCurrency = String(currency || '').trim().toLowerCase();
+        if (normalizedCurrency === 'npr') {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                error: 'NPR payments must use /create-nabil-payment',
+            });
+        }
 
         // Security Layer 2.5: Nonce validation to prevent duplicate form submissions
         if (!metadata.nonce || typeof metadata.nonce !== 'string' || metadata.nonce.length < 32) {
@@ -2181,9 +2246,27 @@ export const createPaymentIntent = async (req, res, next) => {
         // Security Layer 3: Business logic validation
         const { merchant, event, ticket } = await validateMerchantAndEvent(metadata);
 
+        // Security Layer 3.5: Dual-payment v1 guards (GA only, no coupons)
+        let parsedMetadata = { ...metadata, paymentProvider };
+        const v1BlockReason = assertDualPaymentV1Allowed({ merchant, event, metadata: parsedMetadata });
+        if (v1BlockReason) {
+            throw new Error(v1BlockReason);
+        }
+
+        const useStripePrice =
+            parsedMetadata.useStripePrice === true ||
+            String(parsedMetadata.useStripePrice || '').trim() === '1';
+        if (useStripePrice && ticket) {
+            const expectedCurrency = resolveStripeCurrency(ticket, event);
+            if (normalizedCurrency !== expectedCurrency) {
+                throw new Error(
+                    `Invalid currency for international card checkout. Expected ${expectedCurrency.toUpperCase()}.`
+                );
+            }
+        }
+
         // Security Layer 4: Price validation
         // Parse placeIds and seatTickets if present (for seat-based purchases)
-        let parsedMetadata = { ...metadata };
         if (metadata.placeIds) {
             if (typeof metadata.placeIds === 'string') {
                 try {
@@ -2268,7 +2351,8 @@ export const createPaymentIntent = async (req, res, next) => {
                 metadata: { ...metadata, ...parsedMetadata },
                 parsedMetadata,
                 event,
-                currency
+                currency,
+                merchant
             });
         }
 
@@ -2704,7 +2788,8 @@ const _createPaytrailPaymentInternal = async (req, res, next, { redirectSuccessU
             commissionRate: merchant.paytrailShopInShopData?.commissionRate || parseFloat(process.env.PAYTRAIL_PLATFORM_COMMISSION || '3'),
             // Timestamp
             timestamp: new Date().toISOString(),
-            locale: parsedMetadata.locale || 'en-US'
+            locale: parsedMetadata.locale || 'en-US',
+            checkoutHostname: extractCheckoutHostname({ req, metadata: parsedMetadata })
         };
         console.log('[createPaytrailPayment] Storing in Redis:', {
             stamp: paytrailPayment.stamp,
@@ -3275,6 +3360,12 @@ export const verifyPaytrailPayment = async (req, res, next) => {
                     // Ticket already exists - return it (idempotent response)
                     console.log(`[verifyPaytrailPayment] Ticket already exists for duplicate nonce: ${existingTicket._id}`);
                     existingTicket = await Ticket.getTicketById(existingTicket._id);
+                    const eventForTicket = await Event.getEventById(
+                        existingTicket?.ticketInfo?.eventId || existingTicket?.event
+                    );
+                    if (eventForTicket) {
+                        existingTicket = await ticketMaster.prepareTicketForClientResponse(eventForTicket, existingTicket);
+                    }
                     return res.status(consts.HTTP_STATUS_OK).json({ success: true, ticket: existingTicket });
                 }
 
@@ -3318,6 +3409,10 @@ export const verifyPaytrailPayment = async (req, res, next) => {
             if (ticket) {
                 console.log(`[verifyPaytrailPayment] Ticket created by another request: ${ticket._id}`);
                 ticket = await Ticket.getTicketById(ticket._id);
+                const eventForTicket = await Event.getEventById(ticket?.ticketInfo?.eventId || ticket?.event);
+                if (eventForTicket) {
+                    ticket = await ticketMaster.prepareTicketForClientResponse(eventForTicket, ticket);
+                }
                 return res.status(consts.HTTP_STATUS_OK).json({ success: true, ticket });
             }
 
@@ -3339,6 +3434,10 @@ export const verifyPaytrailPayment = async (req, res, next) => {
             if (ticket) {
                 console.log(`[verifyPaytrailPayment] Ticket already exists: ${ticket._id}`);
                 ticket = await Ticket.getTicketById(ticket._id);
+                const eventForTicket = await Event.getEventById(ticket?.ticketInfo?.eventId || ticket?.event);
+                if (eventForTicket) {
+                    ticket = await ticketMaster.prepareTicketForClientResponse(eventForTicket, ticket);
+                }
                 return res.status(consts.HTTP_STATUS_OK).json({ success: true, ticket });
             }
 
@@ -3721,6 +3820,9 @@ export const verifyPaytrailPayment = async (req, res, next) => {
             checkoutToken: useRedisData
                 ? (redisData.checkoutToken || null)
                 : (req.body.checkoutToken || null),
+            checkoutHostname: useRedisData
+                ? (redisData.checkoutHostname || extractCheckoutHostname({ req }))
+                : extractCheckoutHostname({ req }),
         };
 
         console.log('[verifyPaytrailPayment] Payment data being passed to createTicketFromPaytrailPayment:', {
@@ -3817,6 +3919,7 @@ export const verifyPaytrailPayment = async (req, res, next) => {
 
             // Return populated ticket
             ticket = await Ticket.getTicketById(ticket._id);
+            ticket = await ticketMaster.prepareTicketForClientResponse(event, ticket);
             return res.status(consts.HTTP_STATUS_OK).json({ success: true, ticket });
 
         } finally {
@@ -3844,6 +3947,189 @@ export const verifyPaytrailPayment = async (req, res, next) => {
         });
     }
 }
+
+const _createNabilPaymentInternal = async (req, res, { redirectSuccessUrl, redirectCancelUrl } = {}) => {
+    try {
+        validateRequestSize(req.body);
+        const { amount, currency, metadata, paymentProvider } = req.body;
+
+        if (paymentProvider !== 'nabil') {
+            throw new Error('Invalid payment provider');
+        }
+
+        const validatedData = validatePaymentRequest(req.body);
+        const parsedMetadata = { ...validatedData.metadata, paymentProvider: 'nabil' };
+        const { merchant, event, ticket } = await validateMerchantAndEvent(parsedMetadata);
+
+        const v1BlockReason = assertDualPaymentV1Allowed({ merchant, event, metadata: parsedMetadata });
+        if (v1BlockReason) {
+            throw new Error(v1BlockReason);
+        }
+
+        if (!isDualPaymentMerchant(merchant)) {
+            throw new Error('Nabil payments are not enabled for this merchant');
+        }
+
+        const expectedPrice = calculateExpectedPrice(ticket, event, parseInt(parsedMetadata.quantity, 10), parsedMetadata);
+        validatePriceCalculation(amount / 100, expectedPrice);
+
+        if (amount === 0 && roundMoney(expectedPrice.totalAmount) === 0) {
+            return await completeZeroAmountCheckout(req, res, {
+                metadata,
+                parsedMetadata,
+                event,
+                currency,
+                merchant
+            });
+        }
+
+        const nabilService = (await import('../services/nabilPaymentService.js')).default;
+        if (!nabilService.isConfigured()) {
+            throw new Error('Nabil EPG is not configured');
+        }
+
+        const nabilPayment = await nabilService.createPayment({
+            amount,
+            currency: (currency || 'NPR').toUpperCase(),
+            merchantId: parsedMetadata.externalMerchantId || merchant.merchantId,
+            eventId: parsedMetadata.eventId,
+            ticketId: parsedMetadata.ticketId,
+            customer: {
+                email: parsedMetadata.email,
+                name: parsedMetadata.fullName || parsedMetadata.email
+            },
+            redirectSuccessUrl: req.body.redirectSuccessUrl || redirectSuccessUrl,
+            redirectCancelUrl: req.body.redirectCancelUrl || redirectCancelUrl
+        });
+
+        const paymentKey = `nabil_payment:${nabilPayment.stamp}`;
+        const redisPaymentData = {
+            stamp: nabilPayment.stamp,
+            transactionId: nabilPayment.transactionId,
+            amount,
+            currency: (currency || 'NPR').toUpperCase(),
+            commission: nabilPayment.commission,
+            merchantId: parsedMetadata.merchantId,
+            externalMerchantId: parsedMetadata.externalMerchantId || merchant.merchantId,
+            eventId: parsedMetadata.eventId,
+            eventName: parsedMetadata.eventName,
+            ticketId: parsedMetadata.ticketId,
+            ticketName: parsedMetadata.ticketName,
+            email: parsedMetadata.email,
+            fullName: parsedMetadata.fullName,
+            phone: parsedMetadata.phone || '',
+            quantity: parseInt(parsedMetadata.quantity, 10),
+            basePrice: parsedMetadata.basePrice,
+            serviceFee: parsedMetadata.serviceFee,
+            vatRate: parsedMetadata.vatRate,
+            vatAmount: parsedMetadata.vatAmount,
+            serviceTax: parsedMetadata.serviceTax,
+            serviceTaxAmount: parsedMetadata.serviceTaxAmount,
+            orderFee: parsedMetadata.orderFee,
+            orderFeeServiceTax: parsedMetadata.orderFeeServiceTax,
+            totalBasePrice: parsedMetadata.totalBasePrice,
+            totalServiceFee: parsedMetadata.totalServiceFee,
+            country: parsedMetadata.country,
+            marketingOptIn: parsedMetadata.marketingOptIn,
+            nonce: parsedMetadata.nonce,
+            locale: parsedMetadata.locale || 'en-US',
+            paymentProvider: 'nabil'
+        };
+
+        await redisClient.set(paymentKey, JSON.stringify(redisPaymentData), { EX: 600 });
+
+        res.status(consts.HTTP_STATUS_OK).json({
+            paymentUrl: nabilPayment.href,
+            transactionId: nabilPayment.transactionId,
+            stamp: nabilPayment.stamp,
+            provider: 'nabil',
+            commission: nabilPayment.commission
+        });
+    } catch (err) {
+        console.error('Error creating Nabil payment:', err);
+        res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            error: formatInventoryErrorMessage(err)
+        });
+    }
+};
+
+export const createNabilPayment = async (req, res, next) => {
+    return _createNabilPaymentInternal(req, res);
+};
+
+export const verifyNabilPayment = async (req, res, next) => {
+    try {
+        validateRequestSize(req.body);
+        const { stamp, transactionId, status, nonce } = req.body;
+
+        if (!stamp || !transactionId) {
+            throw new Error('Missing stamp or transactionId');
+        }
+
+        if (nonce && typeof nonce === 'string' && nonce.length >= 32) {
+            const nonceKey = `nabil_verify_nonce:${nonce}`;
+            const setResult = await redisClient.set(nonceKey, stamp, { NX: true, EX: 300 });
+            if (setResult === null) {
+                const existingTicket = await Ticket.genericSearch({ nabilStamp: stamp });
+                if (existingTicket) {
+                    return res.status(consts.HTTP_STATUS_OK).json({ success: true, ticket: existingTicket });
+                }
+                throw new Error('This payment verification has already been submitted');
+            }
+        }
+
+        const lockKey = `nabil_verify_lock:${stamp}`;
+        const lockAcquired = await redisClient.set(lockKey, transactionId, { NX: true, EX: 60 });
+        if (lockAcquired === null) {
+            for (let attempt = 0; attempt < 6; attempt++) {
+                await new Promise((resolve) => setTimeout(resolve, 500));
+                const existingTicket = await Ticket.genericSearch({ nabilStamp: stamp });
+                if (existingTicket) {
+                    return res.status(consts.HTTP_STATUS_OK).json({ success: true, ticket: existingTicket });
+                }
+            }
+            throw new Error('Payment verification already in progress');
+        }
+
+        try {
+            let ticket = await Ticket.genericSearch({ nabilStamp: stamp });
+            if (ticket) {
+                return res.status(consts.HTTP_STATUS_OK).json({ success: true, ticket });
+            }
+
+            const paymentKey = `nabil_payment:${stamp}`;
+            const paymentDataStr = await redisClient.get(paymentKey);
+            if (!paymentDataStr) {
+                throw new Error('Payment session expired or not found');
+            }
+            const paymentData = JSON.parse(paymentDataStr);
+
+            const nabilService = (await import('../services/nabilPaymentService.js')).default;
+            let paymentStatus = String(status || '').toLowerCase();
+            if (paymentStatus !== 'ok' && paymentStatus !== 'success') {
+                const verified = await nabilService.verifyPaymentStatus(transactionId, stamp);
+                paymentStatus = verified.status;
+            }
+
+            if (paymentStatus !== 'ok' && paymentStatus !== 'success' && paymentStatus !== 'paid') {
+                throw new Error(`Payment not successful: ${paymentStatus}`);
+            }
+
+            const nabilWebhook = await import('./nabil.webhook.js');
+            ticket = await nabilWebhook.createTicketFromNabilPayment(paymentData, transactionId, stamp);
+            await redisClient.del(paymentKey);
+
+            return res.status(consts.HTTP_STATUS_OK).json({ success: true, ticket });
+        } finally {
+            await redisClient.del(lockKey).catch(() => {});
+        }
+    } catch (err) {
+        console.error('Error verifying Nabil payment:', err);
+        return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+            error: err.message
+        });
+    }
+};
 
 // Handle successful payment and create ticket records
 export const handlePaymentSuccess = async (req, res, next) => {
@@ -4186,6 +4472,38 @@ export const handlePaymentSuccess = async (req, res, next) => {
                 timestamp: new Date().toISOString(),
                 existingData: existingData
             });
+
+            if (existingData?.ticketId) {
+                const existingTicket = await Ticket.getTicketById(existingData.ticketId, false);
+                if (existingTicket) {
+                    const { normalizeLocale } = await import('../util/common.js');
+                    const locale = mergedMetadata.locale ? normalizeLocale(mergedMetadata.locale) : 'en-US';
+                    const emailOptions = await resolveTicketEmailOptions({
+                        req,
+                        merchant,
+                        metadata: sanitizedMetadata,
+                        marketCountryCode: parseRequestMarketCountryCode(req)
+                    });
+                    if (!existingTicket.isSend) {
+                        const existingOtp = existingTicket.otp || await commonUtil.createCode(8);
+                        ticketMaster.sendTicketEmailInBackground(
+                            event,
+                            existingTicket,
+                            sanitizedMetadata.email,
+                            existingOtp,
+                            locale,
+                            emailOptions
+                        );
+                    }
+                    return res.status(consts.HTTP_STATUS_OK).json({
+                        success: true,
+                        data: existingTicket,
+                        message: 'Payment already processed',
+                        duplicate: true
+                    });
+                }
+            }
+
             // Return success with message (idempotent) - prevents errors if client retries after network issue
             return res.status(consts.HTTP_STATUS_OK).json({
                 success: true,
@@ -4289,6 +4607,7 @@ export const handlePaymentSuccess = async (req, res, next) => {
             }
         );
         ticket = await Ticket.getTicketById(ticket._id, false);
+        ticket = await ticketMaster.prepareTicketForClientResponse(event, ticket);
 
         // Consume presale token (one-time use) if present in metadata
         const stripePresaleToken = mergedMetadata.presaleToken || null;
@@ -4363,9 +4682,12 @@ export const handlePaymentSuccess = async (req, res, next) => {
             message: "Payment processed successfully"
         });
 
-        ticketMaster.sendTicketEmailInBackground(event, ticket, sanitizedMetadata.email, otp, locale, {
+        ticketMaster.sendTicketEmailInBackground(event, ticket, sanitizedMetadata.email, otp, locale, await resolveTicketEmailOptions({
+            req,
+            merchant,
+            metadata: sanitizedMetadata,
             marketCountryCode: parseRequestMarketCountryCode(req)
-        });
+        }));
 
         // Publish ticket creation event to notify other systems
         try {
@@ -5164,6 +5486,7 @@ export const handleFreeEventRegistration = async (req, res, next) => {
             }
         );
         ticket = await Ticket.getTicketById(ticket._id, false);
+        ticket = await ticketMaster.prepareTicketForClientResponse(event, ticket);
 
         const clientId = getClientIdentifier(req);
         console.log('Free event registration handled:', {
@@ -5179,9 +5502,12 @@ export const handleFreeEventRegistration = async (req, res, next) => {
         });
 
         const locale = commonUtil.extractLocaleFromRequest(req);
-        ticketMaster.sendTicketEmailInBackground(event, ticket, sanitizedData.email, otp, locale, {
+        ticketMaster.sendTicketEmailInBackground(event, ticket, sanitizedData.email, otp, locale, await resolveTicketEmailOptions({
+            req,
+            merchant,
+            metadata: sanitizedData,
             marketCountryCode: parseRequestMarketCountryCode(req)
-        });
+        }));
 
         // Publish ticket creation event to notify other systems
         try {
@@ -5403,21 +5729,18 @@ export const getEventSeatsPublic = async (req, res, next) => {
 		}
 
 		// Check if event has seat selection
-		if (!event.venue || !event.venue.venueId) {
+		if (!eventHasSeatSelection(event)) {
 			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
 				message: 'Event does not have seat selection enabled',
 				error: 'SEAT_SELECTION_NOT_ENABLED'
 			});
 		}
 
-		// 2. Load encoded manifest from MongoDB (EventManifest collection) with populated venue
-		// EventManifest.eventId stores the internal MongoDB event ID (as string)
+		// 2. Load encoded manifest from MongoDB (EventManifest collection).
+		// Do not populate venue here — missing Venue docs would null out the ref id we need.
 		const eventMongoId = String(event._id);
 
-		// Use .lean() for faster query - returns plain object instead of Mongoose document
-		const encodedManifest = await EventManifest.findOne({ eventId: eventMongoId })
-			.populate('venue')
-			.lean();
+		const encodedManifest = await EventManifest.findOne({ eventId: eventMongoId }).lean();
 
 		if (!encodedManifest) {
 			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
@@ -5426,33 +5749,92 @@ export const getEventSeatsPublic = async (req, res, next) => {
 			});
 		}
 
-		// 3. Get venue's manifest (contains sections, backgroundSvg, places with coordinates)
-		// Use .lean() for faster query
-		const venueManifest = await Manifest.findOne({ venue: encodedManifest.venue._id })
-			.sort({ createdAt: -1 })
-			.lean();
-		if (!venueManifest) {
-			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
-				message: 'Venue manifest not found',
-				error: RESOURCE_NOT_FOUND
-			});
+		const manifestVenueId = encodedManifest.venue ? String(encodedManifest.venue) : null;
+		const venueRefId = event.venue?.venueId || manifestVenueId;
+		const s3Key = encodedManifest.s3Key || event.venue?.manifestS3Key || null;
+		const isPricingConfiguration = event.venue?.pricingModel === 'pricing_configuration';
+
+		let venue = null;
+		let venuePlaces = [];
+
+		if (isPricingConfiguration && s3Key) {
+			let fullManifest = null;
+			try {
+				fullManifest = await downloadPricingFromS3(s3Key);
+			} catch (s3Err) {
+				error('[getEventSeatsPublic] Failed to download pricing manifest from S3', s3Err);
+			}
+
+			const ctx = await loadVenueSectionContext({ venueId: venueRefId, s3Key });
+			const venueDoc = ctx.venue;
+			let sections =
+				(ctx.sections?.length ? ctx.sections : null) ||
+				(Array.isArray(fullManifest?.sections) && fullManifest.sections.length > 0
+					? fullManifest.sections
+					: null) ||
+				[];
+			venuePlaces =
+				(ctx.places?.length ? ctx.places : null) ||
+				fullManifest?.places ||
+				[];
+			if (sections.length === 0 && venuePlaces.length > 0) {
+				sections = deriveSectionsFromPlaces(venuePlaces);
+			}
+			venue = {
+				...(venueDoc || {}),
+				sections,
+				backgroundSvg: venueDoc?.backgroundSvg || fullManifest?.backgroundSvg || null,
+			};
+		} else {
+			let venueDoc = venueRefId ? await Venue.findById(venueRefId).lean() : null;
+			if (!venueDoc) {
+				return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+					message: 'Venue not found for this event',
+					error: RESOURCE_NOT_FOUND
+				});
+			}
+
+			venue = venueDoc;
+			const venueManifest = await Manifest.findOne({ venue: venueDoc._id || venueRefId })
+				.sort({ createdAt: -1 })
+				.lean();
+			if (!venueManifest) {
+				return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+					message: 'Venue manifest not found',
+					error: RESOURCE_NOT_FOUND
+				});
+			}
+
+			venuePlaces = Array.isArray(venueManifest.places) ? venueManifest.places : [];
+			if (venuePlaces.length === 0) {
+				const { places: placesFallback } = await loadVenueSectionContext({
+					venueId: venueDoc._id || venueRefId,
+					s3Key,
+				});
+				venuePlaces = placesFallback;
+			}
 		}
 
-		// 4. placeIds array contains all encoded data (section, row, seat, x, y, tierCode, available, tags)
-		// Frontend will decode placeIds directly - no need to send places array
 		const encodedPlaceIds = encodedManifest.placeIds || [];
-
-		// 5. Use already-populated venue from encodedManifest (no need to query again!)
-		// With .lean(), the populated venue is already a plain object
-		const venue = encodedManifest.venue;
-		if (!venue || !venue.sections || !venue.backgroundSvg) {
+		if (
+			(!venue?.sections || venue.sections.length === 0) &&
+			venuePlaces.length > 0
+		) {
+			venue = venue || {};
+			venue.sections = deriveSectionsFromPlaces(venuePlaces);
+		}
+		if (
+			(!venue?.sections || venue.sections.length === 0) &&
+			encodedPlaceIds.length === 0
+		) {
 			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
 				message: 'Venue not found in manifest or missing required data',
 				error: RESOURCE_NOT_FOUND
 			});
 		}
 
-		// 5. Get Redis reservations for event (using external event ID for Redis key)
+		// placeIds array contains all encoded data (section, row, seat, x, y, tierCode, available, tags)
+		// Frontend will decode placeIds directly - no need to send places array
 		const reservedMap = await seatReservationService.getReservedSeats(externalEventId);
 		const reservedPlaceIds = Array.from(reservedMap.keys());
 		const ownReservedSet = new Set();
@@ -5512,15 +5894,7 @@ export const getEventSeatsPublic = async (req, res, next) => {
 		}
 		const ownReservedPlaceIds = Array.from(ownReservedSet);
 
-		// 6. Format sections from venue (contains polygon and spacingConfig)
-		let venuePlaces = Array.isArray(venueManifest.places) ? venueManifest.places : [];
-		if (venuePlaces.length === 0) {
-			const { places: placesFallback } = await loadVenueSectionContext({
-				venueId: encodedManifest.venue._id,
-				s3Key: encodedManifest.s3Key
-			});
-			venuePlaces = placesFallback;
-		}
+		// Format sections from venue (contains polygon and spacingConfig)
 		const formattedSections = (venue.sections || []).map(section => {
 			const sectionId = section.id || section._id?.toString() || section.name;
 			const sectionPlaces = venuePlaces.filter((p) => p.section === section.name || p.section === sectionId);
@@ -5923,19 +6297,43 @@ export const sendSeatOTP = async (req, res, next) => {
 		// Extract locale from request
 		const locale = commonUtil.extractLocaleFromRequest(req);
 
-		// Send email with code
-		const emailHtml = await commonUtil.loadVerificationCodeTemplate(code, locale);
-		const { getEmailSubject } = await import('../util/emailTranslations.js');
-		const emailSubject = await getEmailSubject('verification_code', locale, { companyName: process.env.COMPANY_TITLE || 'Finnep' });
-		const emailPayload = {
-			from: process.env.EMAIL_USERNAME,
-			to: normalizedEmail,
-			subject: emailSubject,
-			html: emailHtml
-		};
+		const event = await Event.getEventById(eventId);
+		const eventMerchantId = event?.merchant?._id?.toString?.() || event?.merchant?.toString?.();
+		const merchant = eventMerchantId ? await Merchant.getMerchantById(eventMerchantId) : null;
+		const checkoutHostname = extractCheckoutHostname({ req });
+		const siloOpts = merchant && shouldUseSiloTicketEmail(merchant, checkoutHostname)
+			? { channel: 'silo', merchant }
+			: null;
 
 		try {
-			await sendMail.forward(emailPayload);
+			if (siloOpts) {
+				const {
+					loadSiloVerificationCodeTemplate,
+					getSiloEmailSubject
+				} = await import('../util/siloMail.js');
+				const { resolveSiloEmailBranding } = await import('../util/siloEmailSettings.js');
+				const { queueSiloEmail } = await import('../workers/emailWorker.js');
+				const branding = resolveSiloEmailBranding(merchant);
+				const emailHtml = await loadSiloVerificationCodeTemplate(code, locale, branding);
+				const emailSubject = await getSiloEmailSubject('verification_code', locale, { companyName: branding.companyName });
+				await queueSiloEmail(String(merchant._id || merchant.id), {
+					to: normalizedEmail,
+					subject: emailSubject,
+					html: emailHtml,
+					replyTo: branding.replyTo || undefined
+				});
+			} else {
+				const emailHtml = await commonUtil.loadVerificationCodeTemplate(code, locale);
+				const { getEmailSubject } = await import('../util/emailTranslations.js');
+				const emailSubject = await getEmailSubject('verification_code', locale, { companyName: process.env.COMPANY_TITLE || 'Finnep' });
+				const emailPayload = {
+					from: process.env.EMAIL_USERNAME,
+					to: normalizedEmail,
+					subject: emailSubject,
+					html: emailHtml
+				};
+				await sendMail.forward(emailPayload);
+			}
 		} catch (emailErr) {
 			error('Error sending seat OTP email:', emailErr);
 			// Don't fail the request if email fails

@@ -11,12 +11,14 @@ import * as report from '../controllers/report.controller.js'
 import * as audit from '../controllers/audit.controller.js'
 import * as monitor from '../controllers/monitor.controller.js'
 import * as dashboard from '../controllers/dashboard.controller.js'
-import { authenticate, requireAdmin } from '../middleware/auth.middleware.js'
+import { authenticate, requireAdmin, authenticateSuperAdmin, authenticateAdmin } from '../middleware/auth.middleware.js'
 import {
     createPaytrailSubMerchant,
     togglePaytrailForMerchant,
     toggleShopInShopMode
 } from '../controllers/paytrail.admin.controller.js'
+import { toggleNabilForMerchant } from '../controllers/nabil.admin.controller.js'
+import * as apiCredential from '../controllers/apiCredential.controller.js'
 
 router.get('/health', api.getHealth)
 
@@ -150,6 +152,20 @@ router.route('/merchant/:id')
 router.route('/merchant/:id/otherInfo')
     .patch(api.addOrUpdateOtherInfo)
 
+router.route('/merchant/:id/api-credentials')
+    .get(authenticateAdmin, apiCredential.listApiCredentials)
+    .post(authenticateAdmin, apiCredential.issueApiCredential)
+
+router.route('/merchant/:id/api-credentials/:keyId/rotate')
+    .post(authenticateAdmin, apiCredential.rotateApiCredential)
+
+router.route('/merchant/:id/api-credentials/:keyId')
+    .patch(authenticateAdmin, apiCredential.updateApiCredential)
+    .delete(authenticateAdmin, apiCredential.revokeApiCredential)
+
+router.route('/merchant/:id/silo-deployment/retry')
+    .post(authenticateAdmin, apiCredential.retrySiloDeployment)
+
 // Paytrail admin routes (admin only)
 router.route('/admin/paytrail/create-submerchant')
     .post(authenticate, requireAdmin, createPaytrailSubMerchant)
@@ -159,6 +175,10 @@ router.route('/admin/paytrail/commission/:merchantId')
     .put(authenticate, requireAdmin, togglePaytrailForMerchant)
 router.route('/admin/paytrail/shop-in-shop/toggle')
     .post(authenticate, requireAdmin, toggleShopInShopMode)
+
+router.route('/admin/nabil/toggle')
+    .post(authenticate, requireAdmin, toggleNabilForMerchant)
+    .put(authenticate, requireAdmin, toggleNabilForMerchant)
 
 // Venue management for merchants (authenticated, no admin required)
 router.route('/merchant/:merchantId/venue')

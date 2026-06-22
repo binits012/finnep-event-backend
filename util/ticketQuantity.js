@@ -97,6 +97,21 @@ export const findTicketTypeConfig = (event, ticketTypeId) => {
     ) ?? null;
 };
 
+/** True when checkout/seat map should treat an event as seated (venue map or pricing_configuration). */
+export const eventHasSeatSelection = (event) => {
+    if (!event) return false;
+    if (event.isSeatedEvent === true) return true;
+    const venue = event.venue;
+    if (!venue || typeof venue !== 'object') return false;
+    return !!(
+        venue.venueId ||
+        venue.hasSeatSelection === true ||
+        venue.lockedManifestId ||
+        venue.manifestS3Key ||
+        venue.pricingModel === 'pricing_configuration'
+    );
+};
+
 /** Remaining admission headcount for this ticket type, or null when not capped in Mongo. */
 export const parseAvailableHeadcount = (ticketTypeConfig) => {
     if (!ticketTypeConfig || ticketTypeConfig.available == null) return null;
@@ -118,8 +133,8 @@ export const shouldSkipTicketPoolInventoryCheck = (event, metadata = {}) => {
         (typeof metadata.seatTickets === 'string' && metadata.seatTickets.trim().length > 0 &&
             metadata.seatTickets !== '[]' && metadata.seatTickets !== 'null')
     );
-    const eventHasSeatSelection = !!(event?.venue?.hasSeatSelection || event?.venue?.venueId);
-    return eventHasSeatSelection && (hasPlaceIds || hasSeatTickets);
+    const seatedEvent = eventHasSeatSelection(event);
+    return seatedEvent && (hasPlaceIds || hasSeatTickets);
 };
 
 export const resolveSeatCountFromPurchaseMetadata = (metadata = {}) => {

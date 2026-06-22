@@ -1,0 +1,37 @@
+<mjml>
+  <mj-head>
+    <mj-font name="Inter" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" />
+    <mj-title>{{t.subject}}</mj-title>
+    <mj-attributes>
+      <mj-all font-family="Inter, Arial, sans-serif" />
+    </mj-attributes>
+  </mj-head>
+  <mj-body background-color="#f3f4f6">
+    <mj-section background-color="{{accentColor}}" padding="32px 24px">
+      <mj-column>
+        <mj-image src="{{companyLogo}}" alt="{{companyName}}" width="120px" padding-bottom="16px" />
+        <mj-text align="center" color="#ffffff" font-size="22px" font-weight="700">{{t.title}}</mj-text>
+      </mj-column>
+    </mj-section>
+    <mj-section background-color="#ffffff" padding="32px 24px">
+      <mj-column>
+        <mj-text>{{t.greeting}}</mj-text>
+        <mj-text>{{t.body}}</mj-text>
+        <mj-text align="center" padding="24px 0">
+          <span style="font-size: 32px; font-weight: 700; letter-spacing: 6px; color: {{accentColor}};">{{verificationCode}}</span>
+        </mj-text>
+        <mj-text color="#6b7280" font-size="14px">{{t.expiryNote}}</mj-text>
+      </mj-column>
+    </mj-section>
+    <mj-section padding="24px">
+      <mj-column>
+        <mj-text align="center" color="#9ca3af" font-size="12px">
+          © {{currentYear}} {{companyName}}. {{t.copyright}}
+        </mj-text>
+        <mj-text align="center" color="#9ca3af" font-size="11px">
+          {{t.help}} <a href="mailto:{{brandingContactEmail}}" style="color: {{accentColor}};">{{brandingContactEmail}}</a>
+        </mj-text>
+      </mj-column>
+    </mj-section>
+  </mj-body>
+</mjml>

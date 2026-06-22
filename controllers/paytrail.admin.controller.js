@@ -9,13 +9,6 @@ async function updateMerchant(merchantId, updateData) {
 
 export const createPaytrailSubMerchant = async (req, res, next) => {
     try {
-        // Admin only
-        if (req.user.role !== 'admin') {
-            return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
-                error: 'Admin access required'
-            });
-        }
-
         const { merchantId, bankingInfo, commissionRate } = req.body;
 
         // Get merchant
@@ -107,13 +100,6 @@ export const createPaytrailSubMerchant = async (req, res, next) => {
 
 export const togglePaytrailForMerchant = async (req, res, next) => {
     try {
-        // Admin only
-        if (req.user.role !== 'admin') {
-            return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
-                error: 'Admin access required'
-            });
-        }
-
         const { merchantId, enabled, commissionRate } = req.body;
 
         const merchant = await Merchant.getMerchantById(merchantId);
@@ -171,13 +157,6 @@ export const togglePaytrailForMerchant = async (req, res, next) => {
 
 export const toggleShopInShopMode = async (req, res, next) => {
     try {
-        // Admin only
-        if (req.user.role !== 'admin') {
-            return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
-                error: 'Admin access required'
-            });
-        }
-
         const { enabled } = req.body;
         const Setting = await import('../model/setting.js');
 

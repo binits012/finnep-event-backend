@@ -23,6 +23,12 @@ export const authenticate = async (req, res, next) => {
 }
 
 /**
+ * Returns true for admin and superAdmin roles.
+ */
+export const hasAdminAccess = (role) =>
+	role === consts.ROLE_ADMIN || role === consts.ROLE_SUPER_ADMIN
+
+/**
  * Middleware to check if user has admin or superadmin role
  * Must be used after authenticate middleware
  */
@@ -34,7 +40,7 @@ export const requireAdmin = (req, res, next) => {
 		})
 	}
 
-	if (req.user.role !== 'admin' && req.user.role !== 'superAdmin') {
+	if (!hasAdminAccess(req.user.role)) {
 		return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
 			message: 'Forbidden: Admin access required',
 			error: 'INSUFFICIENT_PERMISSIONS'

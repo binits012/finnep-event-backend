@@ -9,6 +9,47 @@ import { sendPricingSyncErrorEmail } from '../../util/sendMail.js';
 import { generateUniqueShortCode, cacheShortCodeMapping } from '../../util/shortCode.js';
 import moment from 'moment-timezone';
 
+function normalizeTicketInfoForMongo(ticketInfo, message = {}) {
+    if (!Array.isArray(ticketInfo)) return ticketInfo;
+    const eventStripeCurrency =
+        message?.stripe_currency ??
+        message?.stripeCurrency ??
+        message?.other_info?.stripeCurrency;
+    return ticketInfo.map((ticket) => ({
+        ...ticket,
+        name: ticket.name ?? ticket.ticket_name,
+        stripePrice: ticket.stripePrice ?? ticket.stripe_price ?? undefined,
+        ...(eventStripeCurrency
+            ? { stripeCurrency: String(eventStripeCurrency).trim().toLowerCase() }
+            : {}),
+    }));
+}
+
+function resolveStripeCurrencyFromMessage(message = {}) {
+    const raw =
+        message?.stripe_currency ??
+        message?.stripeCurrency ??
+        message?.other_info?.stripeCurrency;
+    if (!raw || typeof raw !== 'string') return undefined;
+    const normalized = raw.trim().toLowerCase();
+    return /^[a-z]{3}$/.test(normalized) ? normalized : undefined;
+}
+
+function buildOtherInfoFromMessage(message = {}) {
+    const stripeCurrency = resolveStripeCurrencyFromMessage(message);
+    return {
+        ...(message?.other_info || {}),
+        categoryName: message?.category_name,
+        subCategoryName: message?.subcategory_name,
+        eventExtraInfo: {
+            eventType: message?.event_type,
+            doorSaleAllowed: message?.door_sale_allowed,
+            doorSaleExtraAmount: message?.door_sale_extra_amount
+        },
+        ...(stripeCurrency ? { stripeCurrency } : {}),
+    };
+}
+
 function deriveEventEndOfDay({ eventDate, eventTimezone }) {
     const tz = eventTimezone || process.env.TIME_ZONE || 'Europe/Helsinki';
     return moment(eventDate).tz(tz).endOf('day').toDate();
@@ -175,7 +216,7 @@ async function handleEventCreated(message) {
     const eventDescription = message?.description;
     const eventDate = message?.event_date;
     const occupancy = message?.occupancy;
-    const ticketInfo = message?.ticket_info
+    const ticketInfo = normalizeTicketInfoForMongo(message?.ticket_info, message)
     const eventPromotionPhoto = message?.promotion_photo;
     const eventPhoto = message?.event_photo;
     const eventLocationAddress = message?.location_address;
@@ -187,17 +228,8 @@ async function handleEventCreated(message) {
     const active = message?.active;
     const eventName =externalMerchantId+'_'+ message.id;
     const videoUrl = message?.video_url;
-    // Build enhanced otherInfo with additional fields
-    const otherInfo = {
-        ...(message?.other_info || {}),
-        categoryName: message?.category_name,
-        subCategoryName: message?.subcategory_name,
-        eventExtraInfo: {
-            eventType: message?.event_type,
-            doorSaleAllowed: message?.door_sale_allowed,
-            doorSaleExtraAmount: message?.door_sale_extra_amount
-        }
-    };
+    const otherInfo = buildOtherInfoFromMessage(message);
+    const stripeCurrency = resolveStripeCurrencyFromMessage(message);
     const eventTimezone = message?.event_timezone;
     const city = message?.city;
     const country = message?.country;
@@ -224,7 +256,7 @@ async function handleEventCreated(message) {
         eventLocationGeoCode, transportLink, socialMedia, lang, position,
         active, eventName, videoUrl, otherInfo, eventTimezone,
         city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue,
-        waitlistConfig, event_end_date, isSeatedEvent, shortCode
+        waitlistConfig, event_end_date, isSeatedEvent, shortCode, stripeCurrency
     );
 
     if (savedEvent?._id && shortCode) {
@@ -255,7 +287,7 @@ async function handleEventUpdated(message) {
     const eventDescription = message?.description;
     const eventDate = message?.event_date;
     const occupancy = message?.occupancy;
-    const ticketInfo = message?.ticket_info
+    const ticketInfo = normalizeTicketInfoForMongo(message?.ticket_info, message)
     const eventPromotionPhoto = message?.promotion_photo;
     const eventPhoto = message?.event_photo;
     const eventLocationAddress = message?.location_address;
@@ -267,17 +299,8 @@ async function handleEventUpdated(message) {
     const active = message?.active;
     const eventName =externalMerchantId+'_'+ message.id;
     const videoUrl = message?.video_url;
-    // Build enhanced otherInfo with additional fields
-    const otherInfo = {
-        ...(message?.other_info || {}),
-        categoryName: message?.category_name,
-        subCategoryName: message?.subcategory_name,
-        eventExtraInfo: {
-            eventType: message?.event_type,
-            doorSaleAllowed: message?.door_sale_allowed,
-            doorSaleExtraAmount: message?.door_sale_extra_amount
-        }
-    };
+    const otherInfo = buildOtherInfoFromMessage(message);
+    const stripeCurrency = resolveStripeCurrencyFromMessage(message);
     const eventTimezone = message?.event_timezone;
     const city = message?.city;
     const country = message?.country;
@@ -328,14 +351,18 @@ async function handleEventUpdated(message) {
 
     if (!existingEvent) {
         console.log(`Event with ID ${externalEventId} not found, creating new event instead`);
-        await Event.createEvent(
+        const shortCode = await generateUniqueShortCode(EventModel);
+        const createdEvent = await Event.createEvent(
             eventTitle, eventDescription, eventDate, occupancy,
             ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress,
             eventLocationGeoCode, transportLink, socialMedia, lang, position,
             active, eventName, videoUrl, otherInfo, eventTimezone,
             city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue,
-            waitlistConfig, event_end_date, isSeatedEvent
+            waitlistConfig, event_end_date, isSeatedEvent, shortCode, stripeCurrency
         );
+        if (createdEvent?._id && shortCode) {
+            await cacheShortCodeMapping(shortCode, createdEvent._id.toString());
+        }
     } else {
         const updatePayload = {
             eventTitle, eventDescription, eventDate, occupancy,
@@ -343,7 +370,8 @@ async function handleEventUpdated(message) {
             eventLocationGeoCode, transportLink, socialMedia, lang, position,
             active, eventName, videoUrl, otherInfo, eventTimezone,
             city, country, venueInfo, venue,
-            waitlistConfig, event_end_date, isSeatedEvent
+            waitlistConfig, event_end_date, isSeatedEvent,
+            ...(stripeCurrency ? { stripeCurrency } : {}),
         };
         // Sync pre-sale waitlist cap so client has it before any join; count comes only from waitlist.status_updated (on each join)
         if (waitlistConfig && typeof waitlistConfig === 'object' && waitlistConfig.pre_sale_cap != null) {

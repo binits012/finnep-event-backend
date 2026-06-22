@@ -22,6 +22,8 @@
     "migrate:user-regional-scopes": "node scripts/backfill-user-regional-scopes.mjs",
     "migrate:event-end-date": "node scripts/backfill-event-end-date.mjs",
     "migrate:event-short-code": "node scripts/backfill-event-short-code.mjs",
+    "migrate:partner-waitlist-scope": "node scripts/backfill-partner-waitlist-scope.mjs",
+    "migrate:silo-email-to-mongo": "node scripts/backfill-silo-email-to-mongo.mjs",
     "warm:shortlink-cache": "node scripts/warm-shortlink-cache.mjs",
     "preview:email": "node scripts/preview-email.js",
     "preview:email:list": "node scripts/preview-email.js --list",
@@ -38,6 +40,7 @@
     "html-minifier": "~7.2.0"
   },
   "dependencies": {
+    "@aws-sdk/client-cloudfront": "~3.1073.0",
     "amqplib": "~0.10.9",
     "compression": "~1.8.1",
     "cookie-parser": "~1.4.7",

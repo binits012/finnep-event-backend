@@ -9,6 +9,8 @@ import './workers/emailWorker.js'
 import * as adminRole from './util/adminUser.js'
 import api from './routes/api.js'
 import front from './routes/front.js'
+import siloStorefrontBff from './routes/siloStorefrontBff.js'
+import partner from './routes/partner.js'
 //import './util/schedular.js'
 import Stripe from 'stripe'
 import {checkoutSuccess} from './util/paymentActions.js'
@@ -21,7 +23,8 @@ import {
   getMergedCorsOrigins,
   isCorsOriginAllowed,
   normalizeCorsOrigin,
-  refreshCorsOriginsFromDb
+  refreshCorsOriginsFromDb,
+  refreshPartnerCorsOriginsFromMerchants
 } from './util/corsAllowlist.js';
 const stripe = new Stripe(process.env.STRIPE_KEY)
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET
@@ -91,7 +94,9 @@ const corsOptions = {
     'Authorization',
     'Cache-Control',
     'Pragma',
-    'x-country-code'
+    'x-country-code',
+    'x-api-key',
+    'x-api-secret'
   ],
   exposedHeaders: ['Content-Range', 'X-Content-Range'],
   optionsSuccessStatus: 200
@@ -271,6 +276,8 @@ setupSwagger().then(swagger => {
 
 app.use('/api', api)
 app.use('/front', front)
+app.use('/silo-storefront-bff', siloStorefrontBff)
+app.use('/partner/v1', partner)
 app.set('port', process.env.PORT || 3000);
 
 // Only start server if not in test mode
@@ -293,6 +300,7 @@ if (process.env.NODE_ENV !== 'test') {
     //create settings
     await adminRole.settings()
     await refreshCorsOriginsFromDb()
+    await refreshPartnerCorsOriginsFromMerchants()
     //create socialMedia
     //await adminRole.socialMedia()
 }

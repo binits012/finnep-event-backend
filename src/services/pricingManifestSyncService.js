@@ -128,7 +128,9 @@ export class PricingManifestSyncService {
 		if (existingEvent) {
 			await Event.updateEventById(existingEvent._id, {
 				'venue.lockedManifestId': savedManifest._id,
-				'venue.manifestS3Key': s3Key
+				'venue.manifestS3Key': s3Key,
+				'venue.venueId': venueId,
+				'venue.hasSeatSelection': true,
 			});
 			info(`[PricingManifestSyncService] Linked manifest to event`, {
 				eventMongoId,

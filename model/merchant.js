@@ -1,6 +1,138 @@
 import * as model from '../model/mongoModel.js';
 import { error, info } from './logger.js';
 import { buildCountryMatchFilter } from '../util/regionalAccess.js';
+import {
+  generateKeyId,
+  generateApiSecret,
+  hashApiSecret,
+  getDefaultScopes,
+  normalizeAllowedDomains,
+  sanitizeCredentialForResponse
+} from '../util/apiCredentials.js';
+import { encryptSiloSmtpPassword } from '../util/siloSmtpCrypto.js';
+import { normalizeSiloSettings } from '../util/siloSettings.js';
+
+function attachBffSecret(credential, secret) {
+  try {
+    credential.bffSecret = encryptSiloSmtpPassword(secret);
+  } catch (err) {
+    info('Could not encrypt silo BFF secret: %s', err?.message || err);
+  }
+}
+
+export function merchantHasActiveApiCredential(merchant) {
+  return (merchant.apiCredentials || []).some((credential) => credential.status === 'active');
+}
+
+function getSiloEnabled(merchant) {
+  return Boolean(normalizeSiloSettings(merchant?.siloSettings || {}).enabled);
+}
+
+function getDeploymentAction(beforeEnabled, afterEnabled) {
+  if (!beforeEnabled && afterEnabled) return 'provision';
+  if (beforeEnabled && !afterEnabled) return 'deprovision';
+  return null;
+}
+
+function applySiloDeploymentIntent(merchant, action) {
+  if (!action) return;
+  const silo = normalizeSiloSettings(merchant.siloSettings || {});
+  const nowIso = new Date().toISOString();
+  const nextStatus = action === 'provision' ? 'pending_provision' : 'pending_deprovision';
+
+  silo.deployment = {
+    ...silo.deployment,
+    mode: 'per_merchant',
+    status: nextStatus,
+    lastProvisionRequestedAt: nowIso,
+    lastError: ''
+  };
+  merchant.siloSettings = silo;
+}
+
+function applySiloProvisionedFromCredentials(merchant) {
+  const enabled = merchantHasActiveApiCredential(merchant);
+  merchant.siloSettings = normalizeSiloSettings({ enabled }, merchant.siloSettings || {});
+}
+
+/** Align siloSettings.enabled with active API credentials (CMS is source of truth). */
+export async function reconcileSiloProvisionedFromCredentials(merchantId) {
+  const merchant = await model.Merchant.findById(merchantId);
+  if (!merchant) {
+    return { changed: false, merchant: null, siloEnabled: false, deploymentAction: null };
+  }
+
+  const beforeEnabled = getSiloEnabled(merchant);
+  const expectedEnabled = merchantHasActiveApiCredential(merchant);
+  const currentEnabled = Boolean(normalizeSiloSettings(merchant.siloSettings || {}).enabled);
+  if (expectedEnabled === currentEnabled) {
+    return { changed: false, merchant, siloEnabled: currentEnabled, deploymentAction: null };
+  }
+
+  applySiloProvisionedFromCredentials(merchant);
+  const deploymentAction = getDeploymentAction(beforeEnabled, expectedEnabled);
+  applySiloDeploymentIntent(merchant, deploymentAction);
+  merchant.updatedAt = new Date();
+  await merchant.save();
+
+  info(
+    'Reconciled silo provision state: merchantId=%s enabled=%s',
+    merchant.merchantId,
+    expectedEnabled
+  );
+
+  return {
+    changed: true,
+    merchant,
+    siloEnabled: expectedEnabled,
+    deploymentAction
+  };
+}
+
+/** Re-queue AWS provisioning when silo is enabled but the last provision attempt failed. */
+export async function retryFailedSiloDeploymentIfNeeded(merchantId) {
+  const merchant = await model.Merchant.findById(merchantId);
+  if (!merchant) {
+    return { retried: false, merchant: null, deploymentAction: null };
+  }
+
+  const silo = normalizeSiloSettings(merchant.siloSettings || {});
+  if (!silo.enabled || silo.deployment?.status !== 'provision_failed') {
+    return { retried: false, merchant, deploymentAction: null };
+  }
+
+  applySiloDeploymentIntent(merchant, 'provision');
+  merchant.updatedAt = new Date();
+  await merchant.save();
+
+  info('Re-queued failed silo deployment: merchantId=%s', merchant.merchantId);
+
+  return {
+    retried: true,
+    merchant,
+    deploymentAction: 'provision'
+  };
+}
+
+/** Re-queue AWS provisioning for CMS ops (enabled merchant with active credentials). */
+export async function requeueSiloProvisioning(merchantId) {
+  const merchant = await model.Merchant.findById(merchantId);
+  if (!merchant) return null;
+  if (!merchantHasActiveApiCredential(merchant)) {
+    return { error: 'SILO_NOT_ENABLED' };
+  }
+
+  applySiloDeploymentIntent(merchant, 'provision');
+  merchant.updatedAt = new Date();
+  await merchant.save();
+
+  info('Re-queued silo provisioning from CMS: merchantId=%s', merchant.merchantId);
+
+  return {
+    merchant,
+    deploymentAction: 'provision'
+  };
+}
 
 export class Merchant {
   constructor(merchantId, name, orgName, country, code, email, companyEmail, phone, companyPhoneNumber, address, companyAddress,
@@ -179,4 +311,162 @@ export async function addOrUpdateOtherInfo(id, otherInfo) {
     error('Error adding or updating otherInfo:', err);
     throw err;
   }
+}
+
+export async function findMerchantByApiKeyId(keyId) {
+  try {
+    if (!keyId) return null;
+    return await model.Merchant.findOne({
+      apiCredentials: {
+        $elemMatch: { keyId, status: 'active' }
+      }
+    }).exec();
+  } catch (err) {
+    error('Error finding merchant by API key:', err);
+    throw err;
+  }
+}
+
+export async function findMerchantByApiKeyIdAnyStatus(keyId) {
+  try {
+    if (!keyId) return null;
+    return await model.Merchant.findOne({
+      'apiCredentials.keyId': keyId
+    }).exec();
+  } catch (err) {
+    error('Error finding merchant by API key (any status):', err);
+    throw err;
+  }
+}
+
+export async function issueApiCredential(merchantId, { allowedDomains = [], scopes = [], label = '', serverToServer = true } = {}) {
+  const merchant = await model.Merchant.findById(merchantId);
+  if (!merchant) return null;
+  const beforeEnabled = getSiloEnabled(merchant);
+
+  const keyId = generateKeyId();
+  const secret = generateApiSecret();
+  const credential = {
+    keyId,
+    secretHash: hashApiSecret(secret),
+    allowedDomains: normalizeAllowedDomains(allowedDomains),
+    scopes: getDefaultScopes(scopes),
+    status: 'active',
+    label: String(label || '').trim(),
+    serverToServer: !!serverToServer,
+    createdAt: new Date()
+  };
+  attachBffSecret(credential, secret);
+
+  merchant.apiCredentials = merchant.apiCredentials || [];
+  merchant.apiCredentials.push(credential);
+  applySiloProvisionedFromCredentials(merchant);
+  const deploymentAction = getDeploymentAction(beforeEnabled, getSiloEnabled(merchant));
+  applySiloDeploymentIntent(merchant, deploymentAction);
+  merchant.updatedAt = new Date();
+  await merchant.save();
+
+  return {
+    merchant,
+    credential: sanitizeCredentialForResponse(credential),
+    secret,
+    deploymentAction
+  };
+}
+
+export async function listApiCredentials(merchantId) {
+  const merchant = await model.Merchant.findById(merchantId).lean();
+  if (!merchant) return null;
+  return (merchant.apiCredentials || []).map(sanitizeCredentialForResponse);
+}
+
+export async function rotateApiCredential(merchantId, keyId) {
+  const merchant = await model.Merchant.findById(merchantId);
+  if (!merchant) return null;
+
+  const credential = (merchant.apiCredentials || []).find((c) => c.keyId === keyId);
+  if (!credential) return null;
+
+  const secret = generateApiSecret();
+  credential.secretHash = hashApiSecret(secret);
+  attachBffSecret(credential, secret);
+  credential.rotatedAt = new Date();
+  credential.status = 'active';
+  merchant.updatedAt = new Date();
+  await merchant.save();
+
+  return {
+    merchant,
+    credential: sanitizeCredentialForResponse(credential),
+    secret
+  };
+}
+
+export async function updateApiCredential(merchantId, keyId, updates = {}) {
+  const merchant = await model.Merchant.findById(merchantId);
+  if (!merchant) return null;
+  const beforeEnabled = getSiloEnabled(merchant);
+
+  const credential = (merchant.apiCredentials || []).find((c) => c.keyId === keyId);
+  if (!credential) return null;
+
+  if (updates.allowedDomains !== undefined) {
+    credential.allowedDomains = normalizeAllowedDomains(updates.allowedDomains);
+  }
+  if (updates.scopes !== undefined) {
+    credential.scopes = getDefaultScopes(updates.scopes);
+  }
+  if (updates.status !== undefined && ['active', 'revoked'].includes(updates.status)) {
+    credential.status = updates.status;
+  }
+  if (updates.label !== undefined) {
+    credential.label = String(updates.label || '').trim();
+  }
+  if (updates.serverToServer !== undefined) {
+    credential.serverToServer = !!updates.serverToServer;
+  }
+
+  applySiloProvisionedFromCredentials(merchant);
+  const deploymentAction = getDeploymentAction(beforeEnabled, getSiloEnabled(merchant));
+  applySiloDeploymentIntent(merchant, deploymentAction);
+  merchant.updatedAt = new Date();
+  await merchant.save();
+  return {
+    credential: sanitizeCredentialForResponse(credential),
+    deploymentAction
+  };
+}
+
+export async function revokeApiCredential(merchantId, keyId) {
+  return updateApiCredential(merchantId, keyId, { status: 'revoked' });
+}
+
+export async function touchApiCredentialLastUsed(merchantId, keyId) {
+  await model.Merchant.updateOne(
+    { _id: merchantId, 'apiCredentials.keyId': keyId },
+    { $set: { 'apiCredentials.$.lastUsedAt': new Date() } }
+  ).exec();
+}
+
+export async function getAllPartnerCorsOrigins() {
+  const merchants = await model.Merchant.find({
+    apiCredentials: {
+      $elemMatch: { status: 'active', allowedDomains: { $exists: true, $ne: [] } }
+    }
+  }).select('apiCredentials').lean();
+
+  const origins = new Set();
+  for (const merchant of merchants) {
+    for (const cred of merchant.apiCredentials || []) {
+      if (cred.status !== 'active') continue;
+      for (const domain of cred.allowedDomains || []) {
+        const hostname = String(domain).trim().toLowerCase();
+        if (hostname) {
+          origins.add(`https://${hostname}`);
+          origins.add(`http://${hostname}`);
+        }
+      }
+    }
+  }
+  return [...origins];
 }

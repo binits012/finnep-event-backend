@@ -1,0 +1,33 @@
+<mjml>
+  <mj-head>
+    <mj-font name="Inter" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" />
+    <mj-title>{{t.subject}}</mj-title>
+    <mj-attributes>
+      <mj-all font-family="Inter, Arial, sans-serif" />
+    </mj-attributes>
+  </mj-head>
+  <mj-body background-color="#f8fafc">
+    <mj-section background-color="#ffffff" padding="24px">
+      <mj-column>
+        <mj-image src="{{companyLogo}}" alt="{{companyName}}" width="140px" />
+        <mj-image src="{{eventPromotionalPhoto}}" alt="Event" padding-top="8px" />
+      </mj-column>
+    </mj-section>
+    <mj-section background-color="#ffffff" padding="24px 32px">
+      <mj-column>
+        <mj-text align="center" font-size="28px" font-weight="800" color="#0f172a">{{eventTitle}}</mj-text>
+        <mj-text align="center" color="#64748b">{{t.greeting}}</mj-text>
+        <mj-text align="center" color="#0f172a">{{t.body}}</mj-text>
+        <mj-text align="center" padding-top="16px">
+          <span style="background-color: {{accentColor}}; color: #fff; padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 700;">✓ {{t.confirmed}}</span>
+        </mj-text>
+      </mj-column>
+    </mj-section>
+    <mj-section padding="24px">
+      <mj-column>
+        <mj-text align="center" color="#64748b" font-size="13px">© {{currentYear}} {{companyName}}. {{t.copyright}}</mj-text>
+        <mj-text align="center"><a href="mailto:{{brandingContactEmail}}" style="color: {{accentColor}};">{{brandingContactEmail}}</a></mj-text>
+      </mj-column>
+    </mj-section>
+  </mj-body>
+</mjml>

@@ -301,6 +301,17 @@ const ticketInfoSchema = new mongoose.Schema({
 		enum: ['available', 'low_stock', 'sold_out', 'inactive', 'disabled'],
 		default: 'available'
 	},
+	/** Major units for Stripe diaspora rail (currency in stripeCurrency / event.otherInfo.stripeCurrency) */
+	stripePrice: {
+		type: Number,
+		min: [0, 'Stripe price cannot be negative']
+	},
+	stripeCurrency: {
+		type: String,
+		trim: true,
+		lowercase: true,
+		match: [/^[a-z]{3}$/, 'stripeCurrency must be a 3-letter ISO 4217 code']
+	},
 	createdAt: { type: Date, default: Date.now }
 })
 
@@ -344,6 +355,13 @@ const eventSchema = new mongoose.Schema({
 	eventTimezone: { type: String },
 	city: { type: String },
 	country: { type: String },
+	/** ISO 4217 code for diaspora Stripe prices on Nepal dual-payment events (e.g. dkk, eur) */
+	stripeCurrency: {
+		type: String,
+		trim: true,
+		lowercase: true,
+		match: [/^[a-z]{3}$/, 'stripeCurrency must be a 3-letter ISO 4217 code']
+	},
 	venueInfo: {
 		type: mongoose.Schema.Types.Mixed
 	},
@@ -541,17 +559,23 @@ const ticketSchema = new mongoose.Schema({
 	// Payment provider tracking
 	paymentProvider: {
 		type: String,
-		enum: ['stripe', 'paytrail', 'free'],
+		enum: ['stripe', 'paytrail', 'nabil', 'free'],
 		default: 'stripe'
 	},
+	paymentReference: { type: String },
 	paytrailTransactionId: { type: String }, // Paytrail transaction ID
 	paytrailStamp: { type: String }, // Paytrail stamp (reference)
-	paytrailSubMerchantId: { type: String } // Sub-merchant for this transaction
+	paytrailSubMerchantId: { type: String }, // Sub-merchant for this transaction
+	nabilTransactionId: { type: String },
+	nabilStamp: { type: String }
 })
 
 // Add indexes for Paytrail transaction lookups
 ticketSchema.index({ paytrailTransactionId: 1 });
 ticketSchema.index({ paytrailSubMerchantId: 1 });
+ticketSchema.index({ nabilStamp: 1 });
+ticketSchema.index({ nabilTransactionId: 1 });
+ticketSchema.index({ paymentReference: 1 });
 ticketSchema.index({ createdAt: -1 });
 ticketSchema.index({ isRead: 1, readAt: -1 });
 ticketSchema.index({ isSend: 1, createdAt: 1 });
@@ -681,6 +705,10 @@ const merchantSchema = new mongoose.Schema({
 		default: false,
 		// Admin controls this via CMS
 	},
+	nabilEnabled: {
+		type: Boolean,
+		default: false,
+	},
 	paytrailSubMerchantId: {
 		type: String,
 		// Sub-merchant ID from Paytrail shop-in-shop
@@ -714,6 +742,84 @@ const merchantSchema = new mongoose.Schema({
 		type:Map,
 		of:mongoose.Schema.Types.Mixed
 	},
+	apiCredentials: [{
+		keyId: { type: String, required: true, index: true },
+		secretHash: { type: String, required: true },
+		allowedDomains: [{ type: String }],
+		scopes: [{ type: String }],
+		status: { type: String, enum: ['active', 'revoked'], default: 'active' },
+		label: { type: String, default: '' },
+		serverToServer: { type: Boolean, default: false },
+		createdAt: { type: Date, default: Date.now },
+		lastUsedAt: { type: Date },
+		rotatedAt: { type: Date },
+		bffSecret: {
+			iv: { type: String, default: '' },
+			encryptedData: { type: String, default: '' }
+		},
+		deploySecret: {
+			iv: { type: String, default: '' },
+			encryptedData: { type: String, default: '' }
+		}
+	}],
+	siloSettings: {
+		enabled: { type: Boolean, default: false },
+		domain: { type: String, default: '' },
+		themePreset: {
+			type: String,
+			enum: ['cinematic', 'gallery', 'festival', 'minimal_luxury'],
+			default: 'cinematic'
+		},
+		brandConfig: {
+			primaryColor: { type: String, default: '#f5b700' },
+			darkColor: { type: String, default: '#050505' },
+			logoUrl: { type: String, default: '' },
+			fontProfile: { type: String, enum: ['editorial', 'modern', 'classic'], default: 'editorial' },
+			heroStyle: { type: String, enum: ['poster', 'split', 'immersive'], default: 'poster' }
+		},
+		deployment: {
+			mode: { type: String, default: 'per_merchant' },
+			status: { type: String, default: 'not_configured' },
+			cloudfrontDistributionId: { type: String, default: '' },
+			cloudfrontDomainName: { type: String, default: '' },
+			s3Bucket: { type: String, default: '' },
+			s3Region: { type: String, default: '' },
+			lastProvisionRequestedAt: { type: String, default: '' },
+			lastProvisionedAt: { type: String, default: '' },
+			lastError: { type: String, default: '' },
+			deployStatus: { type: String, default: 'not_deployed' },
+			lastDeployRequestedAt: { type: String, default: '' },
+			lastDeployedAt: { type: String, default: '' },
+			lastDeployError: { type: String, default: '' }
+		},
+		legal: {
+			privacyPolicyHtml: { type: String, default: '' },
+			termsHtml: { type: String, default: '' }
+		},
+		email: {
+			smtp: {
+				host: { type: String, default: '' },
+				port: { type: Number, default: 587 },
+				secure: { type: Boolean, default: false },
+				user: { type: String, default: '' },
+				password: {
+					iv: { type: String, default: '' },
+					encryptedData: { type: String, default: '' }
+				},
+				fromEmail: { type: String, default: '' },
+				fromName: { type: String, default: '' }
+			},
+			replyTo: { type: String, default: '' }
+		},
+		galleryPhotos: [{
+			url: { type: String, default: '' },
+			position: { type: Number, default: 0 }
+		}]
+	},
+	socialMedia: {
+		type: Map,
+		of: String
+	},
 	updatedAt: { type: Date, default: Date.now }
 });
 
@@ -721,6 +827,7 @@ const merchantSchema = new mongoose.Schema({
 merchantSchema.index({ merchantId: 1 });
 merchantSchema.index({ country: 1 }); // Index on country code for regional filtering
 merchantSchema.index({ paytrailSubMerchantId: 1 }); // Index for Paytrail lookups
+merchantSchema.index({ 'apiCredentials.keyId': 1 });
 
 const outboxMessageSchema = new mongoose.Schema({
 	createdAt: { type: Date, default: Date.now },

@@ -282,6 +282,57 @@ describe('Merchant Handler', () => {
       ).rejects.toThrow('Message must be an object');
     });
 
+    it('should sync silo_settings to siloSettings on merchant.updated', async () => {
+      const message = {
+        type: 'merchant.updated',
+        merchantId: 'merchant_123',
+        silo_settings: {
+          enabled: true,
+          domain: 'tickets.example.com',
+          themePreset: 'festival',
+          brandConfig: {
+            primaryColor: '#ff4d6d',
+            darkColor: '#101014',
+            fontProfile: 'modern',
+            heroStyle: 'immersive'
+          }
+        },
+        metaData: {
+          causationId: 'msg_silo'
+        }
+      };
+
+      const existingMerchant = {
+        _id: '507f1f77bcf86cd799439011',
+        merchantId: 'merchant_123'
+      };
+
+      mockInbox.isProcessed.mockResolvedValue(false);
+      mockInbox.saveMessage.mockResolvedValue({});
+      mockMerchant.getMerchantByMerchantId.mockResolvedValue(existingMerchant);
+      mockMerchant.updateMerchantById.mockResolvedValue(existingMerchant);
+      mockInbox.markProcessed.mockResolvedValue(true);
+
+      await merchantHandler.handleMerchantMessage(message);
+
+      expect(mockMerchant.updateMerchantById).toHaveBeenCalledWith(
+        existingMerchant._id,
+        expect.objectContaining({
+          siloSettings: expect.objectContaining({
+            enabled: true,
+            domain: 'tickets.example.com',
+            themePreset: 'festival',
+            brandConfig: expect.objectContaining({
+              primaryColor: '#ff4d6d',
+              darkColor: '#101014',
+              fontProfile: 'modern',
+              heroStyle: 'immersive'
+            })
+          })
+        })
+      );
+    });
+
     it('should throw error for unknown message type', async () => {
       // Arrange
       const message = {

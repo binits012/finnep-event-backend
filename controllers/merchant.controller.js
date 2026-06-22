@@ -19,6 +19,9 @@ import {
     sendRegionalForbidden
 } from '../util/regionalAccess.js'
 import { parseRequestMarketCountryCode, resolvePlatformBrandingAsync } from '../util/platformSettings.js'
+import { isNepalCountry } from '../util/nepalPayment.js'
+import { publishMerchantNabilToggledSafe } from '../util/merchantEventPublisher.js'
+import { sanitizeMerchantForAdmin } from '../util/apiCredentials.js'
 
 export const createMerchant = async (req, res, next) => {
     return res.status(consts.HTTP_STATUS_NOT_IMPLEMENTED).json({
@@ -49,7 +52,7 @@ export const getMerchantById = async (req, res, next) => {
                     if (!canAccessResource(data, merchant)) {
                         return sendRegionalForbidden(res)
                     }
-                    return res.status(consts.HTTP_STATUS_OK).json(merchant)
+                    return res.status(consts.HTTP_STATUS_OK).json(sanitizeMerchantForAdmin(merchant))
                 } else {
                     return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).send({ error: RESOURCE_NOT_FOUND })
                 }
@@ -115,7 +118,7 @@ export const getAllMerchants = async (req, res, next) => {
                 }
 
                 const merchants = await Merchant.getAllMerchants(applyRegionalScopeToFilters(data))
-                res.status(consts.HTTP_STATUS_OK).json(merchants)
+                res.status(consts.HTTP_STATUS_OK).json(merchants.map(sanitizeMerchantForAdmin))
             } catch (err) {
                 error(err)
                 if (!res.headersSent) {
@@ -138,7 +141,8 @@ export const updateMerchantById = async (req, res, next) => {
         paytrailSubMerchantId,
         paytrailCommissionRate,
         paytrailStatus,
-        bankingInfo
+        bankingInfo,
+        nabilEnabled
     } = req.body
     await jwtToken.verifyJWT(token, async (err, data) => {
         if (err || data === null) {
@@ -173,6 +177,9 @@ export const updateMerchantById = async (req, res, next) => {
                         })
                     }
                     updateData.status = status
+                    if (status === 'active' && isNepalCountry(originalMerchant.country)) {
+                        updateData.nabilEnabled = true
+                    }
                 }
                 if (stripeAccount !== undefined) {
                     updateData.stripeAccount = stripeAccount
@@ -225,6 +232,15 @@ export const updateMerchantById = async (req, res, next) => {
                 if (bankingInfo !== undefined) {
                     updateData.bankingInfo = bankingInfo
                 }
+                if (nabilEnabled !== undefined) {
+                    if (Boolean(nabilEnabled) && !isNepalCountry(originalMerchant.country)) {
+                        return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                            message: 'Nabil payments can only be enabled for Nepal merchants',
+                            error: 'INVALID_NABIL_MERCHANT_COUNTRY'
+                        })
+                    }
+                    updateData.nabilEnabled = Boolean(nabilEnabled)
+                }
 
                 if (Object.keys(updateData).length === 0) {
                     return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
@@ -237,6 +253,17 @@ export const updateMerchantById = async (req, res, next) => {
                 const updatedMerchant = await Merchant.updateMerchantById(id, updateData)
 
                 if (updatedMerchant) {
+                    if (
+                        nabilEnabled !== undefined
+                        && Boolean(nabilEnabled) !== Boolean(originalMerchant.nabilEnabled)
+                    ) {
+                        await publishMerchantNabilToggledSafe({
+                            merchant: updatedMerchant,
+                            nabilEnabled: Boolean(nabilEnabled),
+                            updatedBy: data.userId
+                        })
+                    }
+
                     if (status !== undefined && status !== originalMerchant.status) {
                     try {
                         // 2. Create outbox message entry

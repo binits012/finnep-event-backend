@@ -13,6 +13,44 @@ const buildValidityWindowFilter = (now) => ([
 ]);
 const escapeRegExp = (value = '') => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+const effectiveEventEndDateExpr = {
+    $ifNull: ['$event_end_date', { $ifNull: ['$eventEndDate', '$eventDate'] }]
+}
+
+/** Same end-date fallback as silo storefront partitionEvents. */
+export const getEventEffectiveEndDate = (event) => {
+    const raw = event?.event_end_date ?? event?.eventEndDate ?? event?.eventDate
+    if (!raw) return null
+    const end = raw instanceof Date ? raw : new Date(raw)
+    return Number.isNaN(end.getTime()) ? null : end
+}
+
+export const isEventPastByEndDate = (event, now = new Date()) => {
+    const end = getEventEffectiveEndDate(event)
+    if (!end) return false
+    return end.getTime() < now.getTime()
+}
+
+const buildPartnerMerchantEventsQuery = ({ city, country, merchantId, now = new Date() }) => {
+    const q = {
+        merchant: merchantId,
+        $or: [
+            { active: { $ne: false } },
+            {
+                active: false,
+                $expr: { $lt: [effectiveEventEndDateExpr, now] }
+            }
+        ]
+    }
+    if (city) {
+        q.city = city
+    }
+    if (country) {
+        q.country = new RegExp(`^${escapeRegExp(String(country).trim())}$`, 'i')
+    }
+    return q
+}
+
 export class Event {
 
     constructor(eventTitle, eventDescription, eventDate,
@@ -20,7 +58,8 @@ export class Event {
         eventLocationGeoCode, transportLink,
         socialMedia, lang, position, active, eventName, videoUrl, otherInfo,
         eventTimezone, city, country, venueInfo, externalMerchantId, merchant,
-        externalEventId, venue, waitlistConfig, event_end_date, isSeatedEvent, shortCode
+        externalEventId, venue, waitlistConfig, event_end_date, isSeatedEvent, shortCode,
+        stripeCurrency
     ) {
         this.eventTitle = eventTitle
         this.eventDescription = eventDescription
@@ -51,6 +90,7 @@ export class Event {
         this.event_end_date = event_end_date
         this.isSeatedEvent = isSeatedEvent
         this.shortCode = shortCode
+        this.stripeCurrency = stripeCurrency
     }
     async saveToDB() {
         try {
@@ -96,6 +136,7 @@ export class Event {
                 event_end_date: this.event_end_date,
                 isSeatedEvent: this.isSeatedEvent,
                 shortCode: this.shortCode,
+                ...(this.stripeCurrency ? { stripeCurrency: this.stripeCurrency } : {}),
             })
             return await event.save()
         } catch (err) {
@@ -109,13 +150,13 @@ export class Event {
 export const createEvent = async (eventTitle, eventDescription, eventDate,
     occupancy, ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
     socialMedia, lang, position, active, eventName, videoUrl, otherInfo,
-    eventTimezone, city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue, waitlistConfig, event_end_date, isSeatedEvent, shortCode
+    eventTimezone, city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue,     waitlistConfig, event_end_date, isSeatedEvent, shortCode, stripeCurrency
     ) =>{
 
     const event = new Event(eventTitle, eventDescription, eventDate,
         occupancy, ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress, eventLocationGeoCode, transportLink,
         socialMedia, lang, position, active, eventName, videoUrl, otherInfo,
-        eventTimezone, city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue, waitlistConfig, event_end_date, isSeatedEvent, shortCode)
+        eventTimezone, city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue, waitlistConfig, event_end_date, isSeatedEvent, shortCode, stripeCurrency)
     return await event.saveToDB()
 }
 
@@ -316,16 +357,17 @@ export const decrementCouponUsesLeft = async (eventMongoId, couponCode) => {
 };
 
 export const updateEventById = async (id, obj) =>{
+    const setPayload = Object.fromEntries(
+        Object.entries(obj).filter(([, value]) => value !== undefined)
+    );
     try {
         return await model.Event.findByIdAndUpdate(id, {
-            $set: obj
+            $set: setPayload
         }, { new: true }).lean().exec();
     } catch (error) {
-        // Handle duplicate key errors gracefully
         if (error.code === 11000) {
-            console.warn(`Duplicate key error when updating event ${id}:`, error.keyValue);
-            // Try to find the existing event and return it instead of throwing
-            return await model.Event.findById(id).lean().exec();
+            const conflict = JSON.stringify(error.keyValue || {});
+            throw new Error(`Event update failed: duplicate key on ${conflict}. Check legacy unique indexes on events collection.`);
         }
         throw error;
     }
@@ -379,7 +421,7 @@ async function getTicketCountsByEventIds(eventIds) {
     return map;
 }
 
-export const listEventFiltered = async({ city, country, page = 1, limit = 1000 } = {}) => {
+export const listEventFiltered = async({ city, country, page = 1, limit = 1000, merchantId } = {}) => {
     const q = {
         active: true
     }
@@ -388,6 +430,9 @@ export const listEventFiltered = async({ city, country, page = 1, limit = 1000 }
     }
     if (country) {
         q.country = new RegExp(`^${escapeRegExp(String(country).trim())}$`, 'i')
+    }
+    if (merchantId) {
+        q.merchant = merchantId
     }
 
     // Return events that are still valid.
@@ -401,6 +446,35 @@ export const listEventFiltered = async({ city, country, page = 1, limit = 1000 }
     const items = await model.Event.find(q)
         .populate('merchant')
         .sort({ eventDate: 1 })
+        .skip((numericPage - 1) * numericLimit)
+        .limit(numericLimit)
+        .lean()
+
+    const eventIds = items.map((e) => e._id)
+    const countByEventId = await getTicketCountsByEventIds(eventIds)
+    const itemsWithCounts = items.map((event) => ({
+        ...event,
+        ticketsSold: countByEventId[event._id.toString()] || 0
+    }))
+
+    return { items: itemsWithCounts, total }
+}
+
+/** Merchant events for partner/silo API — inactive upcoming/current hidden; inactive past included. */
+export const listPartnerMerchantEvents = async({ city, country, page = 1, limit = 50, merchantId } = {}) => {
+    if (!merchantId) {
+        return { items: [], total: 0 }
+    }
+
+    const q = buildPartnerMerchantEventsQuery({ city, country, merchantId })
+
+    const numericPage = Math.max(parseInt(String(page), 10) || 1, 1)
+    const numericLimit = Math.min(Math.max(parseInt(String(limit), 10) || 50, 1), 200)
+
+    const total = await model.Event.countDocuments(q)
+    const items = await model.Event.find(q)
+        .populate('merchant')
+        .sort({ eventDate: -1 })
         .skip((numericPage - 1) * numericLimit)
         .limit(numericLimit)
         .lean()

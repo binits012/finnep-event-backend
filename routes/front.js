@@ -9,6 +9,7 @@ const router = express.Router()
 import * as front  from '../controllers/front.controller.js'
 import * as guest from '../controllers/guest.controller.js'
 import { handlePaytrailWebhook } from '../controllers/paytrail.webhook.js'
+import { handleNabilWebhook } from '../controllers/nabil.webhook.js'
 router.route('/public-site-config')
     .get(front.getPublicSiteConfig)
 router.route('/business-landing')
@@ -30,6 +31,10 @@ router.route('/create-paytrail-payment-app')
     .post(front.createPaytrailPaymentApp)
 router.route('/verify-paytrail-payment')
     .post(front.verifyPaytrailPayment)
+router.route('/create-nabil-payment')
+    .post(front.createNabilPayment)
+router.route('/verify-nabil-payment')
+    .post(front.verifyNabilPayment)
 router.route('/paytrail-app-return')
     .get(front.paytrailAppReturnPage)
 router.route('/handle-paytrail-payment-failure')
@@ -103,5 +108,10 @@ router.route('/webhooks/paytrail/success')
     .post(handlePaytrailWebhook)
 router.route('/webhooks/paytrail/cancel')
     .post(handlePaytrailWebhook)
+
+router.route('/webhooks/nabil/success')
+    .post(handleNabilWebhook)
+router.route('/webhooks/nabil/cancel')
+    .post(handleNabilWebhook)
 
 export default router

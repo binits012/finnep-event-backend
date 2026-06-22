@@ -8,7 +8,7 @@ import * as commonUtil from '../util/common.js';
 import redisClient from '../model/redisConnect.js';
 import { info, error } from '../model/logger.js';
 import * as consts from '../const.js';
-import { queueTicketEmail } from '../workers/emailWorker.js';
+import { buildSiloTicketEmailOptionsFromPaymentData } from '../util/siloCheckoutEmail.js';
 import { publishTicketCreationEvent } from './front.controller.js';
 import {
     applyTicketQuantitiesToTicketInfo,
@@ -353,10 +353,12 @@ async function _createTicketFromPaytrailPaymentBody(paymentData, transactionId, 
     if (!ticket.isSend) {
         const { normalizeLocale } = await import('../util/common.js');
         const locale = paymentData.locale ? normalizeLocale(paymentData.locale) : 'en-US';
-        const emailPayload = await ticketMaster.createEmailPayload(event, ticket, paymentData.email, otp, locale);
+        const merchant = await Merchant.getMerchantById(paymentData.merchantId);
+        const emailOptions = buildSiloTicketEmailOptionsFromPaymentData(merchant, paymentData);
+        const emailPayload = await ticketMaster.createEmailPayload(event, ticket, paymentData.email, otp, locale, emailOptions);
 
         try {
-            await queueTicketEmail(ticket._id.toString(), emailPayload);
+            await ticketMaster.queueTicketEmailDelivery(ticket._id.toString(), emailPayload, emailOptions);
             info(`Email queued for ticket: ${ticket._id}`);
         } catch (queueError) {
             // Don't fail ticket creation if queue fails - log and continue

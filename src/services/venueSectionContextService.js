@@ -19,7 +19,7 @@ export async function loadVenueSectionContext({ venueId, s3Key }) {
 			: String(venueId);
 
 	const venue = await Venue.findById(vid).lean();
-	const sections = Array.isArray(venue?.sections) ? venue.sections : [];
+	let sections = Array.isArray(venue?.sections) ? venue.sections : [];
 
 	const venueManifest = await Manifest.findOne({ venue: vid }).sort({ createdAt: -1 }).lean();
 	let places = Array.isArray(venueManifest?.places) ? venueManifest.places : [];
@@ -33,5 +33,37 @@ export async function loadVenueSectionContext({ venueId, s3Key }) {
 		}
 	}
 
+	if (sections.length === 0 && places.length > 0) {
+		sections = deriveSectionsFromPlaces(places);
+	}
+
 	return { venue, sections, places };
+}
+
+/**
+ * Build minimal section stubs from place.section when Venue/S3 sections arrays are empty.
+ * Common for pricing_configuration manifests where layout lives in places only.
+ */
+export function deriveSectionsFromPlaces(places) {
+	if (!Array.isArray(places) || places.length === 0) return [];
+
+	const names = [...new Set(places.map((p) => p?.section).filter(Boolean))];
+	return names.map((name) => {
+		const sectionPlaces = places.filter((p) => p?.section === name);
+		const hasSeatLikePlaces = sectionPlaces.some(
+			(p) =>
+				p?.row != null &&
+				String(p.row).trim() !== '' &&
+				p?.seat != null &&
+				String(p.seat).trim() !== ''
+		);
+		return {
+			id: name,
+			name,
+			sectionType: hasSeatLikePlaces ? 'Seating' : 'Custom',
+			selectionMode: hasSeatLikePlaces ? 'seat' : 'area',
+			capacity: sectionPlaces.length,
+			color: '#2196F3',
+		};
+	});
 }

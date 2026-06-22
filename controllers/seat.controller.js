@@ -6,7 +6,7 @@ import { manifestUpdateService } from '../src/services/manifestUpdateService.js'
 import { seatReservationService } from '../src/services/seatReservationService.js';
 import { loadVenueSectionContext } from '../src/services/venueSectionContextService.js';
 import { resolveSoldPlaceIdsForPayment } from '../src/services/paymentSeatResolutionService.js';
-import { error, info } from '../model/logger.js';
+import { eventHasSeatSelection } from '../util/ticketQuantity.js';
 
 const resolveSectionMode = (section) => {
 	if (!section) return 'seat';
@@ -117,7 +117,7 @@ export const getEventSeats = async (req, res, next) => {
 				}
 
 				// Check if event has seat selection
-				if (!event.venue || !event.venue?.venueId) {
+				if (!eventHasSeatSelection(event)) {
 					return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
 						message: 'Event does not have seat selection enabled',
 						error: 'SEAT_SELECTION_NOT_ENABLED'

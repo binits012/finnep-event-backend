@@ -29,6 +29,31 @@ const emailWorker = new Worker(EMAIL_QUEUE_NAME, async (job) => {
     });
 
     try {
+        if (type === 'email.silo') {
+            const { merchantId, ticketId: siloTicketId } = job.data;
+            const Merchant = await import('../model/merchant.js');
+            const { sendSiloEmail } = await import('../util/siloMail.js');
+            const merchant = await Merchant.getMerchantById(merchantId);
+            if (!merchant) {
+                throw new Error(`Merchant not found: ${merchantId}`);
+            }
+            if (siloTicketId) {
+                const ticket = await Ticket.getTicketById(siloTicketId);
+                if (ticket && ticket.isSend) {
+                    info(`Silo ticket email already sent for ticket: ${siloTicketId} - skipping duplicate`);
+                    return { success: true, to: emailPayload?.to, skipped: true, reason: 'already_sent' };
+                }
+            }
+            await sendSiloEmail(merchant, emailPayload);
+            if (siloTicketId) {
+                await Ticket.updateTicketById(siloTicketId, { isSend: true });
+                info(`Silo ticket email sent and marked for ticket: ${siloTicketId}`);
+            } else {
+                info(`Silo email sent successfully to: ${String(emailPayload?.to || '').slice(0, 3)}…`);
+            }
+            return { success: true, to: emailPayload?.to };
+        }
+
         // For ticket emails, check if email was already sent (idempotency)
         if (type === 'email.ticket' && ticketId) {
             const ticket = await Ticket.getTicketById(ticketId);
@@ -115,6 +140,24 @@ export const queueGenericEmail = async (emailPayload) => {
         },
         removeOnComplete: true,
         removeOnFail: { age: 86400 }  // Keep failed jobs for 1 day for debugging
+    });
+};
+
+export const queueSiloEmail = async (merchantId, emailPayload, { ticketId } = {}) => {
+    return emailQueue.add('silo-email', {
+        type: 'email.silo',
+        merchantId: String(merchantId),
+        ticketId: ticketId ? String(ticketId) : undefined,
+        emailPayload,
+        queuedAt: new Date().toISOString()
+    }, {
+        attempts: 3,
+        backoff: {
+            type: 'exponential',
+            delay: 2000
+        },
+        removeOnComplete: true,
+        removeOnFail: { age: 86400 }
     });
 };
 

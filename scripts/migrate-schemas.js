@@ -287,6 +287,19 @@ async function ensureIndexes() {
         );
         info('Event compound index ensured');
 
+        // Legacy Yellow Bridge era: global unique on eventTitle/eventName blocks cross-merchant title reuse.
+        for (const legacyIndexName of ['eventTitle_1', 'eventName_1']) {
+            try {
+                const existingIndexes = await Event.collection.indexes();
+                if (existingIndexes.some((idx) => idx.name === legacyIndexName)) {
+                    await Event.collection.dropIndex(legacyIndexName);
+                    info(`Dropped legacy Event index: ${legacyIndexName}`);
+                }
+            } catch (err) {
+                warn(`Could not drop legacy Event index ${legacyIndexName}: ${err.message}`);
+            }
+        }
+
         await safeCreateIndex(
             Event.collection,
             { country: 1 },

@@ -2,10 +2,13 @@ import {info, error, warn} from '../../model/logger.js'; // Adjust path as neede
 import { createMerchant, getMerchantByMerchantId, updateMerchantById } from '../../model/merchant.js';
 import { inboxModel } from '../../model/inboxMessage.js';
 import { loadEmailTemplateForMerchant } from '../../util/common.js';
+import { normalizeSiloSettings, mergeSiloSettingsFromEmsSync } from '../../util/siloSettings.js';
+import { normalizeMerchantSocialMedia } from '../../util/merchantSocialMedia.js';
 import { forward } from '../../util/sendMail.js';
 import dotenv from 'dotenv'
 dotenv.config()
 import { dirname } from 'path'
+import { isNepalCountry } from '../../util/nepalPayment.js';
 const __dirname = dirname(import.meta.url).slice(7)
 
 export const handleMerchantMessage = async (message) => {
@@ -121,8 +124,14 @@ async function handleMerchantCreated(message) {
             schemaName: message.schemaName,
             website: message.website,
             logo: message.logo,
-            stripeAccount: message.stripeAccount
+            stripeAccount: message.stripeAccount,
+            nabilEnabled: Boolean(message.nabilEnabled ?? message.nabil_enabled) || isNepalCountry(message.country),
         };
+
+        const bankingInfoUpdate = buildBankingInfoUpdate(message, null);
+        if (bankingInfoUpdate !== null && Object.keys(bankingInfoUpdate).length > 0) {
+            merchantData.bankingInfo = bankingInfoUpdate;
+        }
 
         await createMerchant(merchantData);
         //now its time to send the email to the merchant
@@ -184,6 +193,27 @@ function buildBankingInfoUpdate(message, existingMerchant) {
     return merged;
 }
 
+function toPlainObject(value) {
+	if (!value) return {}
+	if (typeof value.toObject === 'function') return value.toObject()
+	if (value instanceof Map) return Object.fromEntries(value)
+	return { ...value }
+}
+
+function parseSiloSettingsRaw(raw) {
+	if (raw == null) return null
+	if (typeof raw === 'string') {
+		try {
+			const parsed = JSON.parse(raw)
+			return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
+		} catch {
+			return null
+		}
+	}
+	if (typeof raw === 'object' && !Array.isArray(raw)) return raw
+	return null
+}
+
 async function handleMerchantUpdated(message) {
     const merchantId = message.merchantId != null ? String(message.merchantId) : null;
     info('Updating merchant', { merchantId, orgName: message.orgName });
@@ -225,9 +255,25 @@ async function handleMerchantUpdated(message) {
             updateData.stripeAccount = stripeAccount;
         }
 
+        const nabilEnabled = message.nabilEnabled ?? message.nabil_enabled;
+        if (nabilEnabled !== undefined && nabilEnabled !== null) {
+            updateData.nabilEnabled = Boolean(nabilEnabled);
+        }
+
         const bankingInfoUpdate = buildBankingInfoUpdate(message, merchant);
         if (bankingInfoUpdate !== null) {
             updateData.bankingInfo = bankingInfoUpdate;
+        }
+
+        const siloSettingsRaw = parseSiloSettingsRaw(message.siloSettings ?? message.silo_settings)
+        if (siloSettingsRaw) {
+            const existingSilo = toPlainObject(merchant.siloSettings)
+            updateData.siloSettings = mergeSiloSettingsFromEmsSync(siloSettingsRaw, existingSilo)
+        }
+
+        const socialMediaRaw = message.socialMedia ?? message.social_media;
+        if (socialMediaRaw !== undefined && socialMediaRaw !== null) {
+            updateData.socialMedia = normalizeMerchantSocialMedia(socialMediaRaw);
         }
 
         await updateMerchantById(merchant._id, updateData);

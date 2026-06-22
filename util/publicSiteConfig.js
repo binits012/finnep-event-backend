@@ -48,7 +48,7 @@ export const DEFAULT_PUBLIC_SITE_CONFIG = {
 	],
 }
 
-function normalizeHostname(raw) {
+export function normalizeHostname(raw) {
 	if (raw == null || typeof raw !== 'string') return ''
 	return String(raw).trim().toLowerCase().split(':')[0].replace(/\.$/, '')
 }

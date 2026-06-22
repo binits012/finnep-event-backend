@@ -1,0 +1,30 @@
+<mjml>
+  <mj-head>
+    <mj-font name="Inter" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" />
+    <mj-title>{{t.subject}}</mj-title>
+    <mj-attributes>
+      <mj-all font-family="Inter, Arial, sans-serif" />
+    </mj-attributes>
+  </mj-head>
+  <mj-body background-color="#f8fafc">
+    <mj-section background-color="#ffffff" padding="24px">
+      <mj-column>
+        <mj-image src="{{companyLogo}}" alt="{{companyName}}" width="140px" />
+        <mj-image src="{{eventPromotionalPhoto}}" alt="Event" />
+      </mj-column>
+    </mj-section>
+    <mj-section background-color="#ffffff" padding="24px 32px">
+      <mj-column>
+        <mj-text align="center" font-size="28px" font-weight="800">{{eventTitle}}</mj-text>
+        <mj-text align="center" color="#64748b">{{t.bodyIntro}}</mj-text>
+        <mj-button background-color="{{accentColor}}" href="{{presaleLink}}" font-weight="700" border-radius="50px">{{t.cta}}</mj-button>
+        <mj-text align="center" color="#64748b" font-size="14px">{{t.validFor}} {{validHours}} {{t.hours}}</mj-text>
+      </mj-column>
+    </mj-section>
+    <mj-section padding="24px">
+      <mj-column>
+        <mj-text align="center" color="#64748b" font-size="13px">© {{currentYear}} {{companyName}}</mj-text>
+      </mj-column>
+    </mj-section>
+  </mj-body>
+</mjml>
