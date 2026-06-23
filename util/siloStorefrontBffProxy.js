@@ -154,7 +154,7 @@ export async function partnerFetchForSiloBff(credential, {
 	return payload
 }
 
-export async function proxyFebFrontForSiloBff(req, res, pathSuffix) {
+export async function proxyFebFrontForSiloBff(req, res, pathSuffix, { merchant } = {}) {
 	const baseUrl = getPartnerBaseUrl()
 	const targetUrl = `${baseUrl}/front/${pathSuffix}${req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''}`
 
@@ -166,6 +166,12 @@ export async function proxyFebFrontForSiloBff(req, res, pathSuffix) {
 	}
 	if (req.headers.authorization) {
 		headers.Authorization = req.headers.authorization
+	}
+	if (merchant?._id) {
+		headers['x-silo-merchant-object-id'] = String(merchant._id)
+	}
+	if (merchant?.merchantId) {
+		headers['x-silo-merchant-id'] = String(merchant.merchantId)
 	}
 
 	const viewerHost = req.headers['x-forwarded-host'] || req.headers.host

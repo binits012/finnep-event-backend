@@ -9,6 +9,10 @@ import * as common from '../util/common.js'
 import { error } from '../model/logger.js'
 import * as hash from '../util/createHash.js'
 import { PlatformMarketingConsent } from '../model/mongoModel.js'
+import * as Merchant from '../model/merchant.js'
+import { normalizeSiloSettings } from '../util/siloSettings.js'
+import { isSiloSmtpConfigured, resolveSiloEmailBranding } from '../util/siloEmailSettings.js'
+import { loadSiloVerificationCodeTemplate, getSiloEmailSubject } from '../util/siloMail.js'
 
 const RATE_LIMIT_CODES_PER_HOUR = 10;
 
@@ -22,6 +26,31 @@ const toDisplayFinalAmount = (value) => {
     if (!Number.isFinite(parsed)) return value;
     const roundedThree = Math.round(parsed * 1000) / 1000;
     return Math.ceil((roundedThree * 100) - Number.EPSILON) / 100;
+}
+
+async function resolveSiloMerchantFromRequest(req) {
+    const objectId = String(req.headers['x-silo-merchant-object-id'] || '').trim();
+    const merchantId = String(req.headers['x-silo-merchant-id'] || '').trim();
+    if (!objectId && !merchantId) return null;
+
+    const merchant = objectId
+        ? await Merchant.getMerchantById(objectId)
+        : await Merchant.getMerchantByMerchantId(merchantId);
+    if (!merchant) {
+        const err = new Error('Silo merchant not found');
+        err.status = consts.HTTP_STATUS_BAD_REQUEST;
+        throw err;
+    }
+
+    const silo = normalizeSiloSettings(merchant.siloSettings || {});
+    if (!silo.enabled || !isSiloSmtpConfigured(silo.email)) {
+        const err = new Error('Silo email is not configured');
+        err.status = consts.HTTP_STATUS_SERVICE_UNAVAILABLE;
+        err.code = 'SILO_EMAIL_NOT_CONFIGURED';
+        throw err;
+    }
+
+    return merchant;
 }
 
 export const checkEmail = async (req, res, next) => {
@@ -92,6 +121,8 @@ export const sendVerificationCode = async (req, res, next) => {
             });
         }
 
+        const siloMerchant = await resolveSiloMerchantFromRequest(req);
+
         // Generate 8-digit code
         const code = generateCode();
         const hashedCode = VerificationCode.hashCode(code);
@@ -105,22 +136,41 @@ export const sendVerificationCode = async (req, res, next) => {
         // Extract locale from request
         const locale = common.extractLocaleFromRequest(req);
 
-        // Load email template and send email with code
-        const emailHtml = await common.loadVerificationCodeTemplate(code, locale);
-        const { getEmailSubject } = await import('../util/emailTranslations.js');
-        const emailSubject = await getEmailSubject('verification_code', locale, { companyName: process.env.COMPANY_TITLE || 'Finnep' });
-        const emailPayload = {
-            from: process.env.EMAIL_USERNAME,
-            to: email,
-            subject: emailSubject,
-            html: emailHtml
-        };
-
         try {
-            await sendMail.forward(emailPayload);
+            if (siloMerchant) {
+                const branding = resolveSiloEmailBranding(siloMerchant);
+                const emailHtml = await loadSiloVerificationCodeTemplate(code, locale, branding);
+                const emailSubject = await getSiloEmailSubject('verification_code', locale, {
+                    companyName: branding.companyName
+                });
+                const { queueSiloEmail } = await import('../workers/emailWorker.js');
+                await queueSiloEmail(String(siloMerchant._id), {
+                    to: email,
+                    subject: emailSubject,
+                    html: emailHtml
+                });
+            } else {
+                // Load email template and send email with code
+                const emailHtml = await common.loadVerificationCodeTemplate(code, locale);
+                const { getEmailSubject } = await import('../util/emailTranslations.js');
+                const emailSubject = await getEmailSubject('verification_code', locale, { companyName: process.env.COMPANY_TITLE || 'Finnep' });
+                const emailPayload = {
+                    from: process.env.EMAIL_USERNAME,
+                    to: email,
+                    subject: emailSubject,
+                    html: emailHtml
+                };
+                await sendMail.forward(emailPayload);
+            }
         } catch (emailErr) {
             error('error sending verification code email %s', emailErr);
-            // Don't fail the request if email fails - code is still created
+            if (siloMerchant) {
+                return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
+                    success: false,
+                    message: 'Failed to send verification code'
+                });
+            }
+            // Don't fail the generic platform request if email fails - code is still created
         }
 
         return res.status(consts.HTTP_STATUS_OK).json({

@@ -95,8 +95,8 @@ router.post('/api/request-data', express.json(), (req, res) => {
 
 router.use('/api/front', express.json({ limit: '2mb' }), (req, res) => {
 	const pathSuffix = req.path.replace(/^\//, '')
-	withMerchant(req, res, async () => {
-		await proxyFebFrontForSiloBff(req, res, pathSuffix)
+	withMerchant(req, res, async ({ merchant }) => {
+		await proxyFebFrontForSiloBff(req, res, pathSuffix, { merchant })
 	})
 })
 
