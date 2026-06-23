@@ -29,6 +29,7 @@ const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET
 import redisClient from '../model/redisConnect.js'
 import * as commonUtil from '../util/common.js'
 import * as Merchant from '../model/merchant.js'
+import { sanitizePublicEventForFront } from '../util/publicMerchant.js'
 import * as OutboxMessage from '../model/outboxMessage.js'
 import { messageConsumer } from '../rabbitMQ/services/messageConsumer.js'
 import { v4 as uuidv4 } from 'uuid'
@@ -303,7 +304,7 @@ export const getDataForFront = async (req, res, next) => {
     const data = {
         photo: photosWithCloudFrontUrls?.filter(e => e.publish),
         notification: notificationList,
-        event: filteredEvents,
+        event: filteredEvents.map((e) => sanitizePublicEventForFront(e)),
         setting: setting,
         platformSetting,
         companyTitle: process.env.COMPANY_TITLE || 'Okazzo'
@@ -515,34 +516,6 @@ export const getEventById = async (req, res, next) => {
     try {
         const event = await Event.getEventById(id)
         if (event) {
-            const {  ...restOfEvent } = event?._doc
-
-            const eventId = id
-            // First ensure eventPhoto is a valid array with non-empty strings
-            const validPhotos = restOfEvent?.eventPhoto?.filter(photo => photo && photo.trim() !== '') || [];
-            /*
-            const photoWithCloudFrontUrls = await Promise.all(validPhotos.map(async (photo, index) => {
-                const cacheKey = `signedUrl:${eventId}:${index}`;
-                const cached = await commonUtil.getCacheByKey(redisClient, cacheKey);
-                if (cached && cached.url && cached.expiresAt > Date.now()) {
-                    return cached.url;
-                } else {
-                    // Generate new signed URL
-                    const expiresInSeconds = 29 * 24 * 60 * 60; // e.g., 29 days
-
-                    const signedUrl = await commonUtil.getCloudFrontUrl(photo)
-                    const expiresAt = Date.now() + expiresInSeconds * 1000;
-
-                    // Store in cache
-                    await commonUtil.setCacheByKey(redisClient, cacheKey, { url: signedUrl, expiresAt });
-                    redisClient.expire(cacheKey, expiresInSeconds);
-
-                    return signedUrl
-                }
-            }));
-            */
-
-            // Presale token: validate and attach presaleAccess when valid (do not consume here; do not send PII)
             let presaleAccess = false
             if (presaleToken && typeof presaleToken === 'string') {
                 const payload = await getPresalePayload(redisClient, presaleToken)
@@ -550,11 +523,13 @@ export const getEventById = async (req, res, next) => {
                     presaleAccess = true
                 }
             }
-            const eventPayload = { ...restOfEvent, presaleAccess }
-            delete eventPayload.discountCodes
-            eventPayload.hasDiscountCodes = eventHasActiveDiscountCodes(restOfEvent?.discountCodes)
 
-            // waitlistConfig, event_end_date, pre_sale_waitlist_count and pre_sale_waitlist_cap are synced from event-merchant-service via RabbitMQ (event.created / event.updated / waitlist.status_updated)
+            const discountCodes = event.discountCodes ?? event._doc?.discountCodes
+            const eventPayload = sanitizePublicEventForFront(event, {
+                presaleAccess,
+                hasDiscountCodes: eventHasActiveDiscountCodes(discountCodes),
+            })
+
             const data = { event: eventPayload };
             return res.status(consts.HTTP_STATUS_OK).json(data)
         } else {
@@ -786,7 +761,7 @@ export const listEvent = async (req, res, next) => {
         const totalPages = Math.max(Math.ceil(total / limitNum), 1);
 
         res.status(consts.HTTP_STATUS_OK).json({
-            items: activeItems,
+            items: activeItems.map((item) => sanitizePublicEventForFront(item)),
             page: pageNum,
             limit: limitNum,
             total,

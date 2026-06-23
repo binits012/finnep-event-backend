@@ -6,6 +6,7 @@ import { INTERNAL_SERVER_ERROR, RESOURCE_NOT_FOUND } from '../applicationTexts.j
 import { toPartnerThemePayload } from '../util/siloSettings.js'
 import { mapLikeToPlain, normalizeMerchantSocialMedia } from '../util/merchantSocialMedia.js'
 import { resolvePartnerLegalContent } from '../util/legalContent.js'
+import { sanitizePublicEventForFront, toPublicEventMerchantRef } from '../util/publicMerchant.js'
 import { parseRequestMarketCountryCode } from '../util/platformSettings.js'
 import {
 	sendWaitlistVerificationCode,
@@ -34,33 +35,14 @@ function toPublicMerchantProfile(merchant) {
 }
 
 function sanitizePartnerMerchantRef(merchant) {
-	if (!merchant) return null
-	const obj = typeof merchant.toObject === 'function' ? merchant.toObject() : { ...merchant }
-	return {
-		_id: obj._id,
-		name: obj.name,
-		orgName: obj.orgName,
-		website: obj.website,
-		logo: obj.logo,
-		paytrailEnabled: Boolean(obj.paytrailEnabled),
-		stripeAccount: obj.stripeAccount || undefined,
-	}
+	return toPublicEventMerchantRef(merchant)
 }
 
 function sanitizePartnerEvent(event) {
-	if (!event) return null
-	const obj = typeof event.toObject === 'function' ? event.toObject() : { ...event }
-	delete obj.discountCodes
-	if (obj.merchant) {
-		obj.merchant = sanitizePartnerMerchantRef(obj.merchant)
-	}
-	if (obj.socialMedia instanceof Map) {
-		obj.socialMedia = Object.fromEntries(obj.socialMedia.entries())
-	}
-	return {
-		...obj,
-		hasDiscountCodes: Array.isArray(event.discountCodes) && event.discountCodes.some((d) => d?.active !== false)
-	}
+	const discountCodes = event?.discountCodes
+	return sanitizePublicEventForFront(event, {
+		hasDiscountCodes: Array.isArray(discountCodes) && discountCodes.some((d) => d?.active !== false)
+	})
 }
 
 export const getPartnerMerchant = async (req, res) => {

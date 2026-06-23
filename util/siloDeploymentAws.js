@@ -8,15 +8,23 @@ import {
 import {
 	CloudFrontClient,
 	CreateDistributionCommand,
+	CreateFunctionCommand,
 	CreateOriginAccessControlCommand,
+	DescribeFunctionCommand,
 	GetDistributionCommand,
 	GetDistributionConfigCommand,
 	ListDistributionsCommand,
 	ListOriginAccessControlsCommand,
-	UpdateDistributionCommand
+	PublishFunctionCommand,
+	UpdateDistributionCommand,
+	UpdateFunctionCommand
 } from '@aws-sdk/client-cloudfront'
 import { error, info, warn } from '../model/logger.js'
 import { getSiloStorefrontBffOriginHostname } from './siloStorefrontBffProxy.js'
+import {
+	SILO_CLOUDFRONT_DYNAMIC_ROUTES_FUNCTION_NAME,
+	SILO_CLOUDFRONT_DYNAMIC_ROUTES_SOURCE
+} from './siloCloudFrontDynamicRoutes.js'
 
 const DEFAULT_REGION = process.env.SILO_DEPLOYMENT_AWS_REGION
 	|| process.env.AWS_REGION
@@ -311,6 +319,92 @@ async function ensureDistributionApiBehavior({ distributionId, merchantId }) {
 	})
 }
 
+function isNoSuchCloudFrontFunctionError(err) {
+	const code = err?.name || err?.Code || err?.code
+	return code === 'NoSuchFunctionExists' || code === 'NoSuchFunction'
+}
+
+async function ensurePublishedDynamicRoutesFunctionArn() {
+	const name = SILO_CLOUDFRONT_DYNAMIC_ROUTES_FUNCTION_NAME
+	const functionCode = Buffer.from(SILO_CLOUDFRONT_DYNAMIC_ROUTES_SOURCE, 'utf8')
+	const functionConfig = {
+		Comment: 'Rewrite silo storefront /events/:id URLs to static shell HTML',
+		Runtime: 'cloudfront-js-2.0'
+	}
+
+	let etag
+	try {
+		const described = await cloudFrontClient.send(new DescribeFunctionCommand({ Name: name }))
+		etag = described.ETag
+		await cloudFrontClient.send(new UpdateFunctionCommand({
+			Name: name,
+			IfMatch: etag,
+			FunctionConfig: functionConfig,
+			FunctionCode: functionCode
+		}))
+		const updated = await cloudFrontClient.send(new DescribeFunctionCommand({ Name: name }))
+		etag = updated.ETag
+	} catch (err) {
+		if (!isNoSuchCloudFrontFunctionError(err)) throw err
+		const created = await cloudFrontClient.send(new CreateFunctionCommand({
+			Name: name,
+			FunctionConfig: functionConfig,
+			FunctionCode: functionCode
+		}))
+		etag = created.ETag
+	}
+
+	const published = await cloudFrontClient.send(new PublishFunctionCommand({
+		Name: name,
+		IfMatch: etag
+	}))
+
+	const arn = published?.FunctionSummary?.FunctionMetadata?.FunctionARN
+	if (!arn) {
+		throw new Error(`Failed to publish CloudFront function: ${name}`)
+	}
+
+	info('CloudFront dynamic event routes function published', { name, arn })
+	return arn
+}
+
+async function ensureDistributionDynamicRoutesFunction(distributionId) {
+	if (!distributionId) return
+
+	const functionArn = await ensurePublishedDynamicRoutesFunctionArn()
+	const configResponse = await cloudFrontClient.send(
+		new GetDistributionConfigCommand({ Id: distributionId })
+	)
+	const config = configResponse?.DistributionConfig
+	if (!config?.DefaultCacheBehavior) return
+
+	const behavior = { ...config.DefaultCacheBehavior }
+	const items = [...(behavior.FunctionAssociations?.Items || [])]
+	const withoutViewerRequest = items.filter((item) => item.EventType !== 'viewer-request')
+	withoutViewerRequest.push({
+		EventType: 'viewer-request',
+		FunctionARN: functionArn
+	})
+	behavior.FunctionAssociations = {
+		Quantity: withoutViewerRequest.length,
+		Items: withoutViewerRequest
+	}
+	config.DefaultCacheBehavior = behavior
+
+	await cloudFrontClient.send(
+		new UpdateDistributionCommand({
+			Id: distributionId,
+			IfMatch: configResponse.ETag,
+			DistributionConfig: config
+		})
+	)
+
+	info('CloudFront viewer-request function attached for dynamic event URLs', {
+		distributionId,
+		functionArn
+	})
+}
+
 async function ensureDistribution({ bucketName, bucketRegion, merchantId, existingDistributionId, oacId }) {
 	const bffOrigin = buildBffOrigin(merchantId)
 
@@ -322,6 +416,7 @@ async function ensureDistribution({ bucketName, bucketRegion, merchantId, existi
 			distributionId: existingDistributionId,
 			merchantId
 		})
+		await ensureDistributionDynamicRoutesFunction(existingDistributionId)
 		return {
 			id: existingDistributionId,
 			domainName: existing?.Distribution?.DomainName || '',
@@ -335,6 +430,11 @@ async function ensureDistribution({ bucketName, bucketRegion, merchantId, existi
 		const existing = await cloudFrontClient.send(
 			new GetDistributionCommand({ Id: existingByComment.Id })
 		)
+		await ensureDistributionApiBehavior({
+			distributionId: existingByComment.Id,
+			merchantId
+		})
+		await ensureDistributionDynamicRoutesFunction(existingByComment.Id)
 		return {
 			id: existingByComment.Id,
 			domainName: existingByComment.DomainName || existing?.Distribution?.DomainName || '',
@@ -342,6 +442,7 @@ async function ensureDistribution({ bucketName, bucketRegion, merchantId, existi
 		}
 	}
 
+	const functionArn = await ensurePublishedDynamicRoutesFunctionArn()
 	const originId = `silo-s3-${merchantId}`
 	const originDomain = buildS3OriginDomain(bucketName, bucketRegion)
 	const originItems = [
@@ -394,7 +495,14 @@ async function ensureDistribution({ bucketName, bucketRegion, merchantId, existi
 					TrustedSigners: { Enabled: false, Quantity: 0 },
 					TrustedKeyGroups: { Enabled: false, Quantity: 0 },
 					Compress: true,
-					MinTTL: 0
+					MinTTL: 0,
+					FunctionAssociations: {
+						Quantity: 1,
+						Items: [{
+							EventType: 'viewer-request',
+							FunctionARN: functionArn
+						}]
+					}
 				}
 			}
 		})
@@ -422,6 +530,14 @@ async function disableDistribution(distributionId) {
 			DistributionConfig: config
 		})
 	)
+}
+
+export async function attachSiloCloudFrontDynamicRoutes(distributionId) {
+	assertAwsCredentials()
+	if (!distributionId) {
+		throw new Error('cloudfrontDistributionId is required')
+	}
+	await ensureDistributionDynamicRoutesFunction(distributionId)
 }
 
 export async function provisionSiloDeploymentAws({ merchantId, existingDeployment = {} }) {
