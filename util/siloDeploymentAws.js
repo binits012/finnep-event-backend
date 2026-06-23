@@ -20,7 +20,7 @@ import {
 	UpdateFunctionCommand
 } from '@aws-sdk/client-cloudfront'
 import { error, info, warn } from '../model/logger.js'
-import { getSiloStorefrontBffOriginHostname } from './siloStorefrontBffProxy.js'
+import { getSiloStorefrontBffOriginHostname, SILO_STOREFRONT_BFF_PUBLIC_PATH } from './siloStorefrontBffProxy.js'
 import {
 	SILO_CLOUDFRONT_DYNAMIC_ROUTES_FUNCTION_NAME,
 	SILO_CLOUDFRONT_DYNAMIC_ROUTES_SOURCE
@@ -232,7 +232,7 @@ function buildBffOrigin(merchantId) {
 	return {
 		Id: `silo-bff-${merchantId}`,
 		DomainName: hostname,
-		OriginPath: '/silo-storefront-bff',
+		OriginPath: SILO_STOREFRONT_BFF_PUBLIC_PATH,
 		OriginCustomHeaders: {
 			Quantity: 1,
 			Items: [{

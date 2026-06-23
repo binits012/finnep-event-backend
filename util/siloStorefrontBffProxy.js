@@ -4,6 +4,11 @@ import { decryptSiloSmtpPassword, hasEncryptedSiloSmtpPassword } from './siloSmt
 
 const BFF_HEADER = 'x-silo-merchant-id'
 
+/** Nginx on okazzo.* only proxies `/front` and `/api/` to FEB — use this path from browsers. */
+export const SILO_STOREFRONT_BFF_PUBLIC_PATH = '/front/silo-storefront-bff'
+/** Direct mount for custom origins / CloudFront behaviors that bypass nginx. */
+export const SILO_STOREFRONT_BFF_DIRECT_PATH = '/silo-storefront-bff'
+
 function normalizeStorefrontHost(value) {
 	if (!value || typeof value !== 'string') return ''
 	const trimmed = value.trim().toLowerCase()
@@ -159,6 +164,9 @@ export async function proxyFebFrontForSiloBff(req, res, pathSuffix) {
 	if (req.headers['content-type']) {
 		headers['Content-Type'] = req.headers['content-type']
 	}
+	if (req.headers.authorization) {
+		headers.Authorization = req.headers.authorization
+	}
 
 	const viewerHost = req.headers['x-forwarded-host'] || req.headers.host
 	if (viewerHost) {
@@ -169,6 +177,9 @@ export async function proxyFebFrontForSiloBff(req, res, pathSuffix) {
 	}
 	if (req.headers['x-market-country-code']) {
 		headers['x-market-country-code'] = req.headers['x-market-country-code']
+	}
+	if (req.headers['x-country-code']) {
+		headers['x-country-code'] = req.headers['x-country-code']
 	}
 
 	const response = await fetch(targetUrl, {

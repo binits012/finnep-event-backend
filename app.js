@@ -10,6 +10,10 @@ import * as adminRole from './util/adminUser.js'
 import api from './routes/api.js'
 import front from './routes/front.js'
 import siloStorefrontBff from './routes/siloStorefrontBff.js'
+import {
+	SILO_STOREFRONT_BFF_DIRECT_PATH,
+	SILO_STOREFRONT_BFF_PUBLIC_PATH
+} from './util/siloStorefrontBffProxy.js'
 import partner from './routes/partner.js'
 //import './util/schedular.js'
 import Stripe from 'stripe'
@@ -276,7 +280,8 @@ setupSwagger().then(swagger => {
 
 app.use('/api', api)
 app.use('/front', front)
-app.use('/silo-storefront-bff', siloStorefrontBff)
+app.use(SILO_STOREFRONT_BFF_DIRECT_PATH, siloStorefrontBff)
+app.use(SILO_STOREFRONT_BFF_PUBLIC_PATH, siloStorefrontBff)
 app.use('/partner/v1', partner)
 app.set('port', process.env.PORT || 3000);
 
