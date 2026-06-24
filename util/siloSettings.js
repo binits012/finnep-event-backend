@@ -5,7 +5,14 @@ const ALLOWED_SILO_THEME_PRESETS = new Set([
 	'minimal_luxury'
 ])
 
-import { normalizeSiloLegal } from './sanitizeLegalHtml.js'
+import {
+	normalizeSiloLegal,
+	normalizeSiloContent,
+	normalizeSiloAnnouncements,
+	normalizeSiloAnnouncement,
+	hasLegalHtmlContent,
+	SILO_ANNOUNCEMENT_TYPES
+} from './sanitizeLegalHtml.js'
 import { normalizeSiloEmail } from './siloEmailSettings.js'
 
 const DEFAULT_SILO_SETTINGS = {
@@ -37,6 +44,14 @@ const DEFAULT_SILO_SETTINGS = {
 	legal: {
 		privacyPolicyHtml: '',
 		termsHtml: ''
+	},
+	content: {
+		aboutHtml: ''
+	},
+	announcements: {
+		marquee: { enabled: false, html: '' },
+		popup: { enabled: false, html: '' },
+		footer: { enabled: false, html: '' }
 	},
 	email: {
 		smtp: {
@@ -150,6 +165,26 @@ export function normalizeSiloSettings(value = {}, existing = {}) {
 				: (prev.deployment?.lastDeployError || '')
 		},
 		legal: normalizeSiloLegal(settings.legal !== undefined ? settings.legal : prev.legal),
+		content: normalizeSiloContent(settings.content !== undefined ? settings.content : prev.content),
+		announcements: normalizeSiloAnnouncements(
+			settings.announcements !== undefined
+				? settings.announcements
+				: (settings.announcement !== undefined
+					? (() => {
+						const legacy = normalizeSiloAnnouncement(settings.announcement)
+						return {
+							[legacy.displayType]: {
+								enabled: legacy.enabled,
+								html: legacy.html
+							}
+						}
+					})()
+					: {}),
+			{
+				announcements: prev.announcements,
+				announcement: prev.announcement
+			}
+		),
 		email: normalizeSiloEmail(
 			settings.email !== undefined ? settings.email : {},
 			prev.email || {}
@@ -204,7 +239,7 @@ export function toPartnerThemePayload(merchant) {
 	const silo = normalizeSiloSettings(obj?.siloSettings || {})
 	const logoUrl = silo.brandConfig.logoUrl || obj?.logo || ''
 
-	return {
+	const payload = {
 		themePreset: silo.themePreset,
 		brandConfig: {
 			...silo.brandConfig,
@@ -214,4 +249,23 @@ export function toPartnerThemePayload(merchant) {
 		domain: silo.domain,
 		galleryPhotos: silo.enabled ? silo.galleryPhotos : []
 	}
+
+	if (silo.enabled && hasLegalHtmlContent(silo.content?.aboutHtml)) {
+		payload.content = { aboutHtml: silo.content.aboutHtml }
+	}
+
+	if (silo.enabled && silo.announcements) {
+		const published = {}
+		for (const type of SILO_ANNOUNCEMENT_TYPES) {
+			const slot = silo.announcements[type]
+			if (slot?.enabled && hasLegalHtmlContent(slot.html)) {
+				published[type] = { html: slot.html }
+			}
+		}
+		if (Object.keys(published).length > 0) {
+			payload.announcements = published
+		}
+	}
+
+	return payload
 }

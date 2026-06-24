@@ -9,6 +9,7 @@ import { error, info } from '../model/logger.js'
 import * as Ticket from '../model/ticket.js'
 import crypto from 'crypto'
 import { RESOURCE_NOT_FOUND, INTERNAL_SERVER_ERROR } from '../applicationTexts.js'
+import { assertSiloEventAccess } from '../util/siloFrontTenancy.js'
 import * as ticketMaster from '../util/ticketMaster.js'
 import {
     applyTicketQuantitiesToTicketInfo,
@@ -39,6 +40,14 @@ import { manifestUpdateService } from '../src/services/manifestUpdateService.js'
 import { seatReservationService } from '../src/services/seatReservationService.js'
 import { resolveSoldPlaceIdsForPayment } from '../src/services/paymentSeatResolutionService.js'
 import { fulfillSeatPurchaseBeforeTicket, assertSeatsAvailableForPurchase } from '../src/services/seatPurchaseFulfillmentService.js'
+import {
+    buildCheckoutFulfillmentSnapshot,
+    saveCheckoutFulfillmentSnapshot,
+    getCheckoutFulfillmentSnapshot,
+    deleteCheckoutFulfillmentSnapshot,
+    assertPaymentSuccessRequestMatchesSnapshot,
+    notifyAdminMissingCheckoutSnapshot,
+} from '../util/checkoutFulfillmentSnapshot.js'
 import { downloadPricingFromS3 } from '../util/aws.js'
 import { loadVenueSectionContext, deriveSectionsFromPlaces } from '../src/services/venueSectionContextService.js'
 import * as seatController from './seat.controller.js'
@@ -516,6 +525,7 @@ export const getEventById = async (req, res, next) => {
     try {
         const event = await Event.getEventById(id)
         if (event) {
+            if (!assertSiloEventAccess(req, res, event)) return
             let presaleAccess = false
             if (presaleToken && typeof presaleToken === 'string') {
                 const payload = await getPresalePayload(redisClient, presaleToken)
@@ -811,6 +821,31 @@ const getClientIdentifier = (req) => {
     return normalizeClientIp(
         req.ip || req.connection?.remoteAddress || req.socket?.remoteAddress || 'unknown'
     );
+};
+
+/** Best-effort Stripe lookup for admin alerts only — never used for fulfillment. */
+const tryGetStripePaymentSummaryForAdminAlert = async (paymentIntentId, metadata = {}) => {
+    try {
+        const merchants = await Merchant.genericSearchMerchant(metadata.merchantId, metadata.externalMerchantId);
+        const merchant = merchants.length > 0 ? merchants[0] : null;
+        let stripePaymentIntentOptions;
+        if (merchant?.stripeAccount && !isPlatformStripeAccount(merchant.stripeAccount)) {
+            stripePaymentIntentOptions = { stripeAccount: merchant.stripeAccount };
+        }
+        const paymentIntent = stripePaymentIntentOptions
+            ? await stripe.paymentIntents.retrieve(paymentIntentId, stripePaymentIntentOptions)
+            : await stripe.paymentIntents.retrieve(paymentIntentId);
+        const stripeMetadata = paymentIntent.metadata || {};
+        return {
+            status: paymentIntent.status,
+            amountCents: paymentIntent.amount,
+            currency: paymentIntent.currency,
+            email: stripeMetadata.email || metadata.email || null,
+            eventId: stripeMetadata.eventId || metadata.eventId || null,
+        };
+    } catch (retrieveError) {
+        return { retrieveError: retrieveError?.message || String(retrieveError) };
+    }
 };
 
 /**
@@ -2220,6 +2255,7 @@ export const createPaymentIntent = async (req, res, next) => {
 
         // Security Layer 3: Business logic validation
         const { merchant, event, ticket } = await validateMerchantAndEvent(metadata);
+        if (!assertSiloEventAccess(req, res, event)) return;
 
         // Security Layer 3.5: Dual-payment v1 guards (GA only, no coupons)
         let parsedMetadata = { ...metadata, paymentProvider };
@@ -2275,6 +2311,23 @@ export const createPaymentIntent = async (req, res, next) => {
             if (typeof parsedMetadata.seatTickets === 'string' && parsedMetadata.seatTickets.trim().startsWith('[')) {
                 try {
                     parsedMetadata.seatTickets = JSON.parse(parsedMetadata.seatTickets);
+                } catch (e) {
+                    // Keep as is
+                }
+            }
+        }
+
+        if (metadata.sectionSelections) {
+            if (typeof metadata.sectionSelections === 'string') {
+                try {
+                    parsedMetadata.sectionSelections = JSON.parse(metadata.sectionSelections);
+                } catch (e) {
+                    parsedMetadata.sectionSelections = metadata.sectionSelections;
+                }
+            }
+            if (typeof parsedMetadata.sectionSelections === 'string' && parsedMetadata.sectionSelections.trim().startsWith('[')) {
+                try {
+                    parsedMetadata.sectionSelections = JSON.parse(parsedMetadata.sectionSelections);
                 } catch (e) {
                     // Keep as is
                 }
@@ -2458,6 +2511,40 @@ export const createPaymentIntent = async (req, res, next) => {
             clientId: clientId
         });
 
+        await saveCheckoutFulfillmentSnapshot(
+            buildCheckoutFulfillmentSnapshot({
+                paymentIntentId: paymentIntent.id,
+                amountCents: paymentIntent.amount,
+                currency: paymentIntent.currency,
+                merchant,
+                metadata,
+                parsedMetadata,
+                expectedPrice,
+                event,
+            })
+        ).catch(async (snapshotErr) => {
+            error('[createPaymentIntent] Failed to save checkout snapshot; cancelling PaymentIntent', {
+                paymentIntentId: paymentIntent.id,
+                eventId: metadata.eventId,
+                error: snapshotErr?.message || String(snapshotErr),
+            });
+            try {
+                if (stripePaymentIntentOptions) {
+                    await stripe.paymentIntents.cancel(paymentIntent.id, {}, stripePaymentIntentOptions);
+                } else {
+                    await stripe.paymentIntents.cancel(paymentIntent.id);
+                }
+            } catch (cancelErr) {
+                error('[createPaymentIntent] Failed to cancel PaymentIntent after snapshot save failure', {
+                    paymentIntentId: paymentIntent.id,
+                    error: cancelErr?.message || String(cancelErr),
+                });
+            }
+            const err = new Error('Checkout session could not be started. Please try again.');
+            err.code = 'CHECKOUT_SNAPSHOT_SAVE_FAILED';
+            throw err;
+        });
+
         // Return client secret for frontend
         res.status(consts.HTTP_STATUS_OK).json({
             clientSecret: paymentIntent.client_secret,
@@ -2578,6 +2665,7 @@ const _createPaytrailPaymentInternal = async (req, res, next, { redirectSuccessU
         });
 
         const { merchant, event, ticket } = await validateMerchantAndEvent(parsedMetadata);
+        if (!assertSiloEventAccess(req, res, event)) return;
 
         // Check if merchant has Paytrail enabled
         if (!merchant.paytrailEnabled) {
@@ -3935,6 +4023,7 @@ const _createNabilPaymentInternal = async (req, res, { redirectSuccessUrl, redir
         const validatedData = validatePaymentRequest(req.body);
         const parsedMetadata = { ...validatedData.metadata, paymentProvider: 'nabil' };
         const { merchant, event, ticket } = await validateMerchantAndEvent(parsedMetadata);
+        if (!assertSiloEventAccess(req, res, event)) return;
 
         const v1BlockReason = assertDualPaymentV1Allowed({ merchant, event, metadata: parsedMetadata });
         if (v1BlockReason) {
@@ -4137,12 +4226,46 @@ export const handlePaymentSuccess = async (req, res, next) => {
             setTimeout(() => reject(new Error('Stripe API timeout')), 10000);
         });
 
+        const checkoutSnapshot = await getCheckoutFulfillmentSnapshot(paymentIntentId);
+        if (!checkoutSnapshot) {
+            const clientId = getClientIdentifier(req);
+            const stripePaymentSummary = await tryGetStripePaymentSummaryForAdminAlert(paymentIntentId, metadata);
+            await notifyAdminMissingCheckoutSnapshot({
+                paymentIntentId,
+                metadata,
+                clientId,
+                stripePaymentSummary,
+            });
+
+            const supportContactEmail = commonUtil.resolveBrandingContactEmail();
+            return res.status(consts.HTTP_STATUS_CONFLICT).json({
+                success: false,
+                error: 'CHECKOUT_SNAPSHOT_EXPIRED',
+                code: 'CHECKOUT_SNAPSHOT_EXPIRED',
+                message: 'Your payment may have been received but ticket delivery could not be completed automatically. Our team has been notified and will follow up shortly.',
+                requiresManualFulfillment: true,
+                supportContactEmail,
+            });
+        }
+
+        try {
+            assertPaymentSuccessRequestMatchesSnapshot(metadata, checkoutSnapshot);
+        } catch (snapshotMatchError) {
+            if (snapshotMatchError?.code === 'CHECKOUT_METADATA_MISMATCH') {
+                return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                    success: false,
+                    error: snapshotMatchError.message,
+                    code: snapshotMatchError.code,
+                    mismatches: snapshotMatchError.mismatches,
+                });
+            }
+            throw snapshotMatchError;
+        }
+
         let stripePaymentIntentOptions;
-        const merchants = await Merchant.genericSearchMerchant(metadata.merchantId, metadata.externalMerchantId);
-        const merchant = merchants.length > 0 ? merchants[0] : null;
-        if (merchant?.stripeAccount && !isPlatformStripeAccount(merchant.stripeAccount)) {
+        if (checkoutSnapshot.stripeAccount && !isPlatformStripeAccount(checkoutSnapshot.stripeAccount)) {
             stripePaymentIntentOptions = {
-                stripeAccount: merchant.stripeAccount
+                stripeAccount: checkoutSnapshot.stripeAccount
             };
         }
 
@@ -4157,68 +4280,43 @@ export const handlePaymentSuccess = async (req, res, next) => {
             });
         }
 
-        // Use paymentIntent.metadata as fallback when req.body.metadata is null or missing fields
-        // paymentIntent.metadata is the source of truth from Stripe
+        if (paymentIntent.amount !== checkoutSnapshot.amountCents) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                success: false,
+                error: 'Payment amount mismatch',
+                code: 'PAYMENT_AMOUNT_MISMATCH',
+            });
+        }
+
         const stripeMetadata = paymentIntent.metadata || {};
         const requestMetadata = metadata || {};
+        const fulfillment = checkoutSnapshot.fulfillment || {};
 
-        // Merge metadata: request body takes precedence, but fall back to Stripe metadata
-        // NOTE: seatTickets and placeIds are excluded from Stripe metadata due to 500 char limit
-        // They MUST always be provided in the request body for seat-based events
         const mergedMetadata = {
-            ...stripeMetadata,
-            ...requestMetadata,
-            // For arrays, prefer request body if present, otherwise use Stripe metadata
-            // seatTickets and placeIds are too large for Stripe metadata, so they should always come from request body
-            placeIds: requestMetadata.placeIds !== undefined ? requestMetadata.placeIds : [],
-            seatTickets: requestMetadata.seatTickets !== undefined ? requestMetadata.seatTickets : [],
-            // Nonce: prefer request body, fallback to Stripe metadata
-            nonce: requestMetadata.nonce || stripeMetadata.nonce,
-            // Locale: prefer request body, fallback to Stripe metadata, default to en-US
-            locale: requestMetadata.locale || stripeMetadata.locale || 'en-US'
+            ...fulfillment,
+            nonce: fulfillment.nonce || requestMetadata.nonce || stripeMetadata.nonce,
+            locale: requestMetadata.locale || fulfillment.locale || stripeMetadata.locale || 'en-US',
         };
 
-        // Validate nonce after merging (can come from request or Stripe metadata)
+        // Validate nonce after merging (can come from snapshot, request, or Stripe metadata)
         const nonce = mergedMetadata.nonce;
         if (!nonce || typeof nonce !== 'string' || nonce.length < 32) {
             throw new Error('Invalid or missing nonce. Please refresh the page and try again.');
         }
 
-        // Re-parse placeIds and seatTickets from merged metadata if they're strings
-        let finalPlaceIds = mergedMetadata.placeIds || [];
-        if (typeof finalPlaceIds === 'string') {
-            try {
-                finalPlaceIds = JSON.parse(finalPlaceIds);
-            } catch (e) {
-                finalPlaceIds = [];
-            }
-        }
-        if (!Array.isArray(finalPlaceIds)) {
-            finalPlaceIds = [];
-        }
+        const finalPlaceIds = Array.isArray(fulfillment.placeIds) ? fulfillment.placeIds : [];
+        const finalSeatTickets = Array.isArray(fulfillment.seatTickets) ? fulfillment.seatTickets : [];
+        const finalSectionSelections = Array.isArray(fulfillment.sectionSelections)
+            ? fulfillment.sectionSelections
+            : [];
 
-        let finalSeatTickets = mergedMetadata.seatTickets || [];
-        if (typeof finalSeatTickets === 'string') {
-            try {
-                finalSeatTickets = JSON.parse(finalSeatTickets);
-            } catch (e) {
-                finalSeatTickets = [];
-            }
-        }
-        if (!Array.isArray(finalSeatTickets)) {
-            finalSeatTickets = [];
-        }
-
-        let finalSectionSelections = mergedMetadata.sectionSelections || [];
-        if (typeof finalSectionSelections === 'string') {
-            try {
-                finalSectionSelections = JSON.parse(finalSectionSelections);
-            } catch (e) {
-                finalSectionSelections = [];
-            }
-        }
-        if (!Array.isArray(finalSectionSelections)) {
-            finalSectionSelections = [];
+        const merchants = await Merchant.genericSearchMerchant(
+            fulfillment.merchantId,
+            fulfillment.externalMerchantId
+        );
+        const merchant = merchants.length > 0 ? merchants[0] : null;
+        if (!merchant || merchant.status !== 'active') {
+            throw new Error('Merchant is not available or active');
         }
 
         const sanitizedMetadata = {
@@ -4304,6 +4402,7 @@ export const handlePaymentSuccess = async (req, res, next) => {
         if (!event) {
             throw new Error('Event not found');
         }
+        if (!assertSiloEventAccess(req, res, event)) return;
 
         // Create ticketInfo object similar to completeOrderTicket
         const ticketInfo = {
@@ -4502,6 +4601,8 @@ export const handlePaymentSuccess = async (req, res, next) => {
         await PlatformMarketingConsent.getOrCreatePlatformConsent(ticketFor);
 
         const isVenueEvent = !!(event && event.venue && event.venue.venueId);
+        const snapshotAssignedPlaceIds =
+            finalPlaceIds.length > 0 && finalSectionSelections.length === 0 ? finalPlaceIds : null;
         if (isVenueEvent) {
             try {
                 await fulfillSeatPurchaseBeforeTicket({
@@ -4510,16 +4611,19 @@ export const handlePaymentSuccess = async (req, res, next) => {
                     sessionId: sanitizedMetadata.sessionId,
                     placeIds: finalPlaceIds,
                     sectionSelections: finalSectionSelections,
-                    checkoutToken: mergedMetadata.checkoutToken || requestMetadata.checkoutToken || null,
+                    checkoutToken: fulfillment.checkoutToken || null,
+                    snapshotAssignedPlaceIds,
                     logPrefix: '[handlePaymentSuccess]',
                 });
             } catch (seatError) {
-                if (seatError?.code === 'SEATS_ALREADY_SOLD') {
+                if (seatError?.code === 'SEATS_ALREADY_SOLD' || seatError?.code === 'SEATS_CHECKOUT_MISMATCH') {
                     await redisClient.del(paymentIntentReserveKey).catch(() => {});
                     return res.status(consts.HTTP_STATUS_CONFLICT).json({
                         success: false,
-                        error: 'SEATS_ALREADY_SOLD',
-                        message: 'Payment was received but these seats are no longer available. Please contact support for a refund.',
+                        error: seatError.code,
+                        message: seatError.code === 'SEATS_CHECKOUT_MISMATCH'
+                            ? 'Payment was received but seat selection does not match checkout. Please contact support for a refund.'
+                            : 'Payment was received but these seats are no longer available. Please contact support for a refund.',
                         requiresRefund: true,
                     });
                 }
@@ -4649,6 +4753,10 @@ export const handlePaymentSuccess = async (req, res, next) => {
         }).catch(err => {
             // Log but don't fail - ticket is already created
             console.warn('Failed to update paymentIntentId in Redis (non-critical):', err);
+        });
+
+        await deleteCheckoutFulfillmentSnapshot(paymentIntentId).catch((snapshotErr) => {
+            console.warn('Failed to delete checkout snapshot (non-critical):', snapshotErr);
         });
 
         res.status(consts.HTTP_STATUS_OK).json({
@@ -5306,6 +5414,7 @@ export const handleFreeEventRegistration = async (req, res, next) => {
                 error: 'Event not found'
             });
         }
+        if (!assertSiloEventAccess(req, res, event)) return;
 
         // Validate and check if merchant exists
         const merchant = await Merchant.getMerchantById(sanitizedData.merchantId);

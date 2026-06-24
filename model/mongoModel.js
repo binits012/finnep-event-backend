@@ -796,6 +796,23 @@ const merchantSchema = new mongoose.Schema({
 			privacyPolicyHtml: { type: String, default: '' },
 			termsHtml: { type: String, default: '' }
 		},
+		content: {
+			aboutHtml: { type: String, default: '' }
+		},
+		announcements: {
+			marquee: {
+				enabled: { type: Boolean, default: false },
+				html: { type: String, default: '' }
+			},
+			popup: {
+				enabled: { type: Boolean, default: false },
+				html: { type: String, default: '' }
+			},
+			footer: {
+				enabled: { type: Boolean, default: false },
+				html: { type: String, default: '' }
+			}
+		},
 		email: {
 			smtp: {
 				host: { type: String, default: '' },

@@ -1,4 +1,5 @@
 import { Merchant as MerchantModel } from '../model/mongoModel.js'
+import { assertSiloBffOriginAllowed, hasValidSiloCfAttestation } from './siloBffOriginGuard.js'
 import { normalizeSiloSettings } from './siloSettings.js'
 import { decryptSiloSmtpPassword, hasEncryptedSiloSmtpPassword } from './siloSmtpCrypto.js'
 
@@ -66,16 +67,28 @@ export function getSiloStorefrontBffOriginHostname() {
 }
 
 export async function resolveSiloBffMerchant(req) {
-	let merchantId = String(req.headers[BFF_HEADER] || req.headers['X-Silo-Merchant-Id'] || '').trim()
+	assertSiloBffOriginAllowed(req)
+
+	let merchantId = ''
 	let merchant = null
 
-	if (merchantId) {
-		merchant = await MerchantModel.findOne({ merchantId }).lean()
+	if (hasValidSiloCfAttestation(req)) {
+		// Injected by CloudFront origin custom headers — not a browser-forwarded header.
+		merchantId = String(req.headers[BFF_HEADER] || req.headers['X-Silo-Merchant-Id'] || '').trim()
+		if (merchantId) {
+			merchant = await MerchantModel.findOne({ merchantId }).lean()
+		}
 	} else {
-		const viewerHost = extractViewerHost(req)
-		merchant = await findMerchantByStorefrontHost(viewerHost)
-		if (merchant) {
-			merchantId = String(merchant.merchantId)
+		let merchantIdFromHeader = String(req.headers[BFF_HEADER] || req.headers['X-Silo-Merchant-Id'] || '').trim()
+		if (merchantIdFromHeader) {
+			merchantId = merchantIdFromHeader
+			merchant = await MerchantModel.findOne({ merchantId }).lean()
+		} else {
+			const viewerHost = extractViewerHost(req)
+			merchant = await findMerchantByStorefrontHost(viewerHost)
+			if (merchant) {
+				merchantId = String(merchant.merchantId)
+			}
 		}
 	}
 

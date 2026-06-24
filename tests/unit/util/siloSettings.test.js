@@ -100,4 +100,72 @@ describe('siloSettings util', () => {
 		expect(theme.enabled).toBe(true)
 		expect(theme.domain).toBe('tickets.example.com')
 	})
+
+	it('includes content and announcements in theme payload when published', () => {
+		const theme = toPartnerThemePayload({
+			siloSettings: {
+				enabled: true,
+				content: { aboutHtml: '<p>Our story</p>' },
+				announcements: {
+					marquee: { enabled: true, html: '<p>Presale live</p>' },
+					popup: { enabled: true, html: '<p>Door time changed</p>' },
+					footer: { enabled: false, html: '<p>Hidden</p>' }
+				}
+			}
+		})
+
+		expect(theme.content).toEqual({ aboutHtml: '<p>Our story</p>' })
+		expect(theme.announcements).toEqual({
+			marquee: { html: '<p>Presale live</p>' },
+			popup: { html: '<p>Door time changed</p>' }
+		})
+	})
+
+	it('omits content and announcements when empty or disabled', () => {
+		const theme = toPartnerThemePayload({
+			siloSettings: {
+				enabled: true,
+				content: { aboutHtml: '' },
+				announcements: {
+					marquee: { enabled: false, html: '<p>Hidden</p>' },
+					popup: { enabled: false, html: '' },
+					footer: { enabled: false, html: '' }
+				}
+			}
+		})
+
+		expect(theme.content).toBeUndefined()
+		expect(theme.announcements).toBeUndefined()
+	})
+
+	it('migrates legacy single announcement into announcements slot', () => {
+		const result = normalizeSiloSettings({
+			announcement: {
+				enabled: true,
+				html: '<p>Hi</p>',
+				displayType: 'popup'
+			}
+		})
+
+		expect(result.announcements.popup).toEqual({
+			enabled: true,
+			html: '<p>Hi</p>'
+		})
+		expect(result.announcements.marquee.enabled).toBe(false)
+	})
+
+	it('normalizes invalid legacy announcement displayType to marquee slot', () => {
+		const result = normalizeSiloSettings({
+			announcement: {
+				enabled: true,
+				html: '<p>Hi</p>',
+				displayType: 'banner'
+			}
+		})
+
+		expect(result.announcements.marquee).toEqual({
+			enabled: true,
+			html: '<p>Hi</p>'
+		})
+	})
 })

@@ -10,6 +10,13 @@ import * as front  from '../controllers/front.controller.js'
 import * as guest from '../controllers/guest.controller.js'
 import { handlePaytrailWebhook } from '../controllers/paytrail.webhook.js'
 import { handleNabilWebhook } from '../controllers/nabil.webhook.js'
+import {
+	createSiloEventTenancyMiddleware,
+	siloEventTenancyParamHandler,
+} from '../middleware/siloEventTenancy.middleware.js'
+
+router.param('eventId', siloEventTenancyParamHandler)
+const siloEventTenancyById = createSiloEventTenancyMiddleware('id')
 router.route('/public-site-config')
     .get(front.getPublicSiteConfig)
 router.route('/business-landing')
@@ -19,7 +26,7 @@ router.route('/')
 router.route('/events')
     .get(front.listEvent)
 router.route('/event/:id')
-    .get(front.getEventById)
+    .get(siloEventTenancyById, front.getEventById)
 router.post('/event/:eventId/discount/validate', front.validateDiscountCode)
 router.route('/create-checkout-session')
     .post(front.createCheckoutSession)

@@ -2,8 +2,7 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv'
 dotenv.config()
-// Build MongoDB connection URI
-// Note: authSource must match the database where the user was created
+
 const user = encodeURIComponent(process.env.MONGODB_USER || 'eventapp');
 const pwd = encodeURIComponent(process.env.MONGODB_PWD || '');
 const host = process.env.MONGODB_HOST || 'localhost';
@@ -13,77 +12,88 @@ const authSource = process.env.MONGODB_AUTH_SOURCE || dbName;
 
 const dbURI = `mongodb://${user}:${pwd}@${host}:${port}/${dbName}?authSource=${authSource}`;
 
+const isProduction = process.env.NODE_ENV === 'production';
+
 const options = {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-  serverSelectionTimeoutMS: 10000, // Increased for development resilience
-  socketTimeoutMS: 45000,  // Close sockets after 45 seconds of inactivity
-  keepAlive: true,         // Enable keepAlive
-  keepAliveInitialDelay: 300000,  // Send keepAlive every 5 minutes (300000 ms)
-  // Auto-reconnect options
+  serverSelectionTimeoutMS: 10000,
+  socketTimeoutMS: 45000,
   retryWrites: true,
   retryReads: true,
-  maxPoolSize: 50,               // ✅ ADD - increase connection pool
-  minPoolSize: 10,
+  maxPoolSize: isProduction ? 50 : 10,
+  minPoolSize: isProduction ? 10 : 1,
 };
 
-// Connect to MongoDB
-async function dbConnect() {
-  try {
-    // Log connection attempt (mask password for security)
-    const maskedURI = dbURI.replace(/:([^:@]+)@/, ':***@');
-    console.log('Attempting MongoDB connection to:', maskedURI);
-    console.log('User:', user ? decodeURIComponent(user) : 'not set');
-    console.log('Host:', host);
-    console.log('Port:', port);
-    console.log('Database:', dbName);
-    console.log('AuthSource:', authSource);
+let connectPromise = null;
+let initialRetryTimer = null;
 
-    await mongoose.connect(dbURI, options)
-    console.log('✅ Mongoose connected successfully!')
-  } catch (err) {
-    const maskedURI = dbURI.replace(/:([^:@]+)@/, ':***@');
-    console.error('❌ Mongoose connection error:', err.message);
-    console.error('Error code:', err.code);
-    console.error('Error codeName:', err.codeName);
-    console.error('Connection string used:', maskedURI);
-    console.error('Full error:', err);
-
-    // Retry connection after 5 seconds
-    setTimeout(() => {
-      console.log('Retrying MongoDB connection...')
-      dbConnect()
-    }, 5000)
-  }
+function logConnectionTarget() {
+  const maskedURI = dbURI.replace(/:([^:@]+)@/, ':***@');
+  console.log('Attempting MongoDB connection to:', maskedURI);
+  console.log('User:', user ? decodeURIComponent(user) : 'not set');
+  console.log('Host:', host);
+  console.log('Port:', port);
+  console.log('Database:', dbName);
+  console.log('AuthSource:', authSource);
 }
 
-// Handle connection events
-dbConnect()
+async function dbConnect() {
+  if (mongoose.connection.readyState === 1) {
+    return mongoose.connection;
+  }
+
+  if (connectPromise) {
+    return connectPromise;
+  }
+
+  logConnectionTarget();
+
+  connectPromise = mongoose.connect(dbURI, options)
+    .then(() => {
+      console.log('✅ Mongoose connected successfully!');
+      return mongoose.connection;
+    })
+    .catch((err) => {
+      connectPromise = null;
+      const maskedURI = dbURI.replace(/:([^:@]+)@/, ':***@');
+      console.error('❌ Mongoose connection error:', err.message);
+      console.error('Connection string used:', maskedURI);
+
+      if (!initialRetryTimer) {
+        initialRetryTimer = setTimeout(() => {
+          initialRetryTimer = null;
+          console.log('Retrying MongoDB connection...');
+          void dbConnect();
+        }, 5000);
+      }
+
+      throw err;
+    });
+
+  return connectPromise;
+}
 
 mongoose.connection.on('error', (err) => {
-  console.log('Mongoose connection error: ' + err)
+  console.log('Mongoose connection error:', err);
 });
 
 mongoose.connection.on('disconnected', () => {
-  console.log('Mongoose disconnected - will attempt to reconnect')
-  // Mongoose will automatically attempt to reconnect, but we can also trigger it manually
-  if (mongoose.connection.readyState === 0) {
-    setTimeout(() => {
-      console.log('Attempting to reconnect to MongoDB...')
-      dbConnect()
-    }, 5000)
-  }
+  console.log('Mongoose disconnected — driver will reconnect automatically');
 });
 
 mongoose.connection.on('reconnected', () => {
-  console.log('Mongoose reconnected successfully')
+  console.log('Mongoose reconnected successfully');
 });
 
-// Handle application termination (SIGINT)
 process.on('SIGINT', async () => {
-  await mongoose.connection.close()
-  console.log('Mongoose disconnected through app termination')
-  process.exit(0)
+  if (initialRetryTimer) {
+    clearTimeout(initialRetryTimer);
+    initialRetryTimer = null;
+  }
+  await mongoose.connection.close();
+  console.log('Mongoose disconnected through app termination');
+  process.exit(0);
 });
+
+void dbConnect();
 
 export default dbConnect;

@@ -5,8 +5,18 @@ import {
 	proxyFebFrontForSiloBff,
 	sendSiloBffError
 } from '../util/siloStorefrontBffProxy.js'
+import { assertSiloBffOriginAllowed } from '../util/siloBffOriginGuard.js'
 
 const router = express.Router()
+
+router.use((req, res, next) => {
+	try {
+		assertSiloBffOriginAllowed(req)
+		next()
+	} catch (error) {
+		sendSiloBffError(res, error)
+	}
+})
 
 async function withMerchant(req, res, handler) {
 	try {

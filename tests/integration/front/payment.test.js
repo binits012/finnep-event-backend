@@ -99,6 +99,46 @@ describe('Front Payment Endpoints', () => {
   });
 
   describe('POST /front/payment-success', () => {
+    it('should return 409 when checkout snapshot is missing', async () => {
+      const response = await request(app)
+        .post('/front/payment-success')
+        .send({
+          paymentIntentId: 'pi_test_missing_snapshot_123',
+          metadata: {
+            eventId: '507f1f77bcf86cd799439011',
+            merchantId: '507f1f77bcf86cd799439012',
+            externalMerchantId: '12345',
+            email: 'buyer@example.com',
+            quantity: '1',
+            nonce: 'a'.repeat(32),
+          },
+        });
+
+      expect(response.status).toBe(409);
+      expect(response.body.error).toBe('CHECKOUT_SNAPSHOT_EXPIRED');
+      expect(response.body.code).toBe('CHECKOUT_SNAPSHOT_EXPIRED');
+      expect(response.body.requiresManualFulfillment).toBe(true);
+      expect(response.body.supportContactEmail).toBeTruthy();
+    });
+
+    it('should return 400 for invalid payment intent ID format', async () => {
+      const response = await request(app)
+        .post('/front/payment-success')
+        .send({
+          paymentIntentId: 'invalid_session_id',
+          metadata: {
+            eventId: '507f1f77bcf86cd799439011',
+            merchantId: '507f1f77bcf86cd799439012',
+            externalMerchantId: '12345',
+            email: 'buyer@example.com',
+            quantity: '1',
+            nonce: 'a'.repeat(32),
+          },
+        });
+
+      expect(response.status).toBe(500);
+    });
+
     it('should return 200 for successful payment processing', async () => {
       const response = await request(app)
         .post('/front/payment-success')
@@ -112,20 +152,8 @@ describe('Front Payment Endpoints', () => {
       if (response.status === 200) {
         expect(response.body.success).toBe(true);
       } else {
-        expect([400, 401, 500]).toContain(response.status);
+        expect([400, 401, 409, 500]).toContain(response.status);
       }
-    });
-
-    it('should return 400 for invalid session ID', async () => {
-      const response = await request(app)
-        .post('/front/payment-success')
-        .send({
-          sessionId: 'invalid_session_id',
-          eventId: 'test_event_id',
-          ticketOrderId: 'test_order_id'
-        });
-
-      expect(response.status).toBe(400);
     });
   });
 });

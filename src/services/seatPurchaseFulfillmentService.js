@@ -49,6 +49,15 @@ export async function assertSeatsAvailableForPurchase({
  * Resolve seats, atomically mark sold, and release Redis holds.
  * Must run before ticket creation to prevent double sale of the same seat.
  */
+const normalizeAssignedPlaceIds = (placeIds = []) =>
+	Array.from(
+		new Set(
+			(Array.isArray(placeIds) ? placeIds : [])
+				.map((id) => (typeof id === 'string' ? id.trim() : ''))
+				.filter((id) => id.length > 0)
+		)
+	);
+
 export async function fulfillSeatPurchaseBeforeTicket({
 	eventId,
 	event,
@@ -56,10 +65,24 @@ export async function fulfillSeatPurchaseBeforeTicket({
 	placeIds = [],
 	sectionSelections = [],
 	checkoutToken = null,
+	snapshotAssignedPlaceIds = null,
 	logPrefix = '[fulfillSeatPurchase]',
 }) {
 	if (!event?.venue?.venueId) {
 		return { placeIdsToMarkSold: [], areaSoldIncrements: [], unresolvedSelections: [] };
+	}
+
+	const explicitPlaceIds = normalizeAssignedPlaceIds(placeIds);
+	const allowedAssignedPlaceIds = normalizeAssignedPlaceIds(snapshotAssignedPlaceIds);
+	if (allowedAssignedPlaceIds.length > 0 && explicitPlaceIds.length > 0) {
+		const allowedSet = new Set(allowedAssignedPlaceIds);
+		const invalid = explicitPlaceIds.filter((placeId) => !allowedSet.has(placeId));
+		if (invalid.length > 0 || explicitPlaceIds.length !== allowedAssignedPlaceIds.length) {
+			const err = new Error('Seat selection does not match checkout');
+			err.code = 'SEATS_CHECKOUT_MISMATCH';
+			err.invalidPlaceIds = invalid;
+			throw err;
+		}
 	}
 
 	const { placeIds: placeIdsToMarkSold, areaSoldIncrements, unresolvedSelections } =

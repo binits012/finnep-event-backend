@@ -99,7 +99,7 @@ Theme settings are configured in the merchant backoffice (EMS `orginfo.silo_sett
 **Two controls (platform admin only):**
 
 1. **FEB-CMS** — Issue/revoke partner API credentials. First active credential sets `siloSettings.enabled: true`; revoking the last active credential sets `enabled: false` and notifies EMS via `MerchantSiloToggled`.
-2. **EMF** — Merchants configure theme, domain, legal, SMTP, and gallery only. They cannot toggle `enabled`; EMF shows read-only provision status synced from CMS.
+2. **EMF** — Merchants configure theme, domain, legal, storefront content (About + announcements), SMTP, and gallery only. They cannot toggle `enabled`; EMF shows read-only provision status synced from CMS.
 
 ### Hosting ownership (Option A)
 
@@ -144,6 +144,34 @@ Returns HTML for silo storefront `/privacy` and `/terms` pages:
 - `source: "platform"` — Finnep default legal from platform `Setting.otherInfo` (used when merchant HTML is empty)
 
 Configure custom legal HTML in the merchant backoffice under **Silo Storefront → Legal pages**.
+
+### Theme payload (`/theme`)
+
+In addition to `themePreset`, `brandConfig`, `enabled`, `domain`, and `galleryPhotos`, the theme response may include:
+
+```json
+{
+  "theme": {
+    "themePreset": "cinematic",
+    "brandConfig": { "primaryColor": "#f5b700", "darkColor": "#050505", "logoUrl": "", "fontProfile": "editorial", "heroStyle": "poster" },
+    "enabled": true,
+    "domain": "tickets.example.com",
+    "galleryPhotos": [{ "url": "https://...", "position": 1 }],
+    "content": { "aboutHtml": "<p>Our story</p>" },
+    "announcements": {
+      "marquee": { "html": "<p>Presale now live</p>" },
+      "popup": { "html": "<p>Doors open at 7pm</p>" },
+      "footer": { "html": "<p>Free parking this weekend</p>" }
+    }
+  }
+}
+```
+
+- `content.aboutHtml` — present when silo is enabled and About HTML is non-empty (merchant `silo_settings.content.aboutHtml`)
+- `announcements` — present when silo is enabled and at least one announcement slot is enabled with non-empty HTML
+- `announcements.marquee` | `announcements.popup` | `announcements.footer` — each slot is included only when enabled and published; value is `{ "html": "..." }`
+
+Configure About and announcements in the merchant backoffice under **Silo Storefront → Storefront content**. Each display type (marquee, popup, footer) can be enabled independently.
 
 ## Pilot onboarding checklist
 

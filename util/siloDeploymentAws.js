@@ -20,6 +20,7 @@ import {
 	UpdateFunctionCommand
 } from '@aws-sdk/client-cloudfront'
 import { error, info, warn } from '../model/logger.js'
+import { getSiloBffOriginSecret, SILO_CF_ATTESTATION_HEADER } from './siloBffOriginGuard.js'
 import { getSiloStorefrontBffOriginHostname, SILO_STOREFRONT_BFF_PUBLIC_PATH } from './siloStorefrontBffProxy.js'
 import {
 	SILO_CLOUDFRONT_DYNAMIC_ROUTES_FUNCTION_NAME,
@@ -226,6 +227,21 @@ async function findDistributionByComment(comment) {
 	return null
 }
 
+function buildBffOriginCustomHeaders(merchantId) {
+	const items = [{
+		HeaderName: 'X-Silo-Merchant-Id',
+		HeaderValue: String(merchantId)
+	}]
+	const attestationSecret = getSiloBffOriginSecret()
+	if (attestationSecret) {
+		items.push({
+			HeaderName: SILO_CF_ATTESTATION_HEADER,
+			HeaderValue: attestationSecret
+		})
+	}
+	return { Quantity: items.length, Items: items }
+}
+
 function buildBffOrigin(merchantId) {
 	const hostname = getSiloStorefrontBffOriginHostname()
 	if (!hostname) return null
@@ -233,13 +249,7 @@ function buildBffOrigin(merchantId) {
 		Id: `silo-bff-${merchantId}`,
 		DomainName: hostname,
 		OriginPath: SILO_STOREFRONT_BFF_PUBLIC_PATH,
-		OriginCustomHeaders: {
-			Quantity: 1,
-			Items: [{
-				HeaderName: 'X-Silo-Merchant-Id',
-				HeaderValue: String(merchantId)
-			}]
-		},
+		OriginCustomHeaders: buildBffOriginCustomHeaders(merchantId),
 		CustomOriginConfig: {
 			HTTPPort: 80,
 			HTTPSPort: 443,
@@ -264,8 +274,8 @@ function buildApiCacheBehavior(bffOriginId) {
 		ForwardedValues: {
 			QueryString: true,
 			Headers: {
-				Quantity: 6,
-				Items: ['Origin', 'Referer', 'Host', 'Content-Type', 'Accept', 'x-market-country-code']
+				Quantity: 7,
+				Items: ['Origin', 'Referer', 'Host', 'Content-Type', 'Accept', 'Authorization', 'x-market-country-code']
 			},
 			Cookies: { Forward: 'none' },
 			QueryStringCacheKeys: { Quantity: 0 }
@@ -290,14 +300,23 @@ async function ensureDistributionApiBehavior({ distributionId, merchantId }) {
 	if (!config) return
 
 	const origins = [...(config.Origins?.Items || [])]
-	if (!origins.some((origin) => origin.Id === bffOrigin.Id)) {
+	const existingOriginIndex = origins.findIndex((origin) => origin.Id === bffOrigin.Id)
+	if (existingOriginIndex === -1) {
 		origins.push(bffOrigin)
+	} else {
+		origins[existingOriginIndex] = {
+			...origins[existingOriginIndex],
+			OriginCustomHeaders: bffOrigin.OriginCustomHeaders
+		}
 	}
 	config.Origins = { Quantity: origins.length, Items: origins }
 
 	const cacheBehaviors = [...(config.CacheBehaviors?.Items || [])]
-	if (!cacheBehaviors.some((behavior) => behavior.PathPattern === '/api/*')) {
+	const apiBehaviorIndex = cacheBehaviors.findIndex((behavior) => behavior.PathPattern === '/api/*')
+	if (apiBehaviorIndex === -1) {
 		cacheBehaviors.unshift(buildApiCacheBehavior(bffOrigin.Id))
+	} else {
+		cacheBehaviors[apiBehaviorIndex] = buildApiCacheBehavior(bffOrigin.Id)
 	}
 	config.CacheBehaviors = {
 		Quantity: cacheBehaviors.length,

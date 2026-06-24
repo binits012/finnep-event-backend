@@ -228,6 +228,91 @@ This is an automated notification. Please do not reply to this email.
     }
 };
 
+const escapeHtml = (value) =>
+    String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+
+/**
+ * Alert platform ops when Stripe payment-success cannot load checkout snapshot.
+ */
+export const sendCheckoutSnapshotExpiredAdminEmail = async (adminEmail, details = {}) => {
+    if (!process.env.SEND_MAIL) {
+        info('[sendCheckoutSnapshotExpiredAdminEmail] Email sending disabled, skipping notification');
+        return;
+    }
+
+    const recipient = String(adminEmail || '').trim();
+    if (!recipient) {
+        error('[sendCheckoutSnapshotExpiredAdminEmail] No admin recipient configured, skipping email');
+        return;
+    }
+
+    const paymentIntentId = escapeHtml(details.paymentIntentId || 'unknown');
+    const customerEmail = escapeHtml(details.customerEmail || 'unknown');
+    const eventId = escapeHtml(details.eventId || 'unknown');
+    const eventName = escapeHtml(details.eventName || '');
+    const merchantId = escapeHtml(details.merchantId || '');
+    const externalMerchantId = escapeHtml(details.externalMerchantId || '');
+    const stripeStatus = escapeHtml(details.stripeStatus || 'not retrieved');
+    const stripeAmount = details.stripeAmountCents != null
+        ? `${(Number(details.stripeAmountCents) / 100).toFixed(2)} ${escapeHtml(details.stripeCurrency || '')}`.trim()
+        : 'unknown';
+    const clientId = escapeHtml(details.clientId || '');
+    const placeIds = escapeHtml((details.placeIds || []).join(', ') || 'none');
+    const stripeRetrieveError = details.stripeRetrieveError
+        ? escapeHtml(details.stripeRetrieveError)
+        : '';
+
+    const emailData = {
+        from: process.env.EMAIL_USERNAME,
+        to: recipient,
+        subject: `[Action required] Checkout snapshot missing — ${details.paymentIntentId || 'payment'}`,
+        html: `
+            <h2>Checkout snapshot missing at payment-success</h2>
+            <p>A customer may have paid in Stripe but ticket fulfillment was blocked because the server checkout snapshot was not found in Redis.</p>
+            <p><strong>Recommended action:</strong> verify the PaymentIntent in Stripe, then manually issue the ticket or process a refund.</p>
+            <table border="1" cellpadding="8" cellspacing="0" style="border-collapse:collapse;">
+                <tr><td><strong>PaymentIntent ID</strong></td><td>${paymentIntentId}</td></tr>
+                <tr><td><strong>Customer email</strong></td><td>${customerEmail}</td></tr>
+                <tr><td><strong>Event ID</strong></td><td>${eventId}</td></tr>
+                <tr><td><strong>Event name</strong></td><td>${eventName || '—'}</td></tr>
+                <tr><td><strong>Merchant ID</strong></td><td>${merchantId || '—'} / ${externalMerchantId || '—'}</td></tr>
+                <tr><td><strong>Stripe status</strong></td><td>${stripeStatus}</td></tr>
+                <tr><td><strong>Stripe amount</strong></td><td>${stripeAmount}</td></tr>
+                <tr><td><strong>Place IDs</strong></td><td>${placeIds}</td></tr>
+                <tr><td><strong>Client</strong></td><td>${clientId || '—'}</td></tr>
+                ${stripeRetrieveError ? `<tr><td><strong>Stripe lookup error</strong></td><td>${stripeRetrieveError}</td></tr>` : ''}
+            </table>
+            <p style="color:#666;font-size:12px;">Automated alert from Finnep Event App. Duplicate alerts for the same PaymentIntent are suppressed for 24h.</p>
+        `,
+        text: `
+Checkout snapshot missing at payment-success
+
+PaymentIntent ID: ${details.paymentIntentId || 'unknown'}
+Customer email: ${details.customerEmail || 'unknown'}
+Event ID: ${details.eventId || 'unknown'}
+Event name: ${details.eventName || '—'}
+Merchant ID: ${details.merchantId || '—'} / ${details.externalMerchantId || '—'}
+Stripe status: ${details.stripeStatus || 'not retrieved'}
+Stripe amount: ${details.stripeAmountCents != null ? `${Number(details.stripeAmountCents) / 100} ${details.stripeCurrency || ''}` : 'unknown'}
+Place IDs: ${(details.placeIds || []).join(', ') || 'none'}
+Client: ${details.clientId || '—'}
+${details.stripeRetrieveError ? `Stripe lookup error: ${details.stripeRetrieveError}` : ''}
+
+Recommended action: verify the PaymentIntent in Stripe, then manually issue the ticket or process a refund.
+        `.trim(),
+    };
+
+    await forward(emailData);
+    info('[sendCheckoutSnapshotExpiredAdminEmail] Admin alert sent', {
+        paymentIntentId: details.paymentIntentId,
+        recipient,
+    });
+};
+
 /*
 module.exports = {
     forward,
