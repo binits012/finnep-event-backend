@@ -274,8 +274,8 @@ function buildApiCacheBehavior(bffOriginId) {
 		ForwardedValues: {
 			QueryString: true,
 			Headers: {
-				Quantity: 7,
-				Items: ['Origin', 'Referer', 'Host', 'Content-Type', 'Accept', 'Authorization', 'x-market-country-code']
+				Quantity: 6,
+				Items: ['Origin', 'Referer', 'Content-Type', 'Accept', 'Authorization', 'x-market-country-code']
 			},
 			Cookies: { Forward: 'none' },
 			QueryStringCacheKeys: { Quantity: 0 }
@@ -306,7 +306,10 @@ async function ensureDistributionApiBehavior({ distributionId, merchantId }) {
 	} else {
 		origins[existingOriginIndex] = {
 			...origins[existingOriginIndex],
-			OriginCustomHeaders: bffOrigin.OriginCustomHeaders
+			DomainName: bffOrigin.DomainName,
+			OriginPath: bffOrigin.OriginPath,
+			OriginCustomHeaders: bffOrigin.OriginCustomHeaders,
+			CustomOriginConfig: bffOrigin.CustomOriginConfig
 		}
 	}
 	config.Origins = { Quantity: origins.length, Items: origins }
