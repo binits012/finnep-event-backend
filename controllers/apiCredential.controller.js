@@ -5,7 +5,8 @@ import { INTERNAL_SERVER_ERROR, RESOURCE_NOT_FOUND } from '../applicationTexts.j
 import { refreshPartnerCorsOriginsFromMerchants } from '../util/corsAllowlist.js'
 import {
 	publishMerchantSiloProvisionedSafe,
-	publishMerchantSiloDeploymentRequestedSafe
+	publishMerchantSiloDeploymentRequestedSafe,
+	publishMerchantSiloDeploymentStatusChangedSafe
 } from '../util/merchantEventPublisher.js'
 import { normalizeSiloSettings, getSiloHostingSummaryForAdmin } from '../util/siloSettings.js'
 import * as model from '../model/mongoModel.js'
@@ -173,27 +174,46 @@ export const revokeApiCredential = async (req, res) => {
 export const retrySiloDeployment = async (req, res) => {
 	try {
 		const merchantId = req.params.id
-		const result = await Merchant.requeueSiloProvisioning(merchantId)
-		if (!result) {
+		const updatedBy = req.user?.email || 'cms-silo-deployment-retry'
+
+		const reconcile = await Merchant.reconcileSiloProvisioningFromAws(merchantId)
+		if (!reconcile) {
 			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({ error: RESOURCE_NOT_FOUND })
 		}
-		if (result.error === 'SILO_NOT_ENABLED') {
+		if (reconcile.error === 'SILO_NOT_ENABLED') {
 			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
 				message: 'Issue active API credentials before retrying silo hosting provisioning',
 				error: 'SILO_NOT_ENABLED'
 			})
 		}
 
+		if (reconcile.reconciled) {
+			await publishMerchantSiloDeploymentStatusChangedSafe({
+				merchant: reconcile.merchant,
+				action: 'provision',
+				status: 'provisioned',
+				deployment: reconcile.deployment
+			})
+
+			const siloHosting = await loadSiloHostingSummary(merchantId)
+			return res.status(consts.HTTP_STATUS_OK).json({
+				reconciled: true,
+				siloHosting
+			})
+		}
+
+		const result = await Merchant.requeueSiloProvisioning(merchantId)
 		await notifySiloDeploymentRequest(
 			merchantId,
 			result.deploymentAction,
-			req.user?.email || 'cms-silo-deployment-retry'
+			updatedBy
 		)
 
 		const siloHosting = await loadSiloHostingSummary(merchantId)
 		return res.status(consts.HTTP_STATUS_OK).json({
 			retried: true,
-			siloHosting
+			siloHosting,
+			reconcileIssues: reconcile.issues || []
 		})
 	} catch (err) {
 		error(err)

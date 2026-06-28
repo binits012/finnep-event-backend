@@ -569,6 +569,97 @@ export async function attachSiloCloudFrontDynamicRoutes(distributionId) {
 	await ensureDistributionDynamicRoutesFunction(distributionId)
 }
 
+function bffOriginHasRequiredHeaders(origin, merchantId) {
+	if (!origin) return false
+	const headers = origin.CustomHeaders?.Items || origin.OriginCustomHeaders?.Items || []
+	const byName = new Map(headers.map((item) => [String(item.HeaderName || '').toLowerCase(), item.HeaderValue]))
+	if (byName.get('x-silo-merchant-id') !== String(merchantId)) return false
+	const attestationSecret = getSiloBffOriginSecret()
+	if (attestationSecret && byName.get(SILO_CF_ATTESTATION_HEADER.toLowerCase()) !== attestationSecret) {
+		return false
+	}
+	return true
+}
+
+/**
+ * Read-only check: S3 bucket + CloudFront distribution + BFF wiring already healthy.
+ * Used by CMS Re-sync to reconcile Mongo/EMS status without a destructive UpdateDistribution.
+ */
+export async function inspectSiloDeploymentAws({ merchantId, existingDeployment = {} }) {
+	assertAwsCredentials()
+	const issues = []
+	const bucketName = existingDeployment.s3Bucket || buildBucketName(merchantId)
+	const distributionId = existingDeployment.cloudfrontDistributionId || ''
+
+	if (!distributionId) {
+		issues.push('cloudfrontDistributionId is missing')
+	}
+
+	try {
+		await s3Client.send(new HeadBucketCommand({ Bucket: bucketName }))
+	} catch {
+		issues.push(`S3 bucket not reachable: ${bucketName}`)
+	}
+
+	let bucketRegion = existingDeployment.s3Region || ''
+	if (!bucketRegion) {
+		try {
+			bucketRegion = await resolveBucketRegion(bucketName)
+		} catch {
+			issues.push(`Could not resolve bucket region: ${bucketName}`)
+		}
+	}
+
+	let domainName = existingDeployment.cloudfrontDomainName || ''
+	let distributionEnabled = false
+
+	if (distributionId) {
+		try {
+			const described = await cloudFrontClient.send(new GetDistributionCommand({ Id: distributionId }))
+			domainName = described?.Distribution?.DomainName || domainName
+			distributionEnabled = Boolean(described?.Distribution?.Status === 'Deployed'
+				&& described?.Distribution?.DistributionConfig?.Enabled)
+			if (!distributionEnabled) {
+				issues.push(`CloudFront distribution is not deployed/enabled: ${distributionId}`)
+			}
+		} catch {
+			issues.push(`CloudFront distribution not found: ${distributionId}`)
+		}
+
+		try {
+			const configResponse = await cloudFrontClient.send(
+				new GetDistributionConfigCommand({ Id: distributionId })
+			)
+			const config = configResponse?.DistributionConfig
+			const bffOriginId = `silo-bff-${merchantId}`
+			const bffOrigin = (config?.Origins?.Items || []).find((origin) => origin.Id === bffOriginId)
+			if (!bffOrigin) {
+				issues.push(`CloudFront BFF origin missing: ${bffOriginId}`)
+			} else if (!bffOriginHasRequiredHeaders(bffOrigin, merchantId)) {
+				issues.push('CloudFront BFF origin custom headers are incomplete')
+			}
+
+			const apiBehavior = (config?.CacheBehaviors?.Items || []).find((b) => b.PathPattern === '/api/*')
+			if (!apiBehavior) {
+				issues.push('CloudFront /api/* cache behavior is missing')
+			} else if (apiBehavior.TargetOriginId !== bffOriginId) {
+				issues.push('CloudFront /api/* behavior does not target the BFF origin')
+			}
+		} catch {
+			issues.push(`Could not read CloudFront distribution config: ${distributionId}`)
+		}
+	}
+
+	return {
+		healthy: issues.length === 0,
+		issues,
+		bucketName,
+		bucketRegion,
+		cloudfrontDistributionId: distributionId,
+		cloudfrontDomainName: domainName
+	}
+}
+
 export async function provisionSiloDeploymentAws({ merchantId, existingDeployment = {} }) {
 	assertAwsCredentials()
 	const bucketName = existingDeployment.s3Bucket || buildBucketName(merchantId)

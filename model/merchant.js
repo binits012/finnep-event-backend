@@ -12,6 +12,7 @@ import {
 import { refreshPartnerCorsOriginsFromMerchants } from '../util/corsAllowlist.js'
 import { encryptSiloSmtpPassword } from '../util/siloSmtpCrypto.js';
 import { normalizeSiloSettings } from '../util/siloSettings.js';
+import { inspectSiloDeploymentAws } from '../util/siloDeploymentAws.js';
 
 function attachBffSecret(credential, secret) {
   try {
@@ -161,6 +162,58 @@ export async function syncSiloStorefrontAllowedDomains(merchantId) {
   }
 
   return { changed, merchant };
+}
+
+/**
+ * CMS Re-sync: when AWS infra is already healthy, align Mongo status to provisioned
+ * and sync credential hostnames — no RabbitMQ, no UpdateDistribution.
+ */
+export async function reconcileSiloProvisioningFromAws(merchantId) {
+  const merchant = await model.Merchant.findById(merchantId);
+  if (!merchant) return null;
+  if (!merchantHasActiveApiCredential(merchant)) {
+    return { error: 'SILO_NOT_ENABLED' };
+  }
+
+  const silo = normalizeSiloSettings(merchant.siloSettings || {});
+  const inspection = await inspectSiloDeploymentAws({
+    merchantId: merchant.merchantId,
+    existingDeployment: silo.deployment || {}
+  });
+
+  if (!inspection.healthy) {
+    info(
+      'Silo AWS reconcile skipped — infra not healthy: merchantId=%s issues=%s',
+      merchant.merchantId,
+      inspection.issues.join('; ')
+    );
+    return { reconciled: false, merchant, issues: inspection.issues };
+  }
+
+  const nowIso = new Date().toISOString();
+  silo.deployment = {
+    ...silo.deployment,
+    mode: 'per_merchant',
+    status: 'provisioned',
+    s3Bucket: inspection.bucketName,
+    s3Region: inspection.bucketRegion || silo.deployment?.s3Region || '',
+    cloudfrontDistributionId: inspection.cloudfrontDistributionId,
+    cloudfrontDomainName: inspection.cloudfrontDomainName,
+    lastProvisionedAt: nowIso,
+    lastError: ''
+  };
+  merchant.siloSettings = silo;
+  merchant.updatedAt = new Date();
+  await merchant.save();
+  await syncSiloStorefrontAllowedDomains(merchant._id);
+
+  info('Silo AWS deployment reconciled from live infra: merchantId=%s', merchant.merchantId);
+
+  return {
+    reconciled: true,
+    merchant,
+    deployment: silo.deployment
+  };
 }
 
 /** Re-queue AWS provisioning for CMS ops (enabled merchant with active credentials). */
