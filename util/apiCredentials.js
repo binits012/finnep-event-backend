@@ -72,9 +72,21 @@ export function sanitizeCredentialForResponse(credential) {
 	}
 }
 
+function plainOtherInfo(otherInfo) {
+	if (!otherInfo) return otherInfo
+	if (otherInfo instanceof Map) return Object.fromEntries(otherInfo.entries())
+	if (typeof otherInfo === 'object') return { ...otherInfo }
+	return otherInfo
+}
+
 export function sanitizeMerchantForAdmin(merchant) {
 	if (!merchant) return merchant
-	const obj = typeof merchant.toObject === 'function' ? merchant.toObject() : { ...merchant }
+	const obj = typeof merchant.toObject === 'function'
+		? merchant.toObject({ flattenMaps: true })
+		: { ...merchant }
+	if (obj.otherInfo) {
+		obj.otherInfo = plainOtherInfo(obj.otherInfo)
+	}
 	if (Array.isArray(obj.apiCredentials)) {
 		obj.apiCredentials = obj.apiCredentials.map(sanitizeCredentialForResponse)
 	}

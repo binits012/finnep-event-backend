@@ -86,7 +86,7 @@ export const getMerchantByMerchantId = async (req, res, next) => {
 
                 const merchant = await Merchant.getMerchantByMerchantId(merchantId)
                 if (merchant) {
-                    return res.status(consts.HTTP_STATUS_OK).json(merchant)
+                    return res.status(consts.HTTP_STATUS_OK).json(sanitizeMerchantForAdmin(merchant))
                 } else {
                     return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).send({ error: RESOURCE_NOT_FOUND })
                 }
@@ -168,6 +168,7 @@ export const updateMerchantById = async (req, res, next) => {
                 }
 
                 const updateData = {}
+                const otherInfoPatch = {}
 
                 if (status !== undefined) {
                     if (!['active', 'inactive', 'pending', 'suspended'].includes(status)) {
@@ -192,7 +193,7 @@ export const updateMerchantById = async (req, res, next) => {
                             error: 'INVALID_STRIPE_PLATFORM_FEE'
                         })
                     }
-                    updateData['otherInfo.stripe'] = Math.round(fee)
+                    otherInfoPatch.stripe = Math.round(fee)
                 }
                 if (revolutFee !== undefined) {
                     const fee = Number(revolutFee)
@@ -202,7 +203,7 @@ export const updateMerchantById = async (req, res, next) => {
                             error: 'INVALID_REVOLUT_FEE'
                         })
                     }
-                    updateData['otherInfo.revolut'] = Math.round(fee)
+                    otherInfoPatch.revolut = Math.round(fee)
                 }
                 if (paytrailEnabled !== undefined) {
                     updateData.paytrailEnabled = Boolean(paytrailEnabled)
@@ -242,15 +243,16 @@ export const updateMerchantById = async (req, res, next) => {
                     updateData.nabilEnabled = Boolean(nabilEnabled)
                 }
 
-                if (Object.keys(updateData).length === 0) {
+                if (Object.keys(updateData).length === 0 && Object.keys(otherInfoPatch).length === 0) {
                     return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
                         message: 'No supported merchant fields provided for update',
                         error: 'NO_UPDATE_FIELDS'
                     })
                 }
 
-                // 1. Update merchant
-                const updatedMerchant = await Merchant.updateMerchantById(id, updateData)
+                // 1. Update merchant — scalar fields and otherInfo (Mongoose Map) are
+                // applied in a single atomic save to avoid partial writes.
+                const updatedMerchant = await Merchant.updateMerchantAndOtherInfo(id, updateData, otherInfoPatch)
 
                 if (updatedMerchant) {
                     if (
@@ -377,7 +379,7 @@ export const updateMerchantById = async (req, res, next) => {
                     }
                     }
 
-                    return res.status(consts.HTTP_STATUS_OK).json(updatedMerchant)
+                    return res.status(consts.HTTP_STATUS_OK).json(sanitizeMerchantForAdmin(updatedMerchant))
                 } else {
                     return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).send({ error: RESOURCE_NOT_FOUND })
                 }
@@ -457,7 +459,7 @@ export const addOrUpdateOtherInfo = async (req, res, next) => {
 
             const updatedMerchant = await Merchant.addOrUpdateOtherInfo(id, otherInfo)
             if (updatedMerchant) {
-                return res.status(consts.HTTP_STATUS_OK).json(updatedMerchant)
+                return res.status(consts.HTTP_STATUS_OK).json(sanitizeMerchantForAdmin(updatedMerchant))
             } else {
                 return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).send({ error: RESOURCE_NOT_FOUND })
             }

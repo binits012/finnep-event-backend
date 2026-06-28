@@ -402,32 +402,96 @@ export async function genericSearchMerchant(...searchTerms) {
   }
 }
 
+function ensureOtherInfoMap(merchant) {
+  if (merchant.otherInfo && typeof merchant.otherInfo.get === 'function') {
+    return merchant.otherInfo;
+  }
+
+  const existing = merchant.otherInfo && typeof merchant.otherInfo === 'object'
+    ? merchant.otherInfo
+    : {};
+  merchant.otherInfo = new Map(Object.entries(existing));
+  return merchant.otherInfo;
+}
+
 export async function addOrUpdateOtherInfo(id, otherInfo) {
   try {
     if (!otherInfo || typeof otherInfo !== 'object' || Array.isArray(otherInfo)) {
       throw new Error('otherInfo must be a plain object');
     }
 
-    const updateData = {};
-    for (const [key, value] of Object.entries(otherInfo)) {
-      updateData[`otherInfo.${key}`] = value;
-    }
-
-    if (Object.keys(updateData).length === 0) {
+    const entries = Object.entries(otherInfo);
+    if (entries.length === 0) {
       return model.Merchant.findById(id);
     }
 
-    const updatedMerchant = await model.Merchant.findByIdAndUpdate(
-      id,
-      { $set: updateData },
-      { new: true, runValidators: true },
-    );
-    if (updatedMerchant) {
-      info('OtherInfo added or updated successfully: %s', id);
+    const merchant = await model.Merchant.findById(id);
+    if (!merchant) {
+      return null;
     }
-    return updatedMerchant;
+
+    const map = ensureOtherInfoMap(merchant);
+    for (const [key, value] of entries) {
+      map.set(key, value);
+    }
+
+    merchant.markModified('otherInfo');
+    merchant.updatedAt = Date.now();
+    await merchant.save();
+
+    info('OtherInfo added or updated successfully: %s', id);
+    return merchant;
   } catch (err) {
     error('Error adding or updating otherInfo:', err);
+    throw err;
+  }
+}
+
+/**
+ * Atomically applies scalar field updates and `otherInfo` map merges in a single
+ * document save. `otherInfo` is a Mongoose Map and cannot be persisted reliably via
+ * `findByIdAndUpdate` dot-notation, so both are mutated on a loaded document.
+ *
+ * @param {string} id
+ * @param {object} [updateData] - scalar/nested fields (dot-notation keys supported)
+ * @param {object} [otherInfoPatch] - keys merged into the `otherInfo` map
+ * @returns {Promise<object|null>} updated merchant document, or null if not found
+ */
+export async function updateMerchantAndOtherInfo(id, updateData = {}, otherInfoPatch = {}) {
+  try {
+    const hasScalarUpdates = updateData && Object.keys(updateData).length > 0;
+    const otherInfoEntries = otherInfoPatch ? Object.entries(otherInfoPatch) : [];
+
+    if (!hasScalarUpdates && otherInfoEntries.length === 0) {
+      return model.Merchant.findById(id);
+    }
+
+    const merchant = await model.Merchant.findById(id);
+    if (!merchant) {
+      return null;
+    }
+
+    if (hasScalarUpdates) {
+      for (const [key, value] of Object.entries(updateData)) {
+        merchant.set(key, value);
+      }
+    }
+
+    if (otherInfoEntries.length > 0) {
+      const map = ensureOtherInfoMap(merchant);
+      for (const [key, value] of otherInfoEntries) {
+        map.set(key, value);
+      }
+      merchant.markModified('otherInfo');
+    }
+
+    merchant.updatedAt = Date.now();
+    await merchant.save();
+
+    info('Merchant updated successfully: %s', id);
+    return merchant;
+  } catch (err) {
+    error('Error updating merchant:', err);
     throw err;
   }
 }

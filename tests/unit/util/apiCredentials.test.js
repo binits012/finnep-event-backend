@@ -69,4 +69,15 @@ describe('apiCredentials util', () => {
 		expect(sanitized.apiCredentials[0].keyId).toBe('feb_key_abc')
 		expect(sanitized.apiCredentials[0].secretHash).toBeUndefined()
 	})
+
+	it('flattens otherInfo maps for admin responses', () => {
+		const merchant = {
+			_id: 'm1',
+			name: 'Test',
+			otherInfo: new Map([['stripe', 150]]),
+			apiCredentials: [],
+		}
+		const sanitized = sanitizeMerchantForAdmin(merchant)
+		expect(sanitized.otherInfo).toEqual({ stripe: 150 })
+	})
 })

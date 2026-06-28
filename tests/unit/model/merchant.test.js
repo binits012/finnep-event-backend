@@ -321,20 +321,85 @@ describe('Merchant Model', () => {
   });
 
   describe('addOrUpdateOtherInfo', () => {
-    it('merges otherInfo keys without replacing the whole map', async () => {
+    it('merges otherInfo keys on the Mongoose Map without replacing it', async () => {
       const merchantId = '507f1f77bcf86cd799439011';
-      const updatedDoc = { _id: merchantId, otherInfo: new Map([['stripe', 150], ['timezone', 'Australia/Sydney']]) };
-      mockMerchantModel.findByIdAndUpdate.mockResolvedValue(updatedDoc);
+      const otherInfoMap = new Map([['timezone', 'Australia/Sydney']]);
+      const merchantDoc = {
+        _id: merchantId,
+        otherInfo: otherInfoMap,
+        markModified: jest.fn(),
+        save: jest.fn().mockResolvedValue(undefined),
+      };
+      mockMerchantModel.findById.mockResolvedValue(merchantDoc);
 
       const result = await Merchant.addOrUpdateOtherInfo(merchantId, { stripe: 150 });
 
-      expect(mockMerchantModel.findByIdAndUpdate).toHaveBeenCalledWith(
-        merchantId,
-        { $set: { 'otherInfo.stripe': 150 } },
-        { new: true, runValidators: true },
-      );
-      expect(result).toBe(updatedDoc);
+      expect(mockMerchantModel.findById).toHaveBeenCalledWith(merchantId);
+      expect(otherInfoMap.get('stripe')).toBe(150);
+      expect(otherInfoMap.get('timezone')).toBe('Australia/Sydney');
+      expect(merchantDoc.markModified).toHaveBeenCalledWith('otherInfo');
+      expect(merchantDoc.save).toHaveBeenCalled();
+      expect(result).toBe(merchantDoc);
       expect(mockLogger.info).toHaveBeenCalled();
+    });
+  });
+
+  describe('updateMerchantAndOtherInfo', () => {
+    it('applies scalar fields and otherInfo in a single save', async () => {
+      const merchantId = '507f1f77bcf86cd799439011';
+      const otherInfoMap = new Map([['revolut', 0]]);
+      const merchantDoc = {
+        _id: merchantId,
+        otherInfo: otherInfoMap,
+        set: jest.fn(),
+        markModified: jest.fn(),
+        save: jest.fn().mockResolvedValue(undefined),
+      };
+      mockMerchantModel.findById.mockResolvedValue(merchantDoc);
+
+      const result = await Merchant.updateMerchantAndOtherInfo(
+        merchantId,
+        { status: 'active' },
+        { stripe: 150 }
+      );
+
+      expect(mockMerchantModel.findById).toHaveBeenCalledWith(merchantId);
+      expect(merchantDoc.set).toHaveBeenCalledWith('status', 'active');
+      expect(otherInfoMap.get('stripe')).toBe(150);
+      expect(otherInfoMap.get('revolut')).toBe(0);
+      expect(merchantDoc.markModified).toHaveBeenCalledWith('otherInfo');
+      expect(merchantDoc.save).toHaveBeenCalledTimes(1);
+      expect(result).toBe(merchantDoc);
+    });
+
+    it('returns null when the merchant does not exist', async () => {
+      mockMerchantModel.findById.mockResolvedValue(null);
+
+      const result = await Merchant.updateMerchantAndOtherInfo(
+        'missing-id',
+        { status: 'active' },
+        {}
+      );
+
+      expect(result).toBeNull();
+    });
+
+    it('does not mark otherInfo modified when no otherInfo patch is provided', async () => {
+      const merchantId = '507f1f77bcf86cd799439011';
+      const merchantDoc = {
+        _id: merchantId,
+        otherInfo: new Map(),
+        set: jest.fn(),
+        markModified: jest.fn(),
+        save: jest.fn().mockResolvedValue(undefined),
+      };
+      mockMerchantModel.findById.mockResolvedValue(merchantDoc);
+
+      await Merchant.updateMerchantAndOtherInfo(merchantId, { status: 'suspended' }, {});
+
+      expect(merchantDoc.set).toHaveBeenCalledWith('status', 'suspended');
+      expect(merchantDoc.markModified).not.toHaveBeenCalled();
+      expect(merchantDoc.save).toHaveBeenCalledTimes(1);
     });
   });
 });
