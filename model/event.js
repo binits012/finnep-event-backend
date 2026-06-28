@@ -327,6 +327,45 @@ export const decrementTicketTypeAvailable = async (eventId, ticketTypeId, admiss
     return { success: true, admissionQuantity: qty };
 };
 
+/**
+ * Atomically increment ticket type available headcount (refund / cancellation reversal).
+ */
+export const incrementTicketTypeAvailable = async (eventId, ticketTypeId, admissionQuantity, ticketTypeConfig = null) => {
+    const qty = parseInt(String(admissionQuantity), 10);
+    if (!ticketTypeId || !Number.isFinite(qty) || qty < 1) {
+        return { success: false, reason: 'invalid_args' };
+    }
+
+    if (ticketTypeConfig && parseAvailableHeadcount(ticketTypeConfig) == null) {
+        return { success: true, skipped: true };
+    }
+
+    const ticketTypeObjectId = new mongoose.Types.ObjectId(ticketTypeId);
+
+    const updated = await model.Event.findOneAndUpdate(
+        {
+            _id: eventId,
+            'ticketInfo._id': ticketTypeObjectId
+        },
+        { $inc: { 'ticketInfo.$.available': qty } },
+        { new: true }
+    ).exec();
+
+    if (!updated) {
+        return { success: false, reason: 'ticket_type_not_found' };
+    }
+
+    const ticketType = updated.ticketInfo?.find((t) => String(t._id) === String(ticketTypeId));
+    if (ticketType && ticketType.status === 'sold_out' && ticketType.available > 0) {
+        await model.Event.updateOne(
+            { _id: eventId, 'ticketInfo._id': ticketTypeObjectId },
+            { $set: { 'ticketInfo.$.status': 'active' } }
+        ).exec();
+    }
+
+    return { success: true, admissionQuantity: qty };
+};
+
 export const decrementCouponUsesLeft = async (eventMongoId, couponCode) => {
     const normalized = String(couponCode || '').trim().toUpperCase();
     if (!eventMongoId || !normalized) {

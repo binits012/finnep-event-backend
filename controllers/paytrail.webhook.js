@@ -10,6 +10,7 @@ import { info, error } from '../model/logger.js';
 import * as consts from '../const.js';
 import { buildSiloTicketEmailOptionsFromPaymentData } from '../util/siloCheckoutEmail.js';
 import { publishTicketCreationEvent } from './front.controller.js';
+import { publishPaymentCompleted, resolvePlatformFeeCents } from '../services/accountingEventPublisher.js';
 import {
     applyTicketQuantitiesToTicketInfo,
     findTicketTypeConfig,
@@ -355,6 +356,12 @@ async function _createTicketFromPaytrailPaymentBody(paymentData, transactionId, 
         const locale = paymentData.locale ? normalizeLocale(paymentData.locale) : 'en-US';
         const merchant = await Merchant.getMerchantById(paymentData.merchantId);
         const emailOptions = buildSiloTicketEmailOptionsFromPaymentData(merchant, paymentData);
+        
+        // Log silo email decision for debugging
+        const isSiloEmail = emailOptions.channel === 'silo';
+        const logContext = `ticketId=${ticket._id}, merchantId=${paymentData.merchantId}, checkoutHostname=${paymentData.checkoutHostname}, isSiloEmail=${isSiloEmail}`;
+        info(`[createTicketFromPaytrailPayment] Email options resolved: ${logContext}`);
+        
         const emailPayload = await ticketMaster.createEmailPayload(event, ticket, paymentData.email, otp, locale, emailOptions);
 
         try {
@@ -375,6 +382,31 @@ async function _createTicketFromPaytrailPaymentBody(paymentData, transactionId, 
     } catch (publishError) {
         error(`Failed to publish ticket creation event for ticket: ${ticket._id}`, { error: publishError.message });
         // Don't fail the entire operation if event publishing fails
+    }
+
+    try {
+        const merchant = await Merchant.getMerchantById(paymentData.merchantId);
+        const grossCents = Number(paymentData.amount || 0);
+        const platformFeeCents = resolvePlatformFeeCents({
+            method: 'paytrail',
+            grossCents,
+            commission: paymentData.commission,
+            commissionRate: paymentData.commissionRate,
+        });
+        await publishPaymentCompleted({
+            ticket,
+            event,
+            merchant,
+            method: 'paytrail',
+            externalPaymentId: transactionId,
+            grossCents,
+            platformFeeCents,
+            pspFeeCents: 0,
+            checkoutChannel: paymentData.siloHostname ? 'silo' : 'marketplace',
+            currency: 'eur',
+        });
+    } catch (accountingErr) {
+        error(`Failed to publish accounting payment.completed for ticket: ${ticket._id}`, { error: accountingErr.message });
     }
 
     info(`Ticket created for Paytrail payment: ${ticket._id} (transaction: ${transactionId}, stamp: ${stamp})`);

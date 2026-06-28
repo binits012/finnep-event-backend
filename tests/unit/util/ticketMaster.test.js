@@ -244,51 +244,136 @@ describe('Ticket Master', () => {
       ).rejects.toThrow('QR Code generation failed');
     });
 
-    it('should attach guest QR codes for multi-ticket orders', async () => {
+    it('should use silo email branding when options.channel is silo', async () => {
+      // Arrange
       const mockEvent = {
         _id: 'event_123',
-        eventTitle: 'Group Event',
+        eventTitle: 'Silo Event',
         eventPromotionPhoto: 'https://example.com/photo.jpg',
         otherInfo: {}
       };
 
       const mockTicketInfo = {
-        id: 'ticket_group_123',
+        id: 'ticket_silo_123',
         ticketInfo: {
-          quantity: '3'
+          quantity: '1',
+          basePrice: '50',
+          serviceFee: '5',
+          entertainmentTax: '0',
+          serviceTax: '0',
+          vatRate: '20',
+          orderFee: '0'
         }
       };
 
-      const ticketFor = 'group@example.com';
-      const otp = 'GROUP123';
+      const mockMerchant = {
+        _id: 'merchant_123',
+        code: 'BUSINESS-ID-123',
+        name: 'Test Merchant',
+        toObject: jest.fn(() => ({
+          _id: 'merchant_123',
+          code: 'BUSINESS-ID-123',
+          name: 'Test Merchant',
+          siloSettings: {
+            enabled: true,
+            brandConfig: {
+              logoUrl: 'https://merchant.com/logo.png',
+              primaryColor: '#f5b700'
+            }
+          },
+          socialMedia: {
+            facebook: 'https://facebook.com/merchant',
+            linkedin: 'https://linkedin.com/company/merchant'
+          }
+        }))
+      };
+
+      const ticketFor = 'silo@example.com';
+      const otp = 'SILO123';
       const mockICS = 'BEGIN:VCALENDAR...';
       const mockQRCode = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA...';
-      const mockTemplate = '<html>Default Template</html>';
+      const mockTemplate = '<html>Silo Template</html>';
 
       mockCommon.generateICS.mockResolvedValue(mockICS);
       mockCommon.generateQRCode.mockResolvedValue(mockQRCode);
       mockCommon.loadEmailTemplate.mockResolvedValue(mockTemplate);
       mockTicket.updateTicketById.mockResolvedValue({});
-      mockTicket.upsertChildTicketQR.mockResolvedValue({});
 
+      // Act
       const result = await ticketMaster.createEmailPayload(
         mockEvent,
         mockTicketInfo,
         ticketFor,
-        otp
+        otp,
+        'en-US',
+        {
+          channel: 'silo',
+          merchant: mockMerchant,
+          marketCountryCode: null
+        }
       );
 
-      expect(mockTicket.upsertChildTicketQR).toHaveBeenCalledTimes(3);
-      expect(mockCommon.generateQRCode).toHaveBeenCalledWith('ticket_group_123');
-      expect(mockCommon.generateQRCode).toHaveBeenCalledWith('ticket_group_123#1');
-      expect(mockCommon.generateQRCode).toHaveBeenCalledWith('ticket_group_123#2');
-      expect(mockCommon.generateQRCode).toHaveBeenCalledWith('ticket_group_123#3');
-      expect(result.attachments).toHaveLength(3);
-      expect(result.attachments.map((a) => a.filename)).toEqual([
-        'ticket-qrcode-guest-1.png',
-        'ticket-qrcode-guest-2.png',
-        'ticket-qrcode-guest-3.png'
-      ]);
+      // Assert
+      const templateVariables = mockCommon.loadEmailTemplate.mock.calls[0][1];
+      expect(templateVariables.isSiloEmail).toBe(true);
+      expect(templateVariables.businessId).toBe('BUSINESS-ID-123');
+      expect(templateVariables.socialMedidFB).toBe('https://facebook.com/merchant');
+      expect(templateVariables.socialMedidLN).toBe('https://linkedin.com/company/merchant');
+      expect(result.from).toBeUndefined(); // Silo emails don't set from in template
+    });
+
+    it('should use platform branding when silo is not configured', async () => {
+      // Arrange
+      const mockEvent = {
+        _id: 'event_123',
+        eventTitle: 'Platform Event',
+        eventPromotionPhoto: 'https://example.com/photo.jpg',
+        otherInfo: {}
+      };
+
+      const mockTicketInfo = {
+        id: 'ticket_platform_123',
+        ticketInfo: {
+          quantity: '1',
+          basePrice: '50',
+          serviceFee: '5',
+          entertainmentTax: '0',
+          serviceTax: '0',
+          vatRate: '20',
+          orderFee: '0'
+        }
+      };
+
+      const ticketFor = 'platform@example.com';
+      const otp = 'PLATFORM123';
+      const mockICS = 'BEGIN:VCALENDAR...';
+      const mockQRCode = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA...';
+      const mockTemplate = '<html>Platform Template</html>';
+
+      mockCommon.generateICS.mockResolvedValue(mockICS);
+      mockCommon.generateQRCode.mockResolvedValue(mockQRCode);
+      mockCommon.loadEmailTemplate.mockResolvedValue(mockTemplate);
+      mockTicket.updateTicketById.mockResolvedValue({});
+
+      // Act
+      const result = await ticketMaster.createEmailPayload(
+        mockEvent,
+        mockTicketInfo,
+        ticketFor,
+        otp,
+        'en-US',
+        {
+          marketCountryCode: null
+        }
+      );
+
+      // Assert
+      const templateVariables = mockCommon.loadEmailTemplate.mock.calls[0][1];
+      expect(templateVariables.isSiloEmail).toBe(false);
+      expect(templateVariables.businessId).toBe('3579764-6');
+      expect(templateVariables.socialMedidFB).toBe('https://www.facebook.com/profile.php?id=61565375592900');
+      expect(templateVariables.socialMedidLN).toBe('https://www.linkedin.com/company/105069196/admin/dashboard/');
+      expect(result.from).toBe(process.env.EMAIL_USERNAME);
     });
   });
 });

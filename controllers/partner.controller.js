@@ -16,6 +16,10 @@ import {
 import { getPresalePayload } from '../util/presaleToken.js'
 import redisClient from '../model/redisConnect.js'
 import { extractLocaleFromRequest } from '../util/common.js'
+import {
+	resolvePartnerPublicMediaUrl,
+	resolvePartnerThemeMedia
+} from '../util/partnerMediaUrls.js'
 
 function toPublicMerchantProfile(merchant) {
 	if (!merchant) return null
@@ -51,8 +55,12 @@ export const getPartnerMerchant = async (req, res) => {
 		if (!merchant) {
 			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({ error: RESOURCE_NOT_FOUND })
 		}
+		const profile = toPublicMerchantProfile(merchant)
+		if (profile?.logo) {
+			profile.logo = await resolvePartnerPublicMediaUrl(profile.logo)
+		}
 		return res.status(consts.HTTP_STATUS_OK).json({
-			merchant: toPublicMerchantProfile(merchant)
+			merchant: profile
 		})
 	} catch (err) {
 		error(err)
@@ -66,8 +74,9 @@ export const getPartnerTheme = async (req, res) => {
 		if (!merchant) {
 			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({ error: RESOURCE_NOT_FOUND })
 		}
+		const theme = await resolvePartnerThemeMedia(toPartnerThemePayload(merchant))
 		return res.status(consts.HTTP_STATUS_OK).json({
-			theme: toPartnerThemePayload(merchant)
+			theme
 		})
 	} catch (err) {
 		error(err)

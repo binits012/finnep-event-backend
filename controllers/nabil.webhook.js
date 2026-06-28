@@ -1,5 +1,6 @@
 import * as Ticket from '../model/ticket.js';
 import * as Event from '../model/event.js';
+import * as Merchant from '../model/merchant.js';
 import * as hash from '../util/createHash.js';
 import * as ticketMaster from '../util/ticketMaster.js';
 import * as commonUtil from '../util/common.js';
@@ -8,6 +9,7 @@ import { info, error } from '../model/logger.js';
 import * as consts from '../const.js';
 import { queueTicketEmail } from '../workers/emailWorker.js';
 import { publishTicketCreationEvent } from './front.controller.js';
+import { publishPaymentCompleted, resolvePlatformFeeCents } from '../services/accountingEventPublisher.js';
 import {
     applyTicketQuantitiesToTicketInfo,
     findTicketTypeConfig,
@@ -222,6 +224,28 @@ async function _createTicketFromNabilPaymentBody(paymentData, transactionId, sta
         await publishTicketCreationEvent(ticket, event, paymentData, paymentReference);
     } catch (publishError) {
         error(`Failed to publish Nabil ticket creation event: ${ticket._id}`, { error: publishError.message });
+    }
+
+    try {
+        const merchant = await Merchant.getMerchantById(paymentData.merchantId);
+        await publishPaymentCompleted({
+            ticket,
+            event,
+            merchant,
+            method: 'nabil',
+            externalPaymentId: paymentReference || transactionId,
+            grossCents: Number(paymentData.amount || 0),
+            platformFeeCents: resolvePlatformFeeCents({
+                method: 'nabil',
+                grossCents: Number(paymentData.amount || 0),
+                commission: paymentData.commission,
+            }),
+            pspFeeCents: 0,
+            checkoutChannel: paymentData.siloHostname ? 'silo' : 'marketplace',
+            currency: (paymentData.currency || 'npr').toLowerCase(),
+        });
+    } catch (accountingErr) {
+        error(`Failed to publish accounting payment.completed for Nabil ticket: ${ticket._id}`, { error: accountingErr.message });
     }
 
     info(`Ticket created for Nabil payment: ${ticket._id} (transaction: ${transactionId}, stamp: ${stamp})`);

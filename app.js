@@ -18,6 +18,7 @@ import partner from './routes/partner.js'
 //import './util/schedular.js'
 import Stripe from 'stripe'
 import {checkoutSuccess} from './util/paymentActions.js'
+import { handleStripeRefundWebhookEvent } from './util/stripeRefundWebhook.js'
 import { setupQueues } from './rabbitMQ/services/queueSetup.js';
 import { messageConsumer } from './rabbitMQ/services/messageConsumer.js';
 import { rabbitMQ } from './util/rabbitmq.js';
@@ -146,6 +147,11 @@ app.use(compression({
 //app.use(logger('dev'));
 
 app.post('/webhook', express.raw({ type: 'application/json' }), async (request, response, next) => {
+    if (!endpointSecret && process.env.NODE_ENV === 'production') {
+        console.error('STRIPE_WEBHOOK_SECRET is required in production');
+        return response.sendStatus(500);
+    }
+
     let event = request.body;
     // Only verify the event if you have an endpoint secret defined.
     // Otherwise use the basic event deserialized with JSON.parse
@@ -189,6 +195,15 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (request, 
             // handlePaymentMethodAttached(paymentMethod);
             console.log(event.id)
             await checkoutSuccess(event,paymentMetaData)
+            break;
+        case 'refund.updated':
+        case 'charge.refunded':
+            try {
+                await handleStripeRefundWebhookEvent(event);
+            } catch (refundWebhookErr) {
+                console.error('Stripe refund webhook handler failed:', refundWebhookErr);
+                return response.sendStatus(500);
+            }
             break;
         default:
             // Unexpected event type

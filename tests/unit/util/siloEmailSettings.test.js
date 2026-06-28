@@ -7,7 +7,17 @@ describe('siloEmailSettings util', () => {
 		process.env.CRYPTO_KEY = process.env.CRYPTO_KEY || 'test-crypto-key-minimum-32-characters-long'
 	})
 
-	it('detects configured SMTP', () => {
+	it('detects configured SMTP when user is empty but fromEmail is set', () => {
+		const password = encryptSiloSmtpPassword('secret')
+		expect(isSiloSmtpConfigured({
+			smtp: {
+				host: 'smtp.example.com',
+				user: '',
+				fromEmail: 'events@example.com',
+				password
+			}
+		})).toBe(true)
+	})
 		const password = encryptSiloSmtpPassword('secret')
 		expect(isSiloSmtpConfigured({
 			smtp: {

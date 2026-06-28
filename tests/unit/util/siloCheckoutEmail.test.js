@@ -2,7 +2,8 @@ import { describe, it, expect } from '@jest/globals'
 import {
 	extractCheckoutHostname,
 	hostnameMatchesSiloDomain,
-	shouldUseSiloTicketEmail
+	shouldUseSiloTicketEmail,
+	buildSiloTicketEmailOptionsFromPaymentData
 } from '../../../util/siloCheckoutEmail.js'
 
 describe('siloCheckoutEmail', () => {
@@ -20,8 +21,62 @@ describe('siloCheckoutEmail', () => {
 		expect(hostnameMatchesSiloDomain('okazzo.eu', 'merchant.com')).toBe(false)
 	})
 
-	it('uses silo email when merchant silo SMTP is configured and hostname matches', () => {
+	it('uses silo email when silo is enabled and hostname matches', () => {
 		const merchant = {
+			siloSettings: {
+				enabled: true,
+				domain: 'merchant.com'
+			}
+		}
+		expect(shouldUseSiloTicketEmail(merchant, 'localhost')).toBe(true)
+		expect(shouldUseSiloTicketEmail(merchant, 'tickets.merchant.com')).toBe(true)
+		expect(shouldUseSiloTicketEmail(merchant, 'okazzo.eu')).toBe(false)
+	})
+
+	it('matches CloudFront domain when custom silo domain is unset', () => {
+		const merchant = {
+			siloSettings: {
+				enabled: true,
+				domain: '',
+				deployment: {
+					cloudfrontDomainName: 'd2f0530enrkby2.cloudfront.net'
+				}
+			}
+		}
+		expect(shouldUseSiloTicketEmail(merchant, 'd2f0530enrkby2.cloudfront.net')).toBe(true)
+		expect(shouldUseSiloTicketEmail(merchant, 'wrong.cloudfront.net')).toBe(false)
+	})
+
+	it('returns silo options from payment data when configured', () => {
+		const merchant = {
+			_id: 'merchant_123',
+			siloSettings: {
+				enabled: true,
+				domain: 'raagrevolution.okazzo.eu',
+				email: {
+					smtp: {
+						host: 'smtp.example.com',
+						user: 'smtp-user',
+						fromEmail: 'tickets@raagrevolution.okazzo.eu',
+						password: { iv: 'iv', encryptedData: 'data' }
+					}
+				}
+			}
+		}
+		const paymentData = {
+			eventId: 'event_123',
+			checkoutHostname: 'raagrevolution.okazzo.eu'
+		}
+
+		const result = buildSiloTicketEmailOptionsFromPaymentData(merchant, paymentData)
+		expect(result.channel).toBe('silo')
+		expect(result.merchant).toBe(merchant)
+		expect(result.checkoutHostname).toBe('raagrevolution.okazzo.eu')
+	})
+
+	it('returns base options when checkoutHostname missing from payment data', () => {
+		const merchant = {
+			_id: 'merchant_123',
 			siloSettings: {
 				enabled: true,
 				domain: 'merchant.com',
@@ -35,8 +90,51 @@ describe('siloCheckoutEmail', () => {
 				}
 			}
 		}
-		expect(shouldUseSiloTicketEmail(merchant, 'localhost')).toBe(true)
-		expect(shouldUseSiloTicketEmail(merchant, 'tickets.merchant.com')).toBe(true)
-		expect(shouldUseSiloTicketEmail(merchant, 'okazzo.eu')).toBe(false)
+		const paymentData = {
+			eventId: 'event_123'
+			// Missing checkoutHostname
+		}
+
+		const result = buildSiloTicketEmailOptionsFromPaymentData(merchant, paymentData)
+		expect(result.channel).toBeUndefined()
+		expect(result.merchant).toBeUndefined()
+		expect(result.marketCountryCode).toBe(null)
+	})
+
+	it('returns base options when merchant not provided', () => {
+		const paymentData = {
+			eventId: 'event_123',
+			checkoutHostname: 'merchant.com'
+		}
+
+		const result = buildSiloTicketEmailOptionsFromPaymentData(null, paymentData)
+		expect(result.channel).toBeUndefined()
+		expect(result.marketCountryCode).toBe(null)
+	})
+
+	it('returns base options when hostname does not match silo domain', () => {
+		const merchant = {
+			_id: 'merchant_123',
+			siloSettings: {
+				enabled: true,
+				domain: 'merchant.com',
+				email: {
+					smtp: {
+						host: 'smtp.example.com',
+						user: 'smtp-user',
+						fromEmail: 'tickets@merchant.com',
+						password: { iv: 'iv', encryptedData: 'data' }
+					}
+				}
+			}
+		}
+		const paymentData = {
+			eventId: 'event_123',
+			checkoutHostname: 'wrongdomain.com'
+		}
+
+		const result = buildSiloTicketEmailOptionsFromPaymentData(merchant, paymentData)
+		expect(result.channel).toBeUndefined()
+		expect(result.marketCountryCode).toBe(null)
 	})
 })

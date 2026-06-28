@@ -131,4 +131,63 @@ export async function fulfillSeatPurchaseBeforeTicket({
 	return { placeIdsToMarkSold, areaSoldIncrements, unresolvedSelections };
 }
 
+/**
+ * Reverse seat fulfillment after a full refund.
+ */
+export async function reverseSeatPurchaseAfterRefund({
+	event,
+	ticketInfo = {},
+	logPrefix = '[reverseSeatPurchaseAfterRefund]',
+}) {
+	if (!event?.venue?.venueId) {
+		return { placeIdsReleased: [], areaSelectionsReversed: [] };
+	}
+
+	const info = ticketInfo instanceof Map ? Object.fromEntries(ticketInfo) : (ticketInfo || {});
+	const placeIds = [];
+
+	if (Array.isArray(info.placeIds)) {
+		placeIds.push(...info.placeIds);
+	} else if (typeof info.placeIds === 'string' && info.placeIds.trim()) {
+		try {
+			const parsed = JSON.parse(info.placeIds);
+			if (Array.isArray(parsed)) placeIds.push(...parsed);
+			else placeIds.push(info.placeIds);
+		} catch {
+			placeIds.push(info.placeIds);
+		}
+	}
+
+	if (Array.isArray(info.seatTickets)) {
+		for (const seat of info.seatTickets) {
+			if (seat?.placeId) placeIds.push(seat.placeId);
+		}
+	}
+
+	const sectionSelections = Array.isArray(info.sectionSelections)
+		? info.sectionSelections
+		: [];
+
+	const uniquePlaceIds = Array.from(new Set(placeIds.filter((id) => typeof id === 'string' && id.trim())));
+	const eventMongoId = String(event._id || event.id);
+	const eventManifest = await EventManifest.findOne({ eventId: eventMongoId });
+	if (!eventManifest) {
+		error(`${logPrefix} EventManifest not found for event ${eventMongoId}`);
+		return { placeIdsReleased: uniquePlaceIds, areaSelectionsReversed: sectionSelections };
+	}
+
+	const manifestId = eventManifest._id.toString();
+
+	if (sectionSelections.length > 0) {
+		await manifestUpdateService.reverseAreaSelectionsSold(manifestId, sectionSelections);
+	}
+
+	if (uniquePlaceIds.length > 0) {
+		await manifestUpdateService.unmarkSeatsAsSold(manifestId, uniquePlaceIds);
+		info(`${logPrefix} Released ${uniquePlaceIds.length} seat(s) for event ${eventMongoId}`);
+	}
+
+	return { placeIdsReleased: uniquePlaceIds, areaSelectionsReversed: sectionSelections };
+}
+
 export default fulfillSeatPurchaseBeforeTicket;

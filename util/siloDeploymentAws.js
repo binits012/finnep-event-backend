@@ -238,6 +238,8 @@ function buildBffOriginCustomHeaders(merchantId) {
 			HeaderName: SILO_CF_ATTESTATION_HEADER,
 			HeaderValue: attestationSecret
 		})
+	} else {
+		warn('[siloDeploymentAws] SILO_BFF_ORIGIN_SECRET is not set — CloudFront /api/* origin requests will be rejected by FEB')
 	}
 	return { Quantity: items.length, Items: items }
 }
@@ -249,7 +251,7 @@ function buildBffOrigin(merchantId) {
 		Id: `silo-bff-${merchantId}`,
 		DomainName: hostname,
 		OriginPath: SILO_STOREFRONT_BFF_PUBLIC_PATH,
-		OriginCustomHeaders: buildBffOriginCustomHeaders(merchantId),
+		CustomHeaders: buildBffOriginCustomHeaders(merchantId),
 		CustomOriginConfig: {
 			HTTPPort: 80,
 			HTTPSPort: 443,
@@ -261,11 +263,13 @@ function buildBffOrigin(merchantId) {
 	}
 }
 
-function buildApiCacheBehavior(bffOriginId) {
+function buildApiCacheBehavior(bffOriginId, existing = {}) {
 	return {
+		...existing,
 		PathPattern: '/api/*',
 		TargetOriginId: bffOriginId,
 		ViewerProtocolPolicy: 'redirect-to-https',
+		SmoothStreaming: existing.SmoothStreaming ?? false,
 		AllowedMethods: {
 			Quantity: 7,
 			Items: ['GET', 'HEAD', 'OPTIONS', 'PUT', 'POST', 'PATCH', 'DELETE'],
@@ -274,7 +278,7 @@ function buildApiCacheBehavior(bffOriginId) {
 		ForwardedValues: {
 			QueryString: true,
 			Headers: {
-				Quantity: 6,
+				Quantity: 7,
 				Items: ['Origin', 'Referer', 'Content-Type', 'Accept', 'Authorization', 'x-market-country-code']
 			},
 			Cookies: { Forward: 'none' },
@@ -285,7 +289,8 @@ function buildApiCacheBehavior(bffOriginId) {
 		MaxTTL: 0,
 		Compress: true,
 		TrustedSigners: { Enabled: false, Quantity: 0 },
-		TrustedKeyGroups: { Enabled: false, Quantity: 0 }
+		TrustedKeyGroups: { Enabled: false, Quantity: 0 },
+		GrpcConfig: existing.GrpcConfig || { Enabled: false }
 	}
 }
 
@@ -308,7 +313,7 @@ async function ensureDistributionApiBehavior({ distributionId, merchantId }) {
 			...origins[existingOriginIndex],
 			DomainName: bffOrigin.DomainName,
 			OriginPath: bffOrigin.OriginPath,
-			OriginCustomHeaders: bffOrigin.OriginCustomHeaders,
+			CustomHeaders: bffOrigin.CustomHeaders,
 			CustomOriginConfig: bffOrigin.CustomOriginConfig
 		}
 	}
@@ -316,10 +321,12 @@ async function ensureDistributionApiBehavior({ distributionId, merchantId }) {
 
 	const cacheBehaviors = [...(config.CacheBehaviors?.Items || [])]
 	const apiBehaviorIndex = cacheBehaviors.findIndex((behavior) => behavior.PathPattern === '/api/*')
+	const existingApiBehavior = apiBehaviorIndex === -1 ? {} : cacheBehaviors[apiBehaviorIndex]
+	const nextApiBehavior = buildApiCacheBehavior(bffOrigin.Id, existingApiBehavior)
 	if (apiBehaviorIndex === -1) {
-		cacheBehaviors.unshift(buildApiCacheBehavior(bffOrigin.Id))
+		cacheBehaviors.unshift(nextApiBehavior)
 	} else {
-		cacheBehaviors[apiBehaviorIndex] = buildApiCacheBehavior(bffOrigin.Id)
+		cacheBehaviors[apiBehaviorIndex] = nextApiBehavior
 	}
 	config.CacheBehaviors = {
 		Quantity: cacheBehaviors.length,

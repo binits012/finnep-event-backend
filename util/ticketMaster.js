@@ -510,11 +510,6 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
         const geoCode = event.eventLocationGeoCode || venue.geoCode || null;
         const venueMapLink = buildVenueMapLink(venue, geoCode);
 
-        // Extract organizer information (from merchant or venueInfo)
-        const organizerName = merchant.orgName || merchant.name || venueInfo.name || 'Event Organizer';
-        const organizerEmail = merchant.companyEmail || merchant.email || process.env.EMAIL_USERNAME || 'info@finnep.fi';
-        const organizerPhone = merchant.companyPhoneNumber || merchant.phone || '';
-
         // Extract attendee name - ticketFor might be email hash, so prioritize ticketInfo fields
         const attendeeName = getValue(ticketInfoData, 'fullName') ||
                             getValue(ticketInfoData, 'attendeeName') ||
@@ -581,18 +576,24 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
         let businessId;
         let socialMedidFB;
         let socialMedidLN;
+        let organizerName;
+        let organizerEmail;
+        let organizerPhone;
 
         if (useSiloEmail) {
             const siloBranding = resolveSiloEmailBranding(options.merchant);
             companyName = siloBranding.companyName;
             companyLogo = siloBranding.companyLogo;
             brandingContactEmail = siloBranding.brandingContactEmail;
-            businessId = '';
             const merchantObj = options.merchant && typeof options.merchant.toObject === 'function'
                 ? options.merchant.toObject()
                 : (options.merchant || event.merchant || {});
-            socialMedidFB = merchantObj?.socialMedia?.facebook || event.socialMedia?.facebook || '';
-            socialMedidLN = merchantObj?.socialMedia?.linkedin || event.socialMedia?.linkedin || '';
+            businessId = merchantObj?.code || '';
+            socialMedidFB = merchantObj?.socialMedia?.facebook || '';
+            socialMedidLN = merchantObj?.socialMedia?.linkedin || '';
+            organizerName = merchantObj?.orgName || merchantObj?.name || venueInfo.name || 'Event Organizer';
+            organizerEmail = merchantObj?.companyEmail || merchantObj?.email || process.env.EMAIL_USERNAME || 'info@finnep.fi';
+            organizerPhone = merchantObj?.companyPhoneNumber || merchantObj?.phone || '';
         } else {
             const branding = await resolvePlatformBrandingAsync(marketCountryCode);
             companyName = branding.companyName;
@@ -601,6 +602,9 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
             businessId = branding.businessId;
             socialMedidFB = branding.socialMedidFB || event.socialMedia?.facebook;
             socialMedidLN = branding.socialMedidLN || event.socialMedia?.linkedin;
+            organizerName = merchant.orgName || merchant.name || venueInfo.name || 'Event Organizer';
+            organizerEmail = merchant.companyEmail || merchant.email || process.env.EMAIL_USERNAME || 'info@finnep.fi';
+            organizerPhone = merchant.companyPhoneNumber || merchant.phone || '';
         }
 
         // Public transport
@@ -620,6 +624,7 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
             eventPromotionalPhoto: event.eventPromotionPhoto || event.eventPromotionalPhoto || '',
             eventTitle: event.eventTitle || '',
             companyName: companyName,
+            isSiloEmail: useSiloEmail,
 
             // Attendee & Ticket
             attendeeName: attendeeName,
@@ -679,11 +684,14 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
             socialMedidLN: socialMedidLN
         };
 
-        // Check if event has custom email template
+        // Check if event has custom email template.
+        // For silo checkout we intentionally force the shared MJML template so merchant branding
+        // (logo/business/social/support visibility) is applied consistently.
         const emailTemplate = event?.otherInfo?.emailTemplate;
+        const useCustomEventTemplate = Boolean(emailTemplate) && !useSiloEmail;
         let loadedData = null;
 
-        if (emailTemplate) {
+        if (useCustomEventTemplate) {
             // Use custom template with simple string replacement
             loadedData = emailTemplate
                 .replace(/\$eventTitle/g, templateVariables.eventTitle)
@@ -787,8 +795,12 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
  */
 async function deliverTicketEmailPayload(ticketId, emailPayload, options = {}) {
     if (options.channel === 'silo' && options.merchant) {
-        const { sendSiloEmail } = await import('./siloMail.js');
-        await sendSiloEmail(options.merchant, emailPayload);
+        const { sendSiloEmail, resolveSiloSmtpConfig } = await import('./siloMail.js');
+        if (resolveSiloSmtpConfig(options.merchant)) {
+            await sendSiloEmail(options.merchant, emailPayload);
+        } else {
+            await forward(emailPayload);
+        }
     } else {
         await forward(emailPayload);
     }

@@ -238,10 +238,28 @@ export const updateChildTicketQRByValue = async (childQrCodeValue, obj) => {
     ).populate('parentTicketId').populate('event').populate('readBy').exec()
 }
 
+export const getTicketByPaymentIntentId = async (paymentIntentId) => {
+    if (!paymentIntentId) return null;
+    return await model.Ticket.findOne({
+        $or: [
+            { paymentIntentId },
+            { paymentReference: paymentIntentId },
+            { 'ticketInfo.paymentIntentId': paymentIntentId }
+        ]
+    }).populate('event').exec();
+};
+
 export const getChildTicketQRsByParentTicketId = async (parentTicketId) => {
     return await model.ChildTicketQR.find({ parentTicketId, active: true })
         .sort({ childIndex: 1 })
         .select('-qrCode')
         .lean()
         .exec()
+}
+
+export const deactivateChildTicketsByParentId = async (parentTicketId) => {
+    return await model.ChildTicketQR.updateMany(
+        { parentTicketId, active: true },
+        { $set: { active: false } }
+    ).exec();
 }

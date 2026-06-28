@@ -1,6 +1,7 @@
 import { inboxModel } from '../../model/inboxMessage.js';
 import * as ExternalTicketSales from '../../model/externalTicketSales.js';
 import { error, info } from '../../model/logger.js';
+import { publishAccountingExternalSales } from '../../services/accountingEventPublisher.js';
 
 export const handleExternalTicketSalesMessage = async (message) => {
     info('Processing external ticket sales message', {
@@ -120,6 +121,22 @@ export const handleExternalTicketSalesMessage = async (message) => {
         const savedSale = await ExternalTicketSales.saveExternalTicketSale(externalSaleData);
         if (savedSale) {
             info(`External ticket sale saved successfully for event ${externalSaleData.externalEventId}, messageId: ${messageId}`);
+            try {
+                await publishAccountingExternalSales({
+                    externalEventId: externalSaleData.externalEventId,
+                    externalMerchantId: externalSaleData.externalMerchantId,
+                    ticketType: externalSaleData.ticketType,
+                    quantity: externalSaleData.quantity,
+                    unitPriceCents: Math.round(externalSaleData.unitPrice * 100),
+                    grossCents: Math.round(externalSaleData.unitPrice * externalSaleData.quantity * 100),
+                    currency: (externalSaleData.currency || 'EUR').toLowerCase(),
+                    source: externalSaleData.source,
+                    paymentMethod: externalSaleData.paymentMethod,
+                    saleDate: externalSaleData.saleDate?.toISOString?.() || new Date().toISOString(),
+                }, messageId);
+            } catch (relayErr) {
+                error('Failed to relay accounting.external.sales: %s', relayErr?.message || relayErr);
+            }
         } else {
             info(`External ticket sale skipped (duplicate messageId: ${messageId}) for event ${externalSaleData.externalEventId}`);
         }

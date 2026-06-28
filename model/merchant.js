@@ -9,6 +9,7 @@ import {
   normalizeAllowedDomains,
   sanitizeCredentialForResponse
 } from '../util/apiCredentials.js';
+import { refreshPartnerCorsOriginsFromMerchants } from '../util/corsAllowlist.js'
 import { encryptSiloSmtpPassword } from '../util/siloSmtpCrypto.js';
 import { normalizeSiloSettings } from '../util/siloSettings.js';
 
@@ -112,6 +113,54 @@ export async function retryFailedSiloDeploymentIfNeeded(merchantId) {
     merchant,
     deploymentAction: 'provision'
   };
+}
+
+function normalizeStorefrontHostname(value) {
+  if (!value || typeof value !== 'string') return '';
+  return value.trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0];
+}
+
+/** After CloudFront/custom domain is known, add storefront hostnames to active API credentials. */
+export async function syncSiloStorefrontAllowedDomains(merchantId) {
+  const merchant = await model.Merchant.findById(merchantId);
+  if (!merchant) return { changed: false, merchant: null };
+
+  const silo = normalizeSiloSettings(merchant.siloSettings || {});
+  const hostnames = [
+    normalizeStorefrontHostname(silo.deployment?.cloudfrontDomainName),
+    normalizeStorefrontHostname(silo.domain)
+  ].filter(Boolean);
+
+  if (hostnames.length === 0) {
+    return { changed: false, merchant };
+  }
+
+  let changed = false;
+  for (const credential of merchant.apiCredentials || []) {
+    if (credential.status !== 'active') continue;
+    const next = new Set(normalizeAllowedDomains(credential.allowedDomains || []));
+    const beforeSize = next.size;
+    for (const hostname of hostnames) {
+      next.add(hostname);
+    }
+    if (next.size !== beforeSize) {
+      credential.allowedDomains = [...next];
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    merchant.updatedAt = new Date();
+    await merchant.save();
+    await refreshPartnerCorsOriginsFromMerchants();
+    info(
+      'Synced silo storefront hostnames to API credential allowedDomains: merchantId=%s hostnames=%s',
+      merchant.merchantId,
+      hostnames.join(', ')
+    );
+  }
+
+  return { changed, merchant };
 }
 
 /** Re-queue AWS provisioning for CMS ops (enabled merchant with active credentials). */

@@ -28,6 +28,11 @@ export const authenticate = async (req, res, next) => {
 export const hasAdminAccess = (role) =>
 	role === consts.ROLE_ADMIN || role === consts.ROLE_SUPER_ADMIN
 
+export const hasAccountingAccess = (user) =>
+	hasAdminAccess(user?.role) ||
+	user?.role === consts.ROLE_ACCOUNTANT ||
+	user?.canAccessAccounting === true
+
 /**
  * Middleware to check if user has admin or superadmin role
  * Must be used after authenticate middleware
@@ -65,6 +70,27 @@ export const requireSuperAdmin = (req, res, next) => {
 	if (req.user.role !== consts.ROLE_SUPER_ADMIN) {
 		return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
 			message: 'Forbidden: SuperAdmin access required',
+			error: 'INSUFFICIENT_PERMISSIONS'
+		})
+	}
+
+	next()
+}
+
+/**
+ * Middleware for accountant CMS access (accountant role, admin, or canAccessAccounting flag).
+ */
+export const requireAccountant = (req, res, next) => {
+	if (!req.user) {
+		return res.status(consts.HTTP_STATUS_SERVICE_UNAUTHORIZED).json({
+			message: 'Unauthorized',
+			error: 'AUTHENTICATION_REQUIRED'
+		})
+	}
+
+	if (!hasAccountingAccess(req.user)) {
+		return res.status(consts.HTTP_STATUS_SERVICE_FORBIDDEN).json({
+			message: 'Forbidden: Accounting access required',
 			error: 'INSUFFICIENT_PERMISSIONS'
 		})
 	}

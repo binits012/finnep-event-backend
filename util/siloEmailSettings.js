@@ -53,12 +53,20 @@ export function normalizeSiloEmail(incoming = {}, existing = {}) {
 	}
 }
 
+/** SMTP auth user; many providers use the same address as fromEmail. */
+export function resolveSiloSmtpAuthUser(smtp) {
+	if (!smtp || typeof smtp !== 'object') return ''
+	const user = typeof smtp.user === 'string' ? smtp.user.trim() : ''
+	if (user) return user
+	return typeof smtp.fromEmail === 'string' ? smtp.fromEmail.trim().toLowerCase() : ''
+}
+
 export function isSiloSmtpConfigured(emailSettings) {
 	const smtp = emailSettings?.smtp
 	if (!smtp) return false
 	return Boolean(
 		smtp.host
-		&& smtp.user
+		&& resolveSiloSmtpAuthUser(smtp)
 		&& smtp.fromEmail
 		&& hasEncryptedSiloSmtpPassword(smtp.password)
 	)

@@ -6,6 +6,10 @@ import {
 	sendSiloBffError
 } from '../util/siloStorefrontBffProxy.js'
 import { assertSiloBffOriginAllowed } from '../util/siloBffOriginGuard.js'
+import {
+	resolvePartnerPublicMediaUrl,
+	resolvePartnerThemeMedia
+} from '../util/partnerMediaUrls.js'
 
 const router = express.Router()
 
@@ -30,6 +34,9 @@ async function withMerchant(req, res, handler) {
 router.get('/api/merchant', (req, res) => {
 	withMerchant(req, res, async ({ credential }) => {
 		const data = await partnerFetchForSiloBff(credential, { path: '/partner/v1/merchant' })
+		if (data?.merchant?.logo) {
+			data.merchant.logo = await resolvePartnerPublicMediaUrl(data.merchant.logo)
+		}
 		res.json(data)
 	})
 })
@@ -37,6 +44,9 @@ router.get('/api/merchant', (req, res) => {
 router.get('/api/theme', (req, res) => {
 	withMerchant(req, res, async ({ credential }) => {
 		const data = await partnerFetchForSiloBff(credential, { path: '/partner/v1/theme' })
+		if (data?.theme) {
+			data.theme = await resolvePartnerThemeMedia(data.theme)
+		}
 		res.json(data)
 	})
 })

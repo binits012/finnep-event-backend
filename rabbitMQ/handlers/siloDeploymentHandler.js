@@ -8,6 +8,7 @@ import {
 	getPlannedSiloBucketName
 } from '../../util/siloDeploymentAws.js'
 import { publishMerchantSiloDeploymentStatusChangedSafe } from '../../util/merchantEventPublisher.js'
+import { syncSiloStorefrontAllowedDomains } from '../../model/merchant.js'
 
 function buildDeploymentState(existing, patch) {
 	return {
@@ -76,6 +77,9 @@ export async function handleSiloDeploymentRequest(message) {
 			})
 
 		await updateMerchantDeploymentState(merchant, result)
+		if (action === 'provision' && result.status === 'provisioned') {
+			await syncSiloStorefrontAllowedDomains(merchant._id)
+		}
 		await publishStatus(merchant, action, result.status)
 
 		info('Handled MerchantSiloDeploymentRequested', {

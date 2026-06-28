@@ -567,7 +567,16 @@ const ticketSchema = new mongoose.Schema({
 	paytrailStamp: { type: String }, // Paytrail stamp (reference)
 	paytrailSubMerchantId: { type: String }, // Sub-merchant for this transaction
 	nabilTransactionId: { type: String },
-	nabilStamp: { type: String }
+	nabilStamp: { type: String },
+
+	paymentIntentId: { type: String },
+	paymentStatus: {
+		type: String,
+		enum: ['paid', 'partially_refunded', 'refunded'],
+		default: 'paid'
+	},
+	refundedAt: { type: Date },
+	refundAmount: { type: Number, default: 0 }
 })
 
 // Add indexes for Paytrail transaction lookups
@@ -576,6 +585,8 @@ ticketSchema.index({ paytrailSubMerchantId: 1 });
 ticketSchema.index({ nabilStamp: 1 });
 ticketSchema.index({ nabilTransactionId: 1 });
 ticketSchema.index({ paymentReference: 1 });
+ticketSchema.index({ paymentIntentId: 1 });
+ticketSchema.index({ paymentStatus: 1 });
 ticketSchema.index({ createdAt: -1 });
 ticketSchema.index({ isRead: 1, readAt: -1 });
 ticketSchema.index({ isSend: 1, createdAt: 1 });
@@ -667,6 +678,36 @@ const paymentSchema = new mongoose.Schema({
 	ticket: {type: mongoose.Schema.Types.ObjectId, ref: 'Ticket', required:true },
 	updatedAt: { type: Date, default: Date.now },
 })
+
+const refundSchema = new mongoose.Schema({
+	createdAt: { type: Date, default: Date.now },
+	stripeRefundId: { type: String, required: true, unique: true },
+	stripeChargeId: { type: String },
+	paymentIntentId: { type: String, required: true, index: true },
+	amount: { type: Number, required: true },
+	currency: { type: String, default: 'eur' },
+	status: { type: String, enum: ['pending', 'succeeded', 'failed', 'canceled'], default: 'pending' },
+	reason: { type: String },
+	source: { type: String, enum: ['dashboard', 'api', 'unknown'], default: 'unknown' },
+	initiatedBy: { type: String },
+	stripeAccount: { type: String },
+	ticket: { type: mongoose.Schema.Types.ObjectId, ref: 'Ticket' },
+	event: { type: mongoose.Schema.Types.ObjectId, ref: 'Event' },
+	merchant: { type: mongoose.Schema.Types.ObjectId, ref: 'Merchant' },
+	rawEvent: { type: mongoose.Schema.Types.Mixed },
+	stripeEventId: { type: String },
+	applicationStatus: {
+		type: String,
+		enum: ['processing', 'completed', 'failed'],
+		default: 'processing'
+	},
+	reversalErrors: [{ type: String }],
+	processedAt: { type: Date },
+	idempotencyKey: { type: String }
+})
+
+refundSchema.index({ event: 1, processedAt: -1 })
+refundSchema.index({ merchant: 1, processedAt: -1 })
 
 
 
@@ -1504,7 +1545,7 @@ const schemas = [
 	inboxMessageSchema,
 	outboxMessageSchema,
 	merchantSchema,
-	orderTicketSchema,paymentSchema,settingSchema,ticketSchema,messageSchema,photoSchema,photoTypeSchema,
+	orderTicketSchema,paymentSchema,refundSchema,settingSchema,ticketSchema,messageSchema,photoSchema,photoTypeSchema,
 	notificationSchema,notificationTypeSchema,tokenSchema,eventSchema,timeBasedPriceSchema,eventTypeSchema,
 	socialMediaSchema,contactSchema,cryptoSchema,roleSchema, userSchema, ticketAnalyticsSchema, externalTicketSalesSchema,
 	venueSchema, manifestSchema, eventManifestSchema, childTicketQrSchema
@@ -1520,6 +1561,7 @@ export const InboxMessage = mongoose.model('InboxMessage', inboxMessageSchema);
 export const OutboxMessage = mongoose.model('OutboxMessage', outboxMessageSchema);
 export const OrderTicket = mongoose.model('OrderTicket',orderTicketSchema)
 export const Payment = mongoose.model('Payment', paymentSchema)
+export const Refund = mongoose.model('Refund', refundSchema)
 export const Setting = mongoose.model('Setting', settingSchema)
 export const Ticket = new mongoose.model('Ticket',ticketSchema)
 export const ChildTicketQR = mongoose.model('ChildTicketQR', childTicketQrSchema)

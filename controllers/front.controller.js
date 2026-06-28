@@ -24,6 +24,7 @@ import {
 import { computeTicketLinePricing, roundMoney, moneyPercentOfExactSum, moneyPercentOf, moneyAdd } from '../util/money.js'
 import * as sendMail from '../util/sendMail.js'
 import { isPlatformStripeAccount } from '../util/stripePlatform.js'
+import { getMerchantConfiguredStripePlatformFeeCents, resolveStripePlatformFeeCents } from '../util/merchantPlatformFee.js'
 import Stripe from 'stripe'
 const stripe = new Stripe(process.env.STRIPE_KEY)
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET
@@ -715,6 +716,25 @@ export const completeOrderTicket = async (req, res, next) => {
                     updatedAt: Date.now(),
                     ticket: ticket.id
                 });
+
+                try {
+                    const { publishPaymentCompleted } = await import('../services/accountingEventPublisher.js');
+                    const paymentIntentId = sessionDetails.payment_intent || sessionDetails.id;
+                    await publishPaymentCompleted({
+                        ticket: ticketData || ticket,
+                        event,
+                        merchant: ticketInfo.merchantId ? { _id: ticketInfo.merchantId, merchantId: ticketInfo.externalMerchantId } : null,
+                        method: 'stripe',
+                        externalPaymentId: String(paymentIntentId),
+                        grossCents: Number(sessionDetails.amount_total || 0),
+                        platformFeeCents: 0,
+                        pspFeeCents: 0,
+                        checkoutChannel: 'marketplace',
+                        currency: (sessionDetails.currency || 'eur').toLowerCase(),
+                    });
+                } catch (accountingErr) {
+                    error('Failed to publish accounting payment.completed for legacy checkout session', { error: accountingErr?.message });
+                }
 
                 return res.status(consts.HTTP_STATUS_CREATED).json({ data: ticketData });
 
@@ -2184,6 +2204,24 @@ const completeZeroAmountCheckout = async (req, res, { metadata, parsedMetadata, 
     } catch (publishError) {
         console.error('[completeZeroAmountCheckout] Failed to publish ticket creation event:', publishError);
     }
+
+    try {
+        const { publishPaymentCompleted } = await import('../services/accountingEventPublisher.js');
+        await publishPaymentCompleted({
+            ticket,
+            event,
+            merchant,
+            method: 'free',
+            externalPaymentId: paymentReference || `free:${ticket._id}`,
+            grossCents: 0,
+            platformFeeCents: 0,
+            pspFeeCents: 0,
+            checkoutChannel: fulfillmentMetadata.siloHostname ? 'silo' : 'marketplace',
+            currency: (currency || 'eur').toLowerCase(),
+        });
+    } catch (accountingErr) {
+        console.error('[completeZeroAmountCheckout] Failed to publish accounting payment.completed:', accountingErr);
+    }
 };
 
 export const createPaymentIntent = async (req, res, next) => {
@@ -2471,7 +2509,18 @@ export const createPaymentIntent = async (req, res, next) => {
                 stripeAccount: merchant.stripeAccount
             };
         } else {
-            // Platform account - no fees
+            const configuredPlatformFee = Math.round(Number(
+                (typeof merchant?.otherInfo?.get === 'function'
+                    ? merchant.otherInfo.get('stripe')
+                    : merchant?.otherInfo?.stripe) ?? 0
+            ));
+            const platformFeeMetadata = Number.isFinite(configuredPlatformFee) && configuredPlatformFee > 0
+                ? {
+                    platformFee: configuredPlatformFee.toString(),
+                    chargeType: 'platform',
+                }
+                : {};
+            // Platform account - no Stripe application_fee_amount, but record fee for accounting
             stripePaymentIntentPayload = {
                 amount: baseAmount,
                 currency: currency.toLowerCase(),
@@ -2484,7 +2533,8 @@ export const createPaymentIntent = async (req, res, next) => {
                     version: '1.0',
                     serverCalculatedTotal: expectedPrice.totalAmount.toString(),
                     clientId: clientId,
-                    locale: locale // Store locale for email templates
+                    locale: locale, // Store locale for email templates
+                    ...platformFeeMetadata,
                 },
                 payment_method_types: getCheckoutPaymentIntentMethodTypes(),
             };
@@ -2856,6 +2906,7 @@ const _createPaytrailPaymentInternal = async (req, res, next, { redirectSuccessU
         };
         console.log('[createPaytrailPayment] Storing in Redis:', {
             stamp: paytrailPayment.stamp,
+            checkoutHostname: redisPaymentData.checkoutHostname,
             hasBasePrice: !!redisPaymentData.basePrice,
             hasServiceFee: !!redisPaymentData.serviceFee,
             basePrice: redisPaymentData.basePrice,
@@ -4444,7 +4495,12 @@ export const handlePaymentSuccess = async (req, res, next) => {
             country: sanitizedMetadata.country || null,
             // Store total values for seated events with different ticket types
             totalBasePrice: sanitizedMetadata.totalBasePrice !== undefined ? sanitizedMetadata.totalBasePrice : null,
-            totalServiceFee: sanitizedMetadata.totalServiceFee !== undefined ? sanitizedMetadata.totalServiceFee : null
+            totalServiceFee: sanitizedMetadata.totalServiceFee !== undefined ? sanitizedMetadata.totalServiceFee : null,
+            platformFee: resolveStripePlatformFeeCents({
+                paymentIntent,
+                stripeMetadata,
+                merchant,
+            }) || null,
         };
 
         const ticketTypeConfig = findTicketTypeConfig(event, sanitizedMetadata.ticketId);
@@ -4675,6 +4731,13 @@ export const handlePaymentSuccess = async (req, res, next) => {
             throw new Error('Ticket creation failed');
         }
 
+        await Ticket.updateTicketById(ticket._id, {
+            paymentProvider: 'stripe',
+            paymentReference: paymentIntentId,
+            paymentIntentId,
+            paymentStatus: 'paid'
+        });
+
         await ticketMaster.provisionGroupChildQRCodes(
             ticket,
             event,
@@ -4785,6 +4848,30 @@ export const handlePaymentSuccess = async (req, res, next) => {
         } catch (publishError) {
             console.error('Failed to publish ticket creation event:', publishError);
             // Don't fail the entire operation if event publishing fails
+        }
+
+        try {
+            const { publishPaymentCompleted } = await import('../services/accountingEventPublisher.js');
+            const checkoutChannel = (fulfillment.siloHostname || sanitizedMetadata.siloHostname) ? 'silo' : 'marketplace';
+            await publishPaymentCompleted({
+                ticket,
+                event,
+                merchant,
+                method: 'stripe',
+                externalPaymentId: paymentIntentId,
+                grossCents: paymentIntent.amount,
+                platformFeeCents: resolveStripePlatformFeeCents({
+                    paymentIntent,
+                    stripeMetadata,
+                    merchant,
+                    fulfillment,
+                }),
+                pspFeeCents: 0,
+                checkoutChannel,
+                currency: paymentIntent.currency,
+            });
+        } catch (accountingErr) {
+            console.error('Failed to publish accounting payment.completed:', accountingErr);
         }
 
     } catch (error) {
@@ -5605,6 +5692,24 @@ export const handleFreeEventRegistration = async (req, res, next) => {
         } catch (publishError) {
             console.error('Failed to publish ticket creation event:', publishError);
             // Don't fail the entire operation if event publishing fails
+        }
+
+        try {
+            const { publishPaymentCompleted } = await import('../services/accountingEventPublisher.js');
+            await publishPaymentCompleted({
+                ticket,
+                event,
+                merchant,
+                method: 'free',
+                externalPaymentId: `free:${ticket._id}`,
+                grossCents: 0,
+                platformFeeCents: 0,
+                pspFeeCents: 0,
+                checkoutChannel: sanitizedData.siloHostname ? 'silo' : 'marketplace',
+                currency: 'eur',
+            });
+        } catch (accountingErr) {
+            console.error('Failed to publish accounting payment.completed:', accountingErr);
         }
 
     } catch (error) {

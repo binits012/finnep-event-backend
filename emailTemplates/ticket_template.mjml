@@ -292,7 +292,8 @@
             </table>
           </mj-text>
 
-          <!-- Support Section -->
+          <!-- Support Section (Platform Only) -->
+          {{#unless isSiloEmail}}
           <mj-text>
             <table width="100%" border="0" cellspacing="0" cellpadding="0" class="info-table">
               <tr>
@@ -307,12 +308,14 @@
               </tr>
             </table>
           </mj-text>
+          {{/unless}}
         </mj-column>
       </mj-section>
 
     </mj-wrapper>
 
     <!-- Footer -->
+    {{#unless isSiloEmail}}
     <mj-section padding="40px 20px 20px 20px">
       <mj-column>
         <mj-text align="center" color="#64748B" font-size="13px" line-height="1.6" padding-bottom="10px">
@@ -324,6 +327,22 @@
         </mj-social>
       </mj-column>
     </mj-section>
+    {{/unless}}
+    
+    <!-- Footer (Silo) -->
+    {{#if isSiloEmail}}
+    <mj-section padding="40px 20px 20px 20px">
+      <mj-column>
+        <mj-text align="center" color="#64748B" font-size="13px" line-height="1.6" padding-bottom="10px">
+          {{t.businessId}} <span style="font-weight: 600; color: #1E293B;">{{businessId}}</span>
+        </mj-text>
+        <mj-social font-size="15px" icon-size="36px" mode="horizontal" padding="0 0 20px 0">
+          <mj-social-element name="facebook" href="{{socialMedidFB}}" />
+          <mj-social-element name="linkedin" href="{{socialMedidLN}}" />
+        </mj-social>
+      </mj-column>
+    </mj-section>
+    {{/if}}
 
   </mj-body>
 </mjml>

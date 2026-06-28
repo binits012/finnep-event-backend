@@ -21,6 +21,7 @@ export const ROLE_ADMIN = 'admin';
 export const ROLE_STAFF = 'staff';
 export const ROLE_MEMBER = 'member';
 export const ROLE_REGIONAL_OPS = 'regionalOps';
+export const ROLE_ACCOUNTANT = 'accountant';
 
 export const ACCESS_SCOPE_GLOBAL = 'global';
 export const ACCESS_SCOPE_REGIONAL = 'regional';

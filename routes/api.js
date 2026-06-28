@@ -19,6 +19,8 @@ import {
 } from '../controllers/paytrail.admin.controller.js'
 import { toggleNabilForMerchant } from '../controllers/nabil.admin.controller.js'
 import * as apiCredential from '../controllers/apiCredential.controller.js'
+import * as refund from '../controllers/refund.controller.js'
+import { authenticateInternalService } from '../middleware/internalServiceAuth.middleware.js'
 
 router.get('/health', api.getHealth)
 
@@ -222,5 +224,8 @@ router.route('/event/:eventId/seats')
 	.post(authenticate, api.reserveSeats)
 router.post('/event/:eventId/seats/confirm', authenticate, api.confirmSeats)
 router.delete('/event/:eventId/seats/release', authenticate, api.releaseSeats)
+
+router.post('/internal/tickets/:ticketId/refund', authenticateInternalService, refund.refundTicket)
+router.get('/event/:eventId/refunds', authenticate, requireAdmin, refund.listEventRefunds)
 
 export default router

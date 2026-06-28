@@ -10,12 +10,13 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { getSignedUrl } from "@aws-sdk/cloudfront-signer";
 
+dotenv.config()
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import { compileMjmlTemplate } from './emailTemplateLoader.js';
 import { loadTranslations, normalizeLocale } from './emailTranslations.js';
 const privateKey = process.env.CLOUDFRONT_PRIVATE_KEY
 const keyPairId = process.env.CLOUDFRONT_KEY_PAIR
-dotenv.config()
 const CHARACTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz123456789';
 
 const websiteHostLabel = (url) => {

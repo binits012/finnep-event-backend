@@ -5,7 +5,7 @@ import { compileMjmlTemplate } from './emailTemplateLoader.js'
 import { loadTranslations, normalizeLocale, getEmailSubject } from './emailTranslations.js'
 import { decryptSiloSmtpPassword } from './siloSmtpCrypto.js'
 import { normalizeSiloSettings } from './siloSettings.js'
-import { isSiloSmtpConfigured, resolveSiloEmailBranding } from './siloEmailSettings.js'
+import { isSiloSmtpConfigured, resolveSiloEmailBranding, resolveSiloSmtpAuthUser } from './siloEmailSettings.js'
 import { error, info } from '../model/logger.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -33,11 +33,12 @@ export function resolveSiloSmtpConfig(merchant) {
 		return null
 	}
 	const fromName = smtp.fromName || obj?.orgName || obj?.name || 'Events'
+	const user = resolveSiloSmtpAuthUser(smtp)
 	return {
 		host: smtp.host,
 		port: smtp.port || 587,
 		secure: Boolean(smtp.secure),
-		user: smtp.user,
+		user,
 		password,
 		fromEmail: smtp.fromEmail,
 		from: `${fromName} <${smtp.fromEmail}>`,

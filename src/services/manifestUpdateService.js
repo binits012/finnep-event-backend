@@ -190,6 +190,85 @@ export class ManifestUpdateService {
 		}
 	}
 
+	/**
+	 * Release seats back to available inventory after a refund.
+	 */
+	async unmarkSeatsAsSold(manifestId, placeIds) {
+		if (!manifestId || !Array.isArray(placeIds) || placeIds.length === 0) {
+			return null;
+		}
+
+		const validPlaceIds = placeIds.filter((id) => typeof id === 'string' && id.trim().length > 0);
+		if (validPlaceIds.length === 0) {
+			return null;
+		}
+
+		const updatedManifest = await EventManifest.findOneAndUpdate(
+			{ _id: manifestId },
+			{
+				$pull: { 'availability.sold': { $in: validPlaceIds } },
+				$set: { updatedAt: new Date() },
+			},
+			{ new: true }
+		);
+
+		if (updatedManifest) {
+			info(`Released ${validPlaceIds.length} seat(s) from sold list in manifest ${manifestId}`);
+		}
+
+		return updatedManifest;
+	}
+
+	/**
+	 * Decrement area/standing sold counters after a refund.
+	 */
+	async reverseAreaSelectionsSold(manifestId, areaSelections) {
+		if (!manifestId || !Array.isArray(areaSelections) || areaSelections.length === 0) {
+			return null;
+		}
+
+		const manifest = await EventManifest.findById(manifestId);
+		if (!manifest) {
+			throw new Error(`Event manifest not found: ${manifestId}`);
+		}
+
+		if (!manifest.availability) {
+			manifest.availability = { sold: [], areaSoldCounts: {} };
+		}
+
+		if (!manifest.availability.areaSoldCounts) {
+			manifest.availability.areaSoldCounts = new Map();
+		}
+
+		if (
+			typeof manifest.availability.areaSoldCounts?.get !== 'function' ||
+			typeof manifest.availability.areaSoldCounts?.set !== 'function'
+		) {
+			const source = manifest.availability.areaSoldCounts || {};
+			const normalized = new Map();
+			for (const [k, v] of Object.entries(source)) {
+				normalized.set(String(k), Number(v || 0) || 0);
+			}
+			manifest.availability.areaSoldCounts = normalized;
+		}
+
+		let totalDecremented = 0;
+		for (const sel of areaSelections) {
+			const sectionId = String(sel?.sectionId || '').trim();
+			const quantity = Number(sel?.quantity || 0);
+			if (!sectionId || quantity <= 0) continue;
+
+			const current = Number(manifest.availability.areaSoldCounts.get(sectionId) || 0);
+			manifest.availability.areaSoldCounts.set(sectionId, Math.max(0, current - quantity));
+			totalDecremented += quantity;
+		}
+
+		manifest.updatedAt = new Date();
+		const updatedManifest = await manifest.save();
+		info(`Decremented area sold counters by ${totalDecremented} on event manifest ${manifestId}`);
+		return updatedManifest;
+	}
+
 
 	/**
 	 * Get event manifest

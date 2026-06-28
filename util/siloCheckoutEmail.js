@@ -1,5 +1,4 @@
 import { normalizeSiloSettings } from './siloSettings.js'
-import { isSiloSmtpConfigured } from './siloEmailSettings.js'
 
 function sanitizeCheckoutHostname(raw) {
 	if (typeof raw !== 'string') return null
@@ -50,15 +49,35 @@ export function isLocalSiloDevHostname(hostname) {
 	return h === 'localhost' || h === '127.0.0.1'
 }
 
+function getSiloCheckoutDomains(silo) {
+	const domains = []
+	if (silo.domain) {
+		const custom = normalizeSiloDomain(silo.domain)
+		if (custom) domains.push(custom)
+	}
+	const cloudfront = silo.deployment?.cloudfrontDomainName
+	if (typeof cloudfront === 'string' && cloudfront.trim()) {
+		const cf = normalizeSiloDomain(cloudfront)
+		if (cf) domains.push(cf)
+	}
+	return [...new Set(domains)]
+}
+
+/** True when checkout originated from this merchant's silo storefront (custom domain, CloudFront, or local dev). */
 export function shouldUseSiloTicketEmail(merchant, checkoutHostname) {
 	const obj = merchant && typeof merchant.toObject === 'function' ? merchant.toObject() : merchant
 	const silo = normalizeSiloSettings(obj?.siloSettings || {})
-	if (!silo.enabled || !isSiloSmtpConfigured(silo.email)) return false
+	if (!silo.enabled) return false
+
 	const hostname = sanitizeCheckoutHostname(checkoutHostname)
 	if (!hostname) return false
+
 	if (isLocalSiloDevHostname(hostname)) return true
-	if (!silo.domain) return false
-	return hostnameMatchesSiloDomain(hostname, silo.domain)
+
+	const domains = getSiloCheckoutDomains(silo)
+	if (domains.length === 0) return false
+
+	return domains.some((domain) => hostnameMatchesSiloDomain(hostname, domain))
 }
 
 export async function resolveTicketEmailOptions({ req, merchant, metadata, marketCountryCode }) {
@@ -73,29 +92,31 @@ export async function resolveTicketEmailOptions({ req, merchant, metadata, marke
 	if (!merchantDoc) return base
 
 	const checkoutHostname = extractCheckoutHostname({ req, metadata })
-	if (!shouldUseSiloTicketEmail(merchantDoc, checkoutHostname)) {
-		return base
+	if (shouldUseSiloTicketEmail(merchantDoc, checkoutHostname)) {
+		return {
+			...base,
+			channel: 'silo',
+			merchant: merchantDoc,
+			checkoutHostname
+		}
 	}
-
-	return {
-		...base,
-		channel: 'silo',
-		merchant: merchantDoc,
-		checkoutHostname
-	}
+	return base
 }
 
 export function buildSiloTicketEmailOptionsFromPaymentData(merchant, paymentData = {}) {
 	const base = { marketCountryCode: null }
 	if (!merchant) return base
-	const checkoutHostname = sanitizeCheckoutHostname(paymentData.checkoutHostname)
-	if (!shouldUseSiloTicketEmail(merchant, checkoutHostname)) {
-		return base
+
+	const checkoutHostname = sanitizeCheckoutHostname(paymentData?.checkoutHostname)
+	if (!checkoutHostname) return base
+
+	if (shouldUseSiloTicketEmail(merchant, checkoutHostname)) {
+		return {
+			...base,
+			channel: 'silo',
+			merchant,
+			checkoutHostname
+		}
 	}
-	return {
-		...base,
-		channel: 'silo',
-		merchant,
-		checkoutHostname
-	}
+	return base
 }

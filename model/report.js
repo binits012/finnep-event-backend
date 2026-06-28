@@ -1,6 +1,7 @@
 import * as model from './mongoModel.js';
 import * as Event from './event.js';
 import * as ExternalTicketSales from './externalTicketSales.js';
+import * as RefundModel from './refund.js';
 import { getPackSizeFromTicketType } from '../util/ticketQuantity.js';
 import { error, info } from './logger.js';
 
@@ -99,7 +100,11 @@ export const getLocalTicketSaleMetrics = (ticket, event = null) => {
 
     const admissionQuantity = Math.max(1, toNumber(ticketInfoValue(info, 'quantity'), 1));
     const orderQuantity = toNumber(ticketInfoValue(info, 'orderQuantity'), 0);
-    const revenue = resolvePaidOrderTotal(info);
+    let revenue = resolvePaidOrderTotal(info);
+    const refundAmountCents = Number(ticket.refundAmount || 0);
+    if (refundAmountCents > 0) {
+        revenue = Math.max(0, revenue - refundAmountCents / 100);
+    }
     const quantity = resolveFinancialSoldQuantity(info, event, ticket, seatCount);
 
     return {
@@ -350,6 +355,9 @@ export const getEventFinancialReport = async (eventId) => {
 
         const totalTicketsSold = localTicketsSold + externalTicketsSold;
         const totalRevenue = localRevenue + externalRevenue;
+        const refundTotals = await RefundModel.aggregateRefundsByEventId(eventId);
+        const totalRefundsCents = refundTotals.totalRefunds || 0;
+        const totalRefunds = totalRefundsCents / 100;
         const occupancyRate = event.occupancy > 0
             ? (totalTicketsSold / event.occupancy) * 100
             : 0;
@@ -454,8 +462,8 @@ export const getEventFinancialReport = async (eventId) => {
                 externalTicketsSold,
                 externalRevenue,
                 totalPayments: localPayments.length,
-                totalRefunds: 0,
-                netRevenue: totalRevenue
+                totalRefunds,
+                netRevenue: Math.max(0, totalRevenue - totalRefunds)
             },
             ticketBreakdown,
             sourceBreakdown,
