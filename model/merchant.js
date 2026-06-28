@@ -404,7 +404,24 @@ export async function genericSearchMerchant(...searchTerms) {
 
 export async function addOrUpdateOtherInfo(id, otherInfo) {
   try {
-    const updatedMerchant = await model.Merchant.findByIdAndUpdate(id, { 'otherInfo': otherInfo }, { new: true });
+    if (!otherInfo || typeof otherInfo !== 'object' || Array.isArray(otherInfo)) {
+      throw new Error('otherInfo must be a plain object');
+    }
+
+    const updateData = {};
+    for (const [key, value] of Object.entries(otherInfo)) {
+      updateData[`otherInfo.${key}`] = value;
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      return model.Merchant.findById(id);
+    }
+
+    const updatedMerchant = await model.Merchant.findByIdAndUpdate(
+      id,
+      { $set: updateData },
+      { new: true, runValidators: true },
+    );
     if (updatedMerchant) {
       info('OtherInfo added or updated successfully: %s', id);
     }

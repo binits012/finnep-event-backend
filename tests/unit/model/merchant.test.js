@@ -319,5 +319,23 @@ describe('Merchant Model', () => {
       expect(result).toBeDefined();
     });
   });
+
+  describe('addOrUpdateOtherInfo', () => {
+    it('merges otherInfo keys without replacing the whole map', async () => {
+      const merchantId = '507f1f77bcf86cd799439011';
+      const updatedDoc = { _id: merchantId, otherInfo: new Map([['stripe', 150], ['timezone', 'Australia/Sydney']]) };
+      mockMerchantModel.findByIdAndUpdate.mockResolvedValue(updatedDoc);
+
+      const result = await Merchant.addOrUpdateOtherInfo(merchantId, { stripe: 150 });
+
+      expect(mockMerchantModel.findByIdAndUpdate).toHaveBeenCalledWith(
+        merchantId,
+        { $set: { 'otherInfo.stripe': 150 } },
+        { new: true, runValidators: true },
+      );
+      expect(result).toBe(updatedDoc);
+      expect(mockLogger.info).toHaveBeenCalled();
+    });
+  });
 });
 
