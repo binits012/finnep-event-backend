@@ -6,8 +6,8 @@ import Stripe from 'stripe';
 import {
     resolveOrderQuantityFromTicket,
     resolveAdmissionQuantityFromTicket,
-    readRecordedPlatformFeeCents,
     resolvePublishedPlatformFeeCents,
+    resolvePublishedUnitPlatformFeeCents,
     readTicketInfoValue,
     PLATFORM_FEE_BASIS,
 } from '../util/merchantPlatformFee.js';
@@ -110,16 +110,16 @@ export async function publishPaymentCompleted({
     const normalizedMethod = (method || 'stripe').toLowerCase();
     const orderQuantity = resolveOrderQuantityFromTicket(ticket);
     const admissionQuantity = resolveAdmissionQuantityFromTicket(ticket);
-    const recordedPlatformFeeCents = readRecordedPlatformFeeCents(ticket);
-    const platformFeeCents = resolvePublishedPlatformFeeCents(ticket, {
+    const unitPlatformFeeCents = resolvePublishedUnitPlatformFeeCents(ticket, merchant);
+    const platformFeeCents = resolvePublishedPlatformFeeCents(ticket, merchant, {
         grossCents,
         method: normalizedMethod,
     });
-    let platformFeeBasis = readTicketInfoValue(ticket, 'platformFeeBasis');
-    if (!platformFeeBasis && platformFeeCents > 0 && recordedPlatformFeeCents === 0) {
-        platformFeeBasis = PLATFORM_FEE_BASIS;
-    }
-    const configuredPlatformFeeUnitCents = readTicketInfoValue(ticket, 'platformFeeUnitCents');
+    const platformFeeBasis = readTicketInfoValue(ticket, 'platformFeeBasis') || (
+        platformFeeCents > 0 && (normalizedMethod === 'stripe') ? PLATFORM_FEE_BASIS : null
+    );
+    const configuredPlatformFeeUnitCents = readTicketInfoValue(ticket, 'platformFeeUnitCents')
+        ?? (unitPlatformFeeCents > 0 ? String(unitPlatformFeeCents) : null);
 
     const merchantNet = Math.max(0, grossCents - platformFeeCents - pspFeeCents);
     await publishAccountingEvent('payment.completed', {
@@ -187,7 +187,10 @@ export async function publishPaymentRefunded({
         estimated = fetched.feeReversalEstimated;
         if (estimated && ticket) {
             const paid = centsFromMajor(ticket?.ticketInfo?.get?.('price') ?? ticket?.ticketInfo?.price);
-            const origFee = readRecordedPlatformFeeCents(ticket);
+            const origFee = resolvePublishedPlatformFeeCents(ticket, merchant, {
+                grossCents: paid,
+                method: 'stripe',
+            });
             if (paid > 0 && origFee > 0) {
                 feeReversed = Math.round(origFee * (refundAmountCents / paid));
             }

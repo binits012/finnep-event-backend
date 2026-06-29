@@ -9,6 +9,7 @@ import {
     resolveOrderQuantityFromMetadata,
     readRecordedPlatformFeeCents,
     resolvePublishedPlatformFeeCents,
+    resolvePublishedUnitPlatformFeeCents,
     readTicketInfoStoredInt,
     copyRecordedPlatformFeeToTicketInfo,
     PLATFORM_FEE_BASIS,
@@ -51,25 +52,39 @@ describe('merchantPlatformFee', () => {
         expect(readRecordedPlatformFeeCents(ticket)).toBe(250);
     });
 
+    it('resolvePublishedPlatformFeeCents scales unit × orderQuantity even when ticket has flat platformFee', () => {
+        const merchant = { otherInfo: { stripe: 150 } };
+        const ticket = {
+            ticketInfo: {
+                platformFee: 150,
+                platformFeeBasis: 'per_order_quantity',
+                orderQuantity: '4',
+                quantity: '4',
+            },
+        };
+        expect(resolvePublishedPlatformFeeCents(ticket, merchant, { grossCents: 41400, method: 'stripe' })).toBe(600);
+    });
+
     it('resolvePublishedPlatformFeeCents uses env unit fee × orderQuantity when ticket fee is 0', () => {
         const prev = process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS;
         process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS = '150';
         try {
             const ticket = { ticketInfo: { orderQuantity: '2', quantity: '2' } };
-            expect(resolvePublishedPlatformFeeCents(ticket, { grossCents: 7900, method: 'stripe' })).toBe(300);
-            expect(resolvePublishedPlatformFeeCents(ticket, { grossCents: 0, method: 'stripe' })).toBe(0);
+            expect(resolvePublishedPlatformFeeCents(ticket, null, { grossCents: 7900, method: 'stripe' })).toBe(300);
+            expect(resolvePublishedPlatformFeeCents(ticket, null, { grossCents: 0, method: 'stripe' })).toBe(0);
         } finally {
             if (prev === undefined) delete process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS;
             else process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS = prev;
         }
     });
 
-    it('resolvePublishedPlatformFeeCents prefers recorded ticket fee', () => {
+    it('resolvePublishedPlatformFeeCents prefers merchant unit over env', () => {
         const prev = process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS;
-        process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS = '150';
+        process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS = '15';
         try {
-            const ticket = { ticketInfo: { platformFee: 450, orderQuantity: '2' } };
-            expect(resolvePublishedPlatformFeeCents(ticket, { grossCents: 7900, method: 'stripe' })).toBe(450);
+            const merchant = { otherInfo: { stripe: 150 } };
+            const ticket = { ticketInfo: { orderQuantity: '2', quantity: '2' } };
+            expect(resolvePublishedPlatformFeeCents(ticket, merchant, { grossCents: 7900, method: 'stripe' })).toBe(300);
         } finally {
             if (prev === undefined) delete process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS;
             else process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS = prev;
