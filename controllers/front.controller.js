@@ -24,7 +24,7 @@ import {
 import { computeTicketLinePricing, roundMoney, moneyPercentOfExactSum, moneyPercentOf, moneyAdd } from '../util/money.js'
 import * as sendMail from '../util/sendMail.js'
 import { isPlatformStripeAccount } from '../util/stripePlatform.js'
-import { getMerchantConfiguredStripePlatformFeeCents, resolveStripePlatformFeeCents, resolveConfiguredStripePlatformFeeCents, resolveOrderQuantityFromTicket, PLATFORM_FEE_BASIS } from '../util/merchantPlatformFee.js'
+import { resolveConfiguredStripePlatformFeeCents, resolveOrderQuantityFromMetadata, scalePlatformFeeByOrderQuantity, copyRecordedPlatformFeeToTicketInfo, PLATFORM_FEE_BASIS } from '../util/merchantPlatformFee.js'
 import Stripe from 'stripe'
 const stripe = new Stripe(process.env.STRIPE_KEY)
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET
@@ -726,14 +726,6 @@ export const completeOrderTicket = async (req, res, next) => {
                         legacyMerchant = merchants.length > 0 ? merchants[0] : null;
                     }
                     const legacyTicket = ticketData || ticket;
-                    let legacyPaymentIntent = null;
-                    if (paymentIntentId && String(paymentIntentId).startsWith('pi_')) {
-                        try {
-                            legacyPaymentIntent = await stripe.paymentIntents.retrieve(String(paymentIntentId));
-                        } catch (legacyPiErr) {
-                            error('Legacy checkout: could not retrieve payment intent for platform fee', { error: legacyPiErr?.message });
-                        }
-                    }
                     await publishPaymentCompleted({
                         ticket: legacyTicket,
                         event,
@@ -741,11 +733,6 @@ export const completeOrderTicket = async (req, res, next) => {
                         method: 'stripe',
                         externalPaymentId: String(paymentIntentId),
                         grossCents: Number(sessionDetails.amount_total || 0),
-                        platformFeeCents: resolveStripePlatformFeeCents({
-                            paymentIntent: legacyPaymentIntent,
-                            merchant: legacyMerchant,
-                            orderQuantity: resolveOrderQuantityFromTicket(legacyTicket),
-                        }),
                         pspFeeCents: 0,
                         checkoutChannel: 'marketplace',
                         currency: (sessionDetails.currency || 'eur').toLowerCase(),
@@ -2240,7 +2227,6 @@ const completeZeroAmountCheckout = async (req, res, { metadata, parsedMetadata, 
             method: 'free',
             externalPaymentId: paymentReference || `free:${ticket._id}`,
             grossCents: 0,
-            platformFeeCents: 0,
             pspFeeCents: 0,
             checkoutChannel: resolveSiloCheckoutChannel(
                 merchant,
@@ -2501,7 +2487,9 @@ export const createPaymentIntent = async (req, res, next) => {
         // Only apply connected account logic if merchant is NOT the platform account
         if (!isPlatformStripeAccount(merchant.stripeAccount)) {
 
-            const platformFee = resolveConfiguredStripePlatformFeeCents(merchant);
+            const orderQuantity = resolveOrderQuantityFromMetadata(parsedMetadata);
+            const unitPlatformFee = resolveConfiguredStripePlatformFeeCents(merchant);
+            const platformFee = scalePlatformFeeByOrderQuantity(unitPlatformFee, orderQuantity);
             if (!Number.isFinite(platformFee) || platformFee < 0) {
                 throw new Error('Invalid Stripe platform fee configuration');
             }
@@ -2523,7 +2511,9 @@ export const createPaymentIntent = async (req, res, next) => {
                     clientId: clientId, // Track client for monitoring
                     baseAmount: baseAmount.toString(),
                     platformFee: platformFee.toString(),
+                    platformFeeUnitCents: unitPlatformFee > 0 ? unitPlatformFee.toString() : undefined,
                     platformFeeBasis: PLATFORM_FEE_BASIS,
+                    orderQuantity: String(orderQuantity),
                     chargeType: 'direct',
                     locale: locale // Store locale for email templates
                 },
@@ -2537,11 +2527,15 @@ export const createPaymentIntent = async (req, res, next) => {
                 stripeAccount: merchant.stripeAccount
             };
         } else {
-            const platformFee = resolveConfiguredStripePlatformFeeCents(merchant);
+            const orderQuantity = resolveOrderQuantityFromMetadata(parsedMetadata);
+            const unitPlatformFee = resolveConfiguredStripePlatformFeeCents(merchant);
+            const platformFee = scalePlatformFeeByOrderQuantity(unitPlatformFee, orderQuantity);
             const platformFeeMetadata = platformFee > 0
                 ? {
                     platformFee: platformFee.toString(),
+                    platformFeeUnitCents: unitPlatformFee > 0 ? unitPlatformFee.toString() : undefined,
                     platformFeeBasis: PLATFORM_FEE_BASIS,
+                    orderQuantity: String(orderQuantity),
                     chargeType: 'platform',
                 }
                 : {};
@@ -4588,15 +4582,11 @@ export const handlePaymentSuccess = async (req, res, next) => {
             ticketInfo.checkoutHostname = checkoutHostnameForTicket;
         }
 
-        const resolvedPlatformFeeCents = resolveStripePlatformFeeCents({
+        copyRecordedPlatformFeeToTicketInfo(ticketInfo, {
             paymentIntent,
             stripeMetadata,
-            merchant,
             fulfillment,
-            orderQuantity: resolveOrderQuantityFromTicket({ ticketInfo }),
         });
-        ticketInfo.platformFee = resolvedPlatformFeeCents || null;
-        ticketInfo.platformFeeBasis = PLATFORM_FEE_BASIS;
 
         if (sanitizedMetadata.ticketId) {
             try {
@@ -4908,13 +4898,6 @@ export const handlePaymentSuccess = async (req, res, next) => {
                 method: paymentProvider,
                 externalPaymentId: paymentIntentId,
                 grossCents: paymentIntent.amount,
-                platformFeeCents: resolveStripePlatformFeeCents({
-                    paymentIntent,
-                    stripeMetadata,
-                    merchant,
-                    fulfillment,
-                    orderQuantity: resolveOrderQuantityFromTicket(ticket),
-                }),
                 pspFeeCents: 0,
                 checkoutChannel,
                 currency: paymentIntent.currency,
@@ -5760,7 +5743,6 @@ export const handleFreeEventRegistration = async (req, res, next) => {
                 method: 'free',
                 externalPaymentId: `free:${ticket._id}`,
                 grossCents: 0,
-                platformFeeCents: 0,
                 pspFeeCents: 0,
                 checkoutChannel: resolveSiloCheckoutChannel(
                     merchant,

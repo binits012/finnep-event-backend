@@ -8,13 +8,12 @@
 import 'dotenv/config';
 import mongoose from 'mongoose';
 import '../model/dbConnect.js';
-import { publishPaymentCompleted, resolvePlatformFeeCents } from '../services/accountingEventPublisher.js';
+import { publishPaymentCompleted } from '../services/accountingEventPublisher.js';
 import {
-  getMerchantConfiguredStripePlatformFeeCents,
   resolveOrderQuantityFromTicket,
+  readRecordedPlatformFeeCents,
 } from '../util/merchantPlatformFee.js';
 import { resolveTicketMerchant, ticketInfoObject } from './lib/resolveTicketMerchant.mjs';
-import * as Merchant from '../model/merchant.js';
 
 const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');
@@ -80,34 +79,10 @@ async function main() {
     }
 
     const orderQuantity = resolveOrderQuantityFromTicket(ticket);
-    const configuredFeeCents = method === 'stripe'
-      ? getMerchantConfiguredStripePlatformFeeCents(merchant)
-      : 0;
+    const platformFeeCents = readRecordedPlatformFeeCents(ticket);
 
     const priceMajor = Number(info.price ?? info.totalPrice ?? info.totalAmount ?? 0);
     const grossCents = method === 'free' ? 0 : Math.round(priceMajor * 100);
-
-    let commissionRate;
-    if (method === 'paytrail' && febMerchantId) {
-      try {
-        const merchantDoc = await Merchant.getMerchantById(febMerchantId);
-        commissionRate = merchantDoc?.paytrailShopInShopData?.commissionRate
-          ?? parseFloat(process.env.PAYTRAIL_PLATFORM_COMMISSION || '3');
-      } catch {
-        commissionRate = parseFloat(process.env.PAYTRAIL_PLATFORM_COMMISSION || '3');
-      }
-    }
-
-    const platformFeeCents = resolvePlatformFeeCents({
-      method,
-      grossCents,
-      platformFee: info.platformFee
-        || (method === 'stripe' ? configuredFeeCents : 0),
-      platformCommission: info.platformCommission,
-      commissionRate,
-      orderQuantity,
-      configuredFeeCents,
-    });
 
     if (dryRun) {
       console.log('[dry-run]', externalPaymentId, method, grossCents, 'fee', platformFeeCents, 'qty', orderQuantity);
@@ -124,7 +99,6 @@ async function main() {
         method: method === 'free' || grossCents === 0 ? 'free' : method,
         externalPaymentId,
         grossCents,
-        platformFeeCents: Number.isFinite(platformFeeCents) ? platformFeeCents : 0,
         pspFeeCents: 0,
         checkoutChannel: 'marketplace',
         currency: (info.currency || 'eur').toLowerCase(),
@@ -138,7 +112,6 @@ async function main() {
   }
 
   console.log(`Scanned ${count} tickets, published ${published}, skipped ${skipped}${dryRun ? ' (dry-run)' : ''}`);
-  await mongoose.disconnect();
 }
 
 main().catch((err) => {

@@ -10,7 +10,7 @@ import * as consts from '../const.js';
 import { resolveSiloCheckoutChannel } from '../util/siloCheckoutEmail.js';
 import { queueTicketEmail } from '../workers/emailWorker.js';
 import { publishTicketCreationEvent } from './front.controller.js';
-import { publishPaymentCompleted, resolvePlatformFeeCents } from '../services/accountingEventPublisher.js';
+import { publishPaymentCompleted } from '../services/accountingEventPublisher.js';
 import {
     applyTicketQuantitiesToTicketInfo,
     findTicketTypeConfig,
@@ -236,11 +236,6 @@ async function _createTicketFromNabilPaymentBody(paymentData, transactionId, sta
             method: 'nabil',
             externalPaymentId: paymentReference || transactionId,
             grossCents: Number(paymentData.amount || 0),
-            platformFeeCents: resolvePlatformFeeCents({
-                method: 'nabil',
-                grossCents: Number(paymentData.amount || 0),
-                commission: paymentData.commission,
-            }),
             pspFeeCents: 0,
             checkoutChannel: resolveSiloCheckoutChannel(merchant, paymentData.checkoutHostname),
             currency: (paymentData.currency || 'npr').toLowerCase(),

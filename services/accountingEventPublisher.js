@@ -4,10 +4,11 @@ import { messageConsumer } from '../rabbitMQ/services/messageConsumer.js';
 import { info, error } from '../model/logger.js';
 import Stripe from 'stripe';
 import {
-    getMerchantConfiguredStripePlatformFeeCents,
-    getDefaultStripePlatformFeeCents,
-    normalizePerTransactionPlatformFeeCents,
     resolveOrderQuantityFromTicket,
+    resolveAdmissionQuantityFromTicket,
+    readRecordedPlatformFeeCents,
+    resolvePublishedPlatformFeeCents,
+    readTicketInfoValue,
     PLATFORM_FEE_BASIS,
 } from '../util/merchantPlatformFee.js';
 import { resolveSiloCheckoutChannel } from '../util/siloCheckoutEmail.js';
@@ -90,85 +91,9 @@ function centsFromMajor(amount) {
     return Math.round(n * 100);
 }
 
-function resolveAdmissionQuantityFromTicket(ticket, orderQuantity = 1) {
-    const raw = ticket?.ticketInfo?.get?.('quantity') ?? ticket?.ticketInfo?.quantity;
-    const parsed = parseInt(String(raw ?? ''), 10);
-    if (Number.isFinite(parsed) && parsed > 0) return parsed;
-    return Math.max(1, parseInt(String(orderQuantity || 1), 10) || 1);
-}
-
-/**
- * Normalize platform fee to cents from ticket info / payment payloads.
- */
-export function resolvePlatformFeeCents({
-    method,
-    grossCents = 0,
-    platformFee,
-    platformCommission,
-    commission,
-    commissionRate,
-    orderQuantity = 1,
-    configuredFeeCents = 0,
-} = {}) {
-    const normalizedMethod = (method || '').toLowerCase();
-    const sources = [platformFee, platformCommission, commission];
-    let resolved = 0;
-
-    for (const raw of sources) {
-        if (raw == null || raw === '') continue;
-        if (typeof raw === 'object') {
-            const cents = Number(raw.platformAmount ?? raw.platform_amount ?? 0);
-            if (cents > 0) {
-                resolved = Math.round(cents);
-                break;
-            }
-            continue;
-        }
-        const num = Number(raw);
-        if (!Number.isFinite(num) || num <= 0) continue;
-        if (normalizedMethod === 'stripe' || normalizedMethod === 'paytrail' || normalizedMethod === 'nabil') {
-            resolved = Math.round(num);
-            break;
-        }
-        resolved = num > 100 ? Math.round(num) : Math.round(num * 100);
-        break;
-    }
-
-    if (!resolved) {
-        const rate = Number(commissionRate);
-        if ((normalizedMethod === 'paytrail' || normalizedMethod === 'nabil') && grossCents > 0 && rate > 0 && rate <= 100) {
-            resolved = Math.round(grossCents * (rate / 100));
-        }
-    }
-
-    if (!resolved) {
-        const defaultFee = Number(process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS || 0);
-        if (defaultFee > 0 && grossCents > 0 && normalizedMethod !== 'free') {
-            resolved = Math.min(Math.round(defaultFee), Math.round(grossCents));
-        }
-    }
-
-    if (normalizedMethod === 'stripe' && resolved > 0) {
-        return normalizePerTransactionPlatformFeeCents(resolved, {
-            orderQuantity,
-            configuredFeeCents,
-        });
-    }
-
-    return resolved;
-}
-
 /**
  * @param {object} params
- * @param {object} params.ticket
- * @param {object} params.event
- * @param {object} params.merchant
- * @param {string} params.method stripe|paytrail|nabil|free
- * @param {string} params.externalPaymentId
- * @param {number} params.grossCents
- * @param {number} params.platformFeeCents
- * @param {number} params.pspFeeCents
- * @param {string} params.checkoutChannel marketplace|silo
+ * @param {object} params.ticket — ticket document; all qty/fee fields read from ticketInfo only
  */
 export async function publishPaymentCompleted({
     ticket,
@@ -177,7 +102,6 @@ export async function publishPaymentCompleted({
     method,
     externalPaymentId,
     grossCents,
-    platformFeeCents = 0,
     pspFeeCents = 0,
     checkoutChannel = 'marketplace',
     currency = 'eur',
@@ -185,22 +109,19 @@ export async function publishPaymentCompleted({
 }) {
     const normalizedMethod = (method || 'stripe').toLowerCase();
     const orderQuantity = resolveOrderQuantityFromTicket(ticket);
-    const admissionQuantity = resolveAdmissionQuantityFromTicket(ticket, orderQuantity);
-    const configuredFeeCents = getMerchantConfiguredStripePlatformFeeCents(merchant);
-
-    let effectivePlatformFeeCents = Number(platformFeeCents || 0);
-    if (!effectivePlatformFeeCents && normalizedMethod === 'stripe') {
-        effectivePlatformFeeCents = configuredFeeCents || getDefaultStripePlatformFeeCents();
-    }
-
-    const resolvedPlatformFeeCents = resolvePlatformFeeCents({
-        method: normalizedMethod,
+    const admissionQuantity = resolveAdmissionQuantityFromTicket(ticket);
+    const recordedPlatformFeeCents = readRecordedPlatformFeeCents(ticket);
+    const platformFeeCents = resolvePublishedPlatformFeeCents(ticket, {
         grossCents,
-        platformFee: effectivePlatformFeeCents,
-        orderQuantity,
-        configuredFeeCents,
+        method: normalizedMethod,
     });
-    const merchantNet = Math.max(0, grossCents - resolvedPlatformFeeCents - pspFeeCents);
+    let platformFeeBasis = readTicketInfoValue(ticket, 'platformFeeBasis');
+    if (!platformFeeBasis && platformFeeCents > 0 && recordedPlatformFeeCents === 0) {
+        platformFeeBasis = PLATFORM_FEE_BASIS;
+    }
+    const configuredPlatformFeeUnitCents = readTicketInfoValue(ticket, 'platformFeeUnitCents');
+
+    const merchantNet = Math.max(0, grossCents - platformFeeCents - pspFeeCents);
     await publishAccountingEvent('payment.completed', {
         platformMerchantId: merchant?.merchantId || ticket?.externalMerchantId,
         febMerchantId: merchant?._id?.toString?.() || ticket?.merchant?.toString?.(),
@@ -209,11 +130,13 @@ export async function publishPaymentCompleted({
         eventTitle: event?.eventTitle || event?.eventName || null,
         ticketIds: ticket?._id ? [String(ticket._id)] : [],
         grossCents,
-        platformFeeCents: resolvedPlatformFeeCents,
-        platformFeeBasis: PLATFORM_FEE_BASIS,
-        orderQuantity,
-        admissionQuantity,
-        configuredPlatformFeeCents: configuredFeeCents || null,
+        platformFeeCents,
+        ...(platformFeeBasis ? { platformFeeBasis } : {}),
+        ...(orderQuantity != null ? { orderQuantity } : {}),
+        ...(admissionQuantity != null ? { admissionQuantity } : {}),
+        configuredPlatformFeeCents: configuredPlatformFeeUnitCents != null
+            ? Number(configuredPlatformFeeUnitCents) || null
+            : null,
         pspFeeCents,
         merchantNetCents: merchantNet,
         method: normalizedMethod,
@@ -264,13 +187,7 @@ export async function publishPaymentRefunded({
         estimated = fetched.feeReversalEstimated;
         if (estimated && ticket) {
             const paid = centsFromMajor(ticket?.ticketInfo?.get?.('price') ?? ticket?.ticketInfo?.price);
-            const rawOrigFee = Number(ticket?.ticketInfo?.get?.('platformFee') ?? ticket?.ticketInfo?.platformFee ?? 0);
-            const orderQuantity = resolveOrderQuantityFromTicket(ticket);
-            const configuredFeeCents = getMerchantConfiguredStripePlatformFeeCents(merchant);
-            const origFee = normalizePerTransactionPlatformFeeCents(rawOrigFee, {
-                orderQuantity,
-                configuredFeeCents,
-            });
+            const origFee = readRecordedPlatformFeeCents(ticket);
             if (paid > 0 && origFee > 0) {
                 feeReversed = Math.round(origFee * (refundAmountCents / paid));
             }

@@ -3,9 +3,14 @@ import {
     getMerchantConfiguredStripePlatformFeeCents,
     getDefaultStripePlatformFeeCents,
     resolveConfiguredStripePlatformFeeCents,
-    normalizePerTransactionPlatformFeeCents,
+    scalePlatformFeeByOrderQuantity,
     resolveOrderQuantityFromTicket,
-    resolveStripePlatformFeeCents,
+    resolveAdmissionQuantityFromTicket,
+    resolveOrderQuantityFromMetadata,
+    readRecordedPlatformFeeCents,
+    resolvePublishedPlatformFeeCents,
+    readTicketInfoStoredInt,
+    copyRecordedPlatformFeeToTicketInfo,
     PLATFORM_FEE_BASIS,
 } from '../../../util/merchantPlatformFee.js';
 
@@ -15,76 +20,74 @@ describe('merchantPlatformFee', () => {
         expect(getMerchantConfiguredStripePlatformFeeCents(merchant)).toBe(700);
     });
 
-    it('reads configured stripe fee from plain otherInfo object', () => {
-        const merchant = { otherInfo: { stripe: 700 } };
-        expect(getMerchantConfiguredStripePlatformFeeCents(merchant)).toBe(700);
-    });
-
-    it('prefers application_fee_amount over merchant config', () => {
-        const merchant = { otherInfo: { stripe: 700 } };
-        expect(resolveStripePlatformFeeCents({
-            paymentIntent: { application_fee_amount: 500 },
-            merchant,
-        })).toBe(500);
-    });
-
-    it('falls back to merchant config when PI has no application fee', () => {
-        const merchant = { otherInfo: { stripe: 700 } };
-        expect(resolveStripePlatformFeeCents({
-            paymentIntent: { application_fee_amount: null },
-            stripeMetadata: {},
-            merchant,
-        })).toBe(700);
-    });
-
-    it('uses metadata platformFee before merchant config', () => {
-        const merchant = { otherInfo: { stripe: 700 } };
-        expect(resolveStripePlatformFeeCents({
-            paymentIntent: {},
-            stripeMetadata: { platformFee: '250' },
-            merchant,
-        })).toBe(250);
-    });
-
-    it('normalizes qty-scaled fee back to per-transaction merchant config', () => {
-        const merchant = { otherInfo: { stripe: 150 } };
-        expect(resolveStripePlatformFeeCents({
-            paymentIntent: { application_fee_amount: 450 },
-            merchant,
-            orderQuantity: 3,
-        })).toBe(150);
-    });
-
-    it('keeps flat fee when order quantity is greater than one', () => {
-        const merchant = { otherInfo: { stripe: 150 } };
-        expect(resolveStripePlatformFeeCents({
-            paymentIntent: { application_fee_amount: 150 },
-            merchant,
-            orderQuantity: 3,
-        })).toBe(150);
-    });
-
-    it('reads order quantity from ticketInfo.orderQuantity', () => {
+    it('reads order quantity from ticketInfo.orderQuantity only', () => {
         const ticket = {
             ticketInfo: {
-                orderQuantity: '4',
-                quantity: '12',
-            },
-        };
-        expect(resolveOrderQuantityFromTicket(ticket)).toBe(4);
-    });
-
-    it('derives order quantity from admission quantity and pack size', () => {
-        const ticket = {
-            ticketInfo: {
+                orderQuantity: '2',
                 quantity: '6',
-                packSize: '3',
             },
         };
         expect(resolveOrderQuantityFromTicket(ticket)).toBe(2);
+        expect(resolveAdmissionQuantityFromTicket(ticket)).toBe(6);
     });
 
-    it('falls back to env default when merchant has no stripe fee', () => {
+    it('returns null for orderQuantity when not recorded', () => {
+        const ticket = { ticketInfo: { quantity: '3' } };
+        expect(resolveOrderQuantityFromTicket(ticket)).toBeNull();
+        expect(resolveAdmissionQuantityFromTicket(ticket)).toBe(3);
+    });
+
+    it('reads platformFee from ticket only', () => {
+        const ticket = { ticketInfo: { platformFee: 300, orderQuantity: '2', quantity: '2' } };
+        expect(readRecordedPlatformFeeCents(ticket)).toBe(300);
+    });
+
+    it('reads platformCommission object from ticket', () => {
+        const ticket = {
+            ticketInfo: {
+                platformCommission: { platformAmount: 250 },
+            },
+        };
+        expect(readRecordedPlatformFeeCents(ticket)).toBe(250);
+    });
+
+    it('resolvePublishedPlatformFeeCents uses env unit fee × orderQuantity when ticket fee is 0', () => {
+        const prev = process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS;
+        process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS = '150';
+        try {
+            const ticket = { ticketInfo: { orderQuantity: '2', quantity: '2' } };
+            expect(resolvePublishedPlatformFeeCents(ticket, { grossCents: 7900, method: 'stripe' })).toBe(300);
+            expect(resolvePublishedPlatformFeeCents(ticket, { grossCents: 0, method: 'stripe' })).toBe(0);
+        } finally {
+            if (prev === undefined) delete process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS;
+            else process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS = prev;
+        }
+    });
+
+    it('resolvePublishedPlatformFeeCents prefers recorded ticket fee', () => {
+        const prev = process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS;
+        process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS = '150';
+        try {
+            const ticket = { ticketInfo: { platformFee: 450, orderQuantity: '2' } };
+            expect(resolvePublishedPlatformFeeCents(ticket, { grossCents: 7900, method: 'stripe' })).toBe(450);
+        } finally {
+            if (prev === undefined) delete process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS;
+            else process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS = prev;
+        }
+    });
+
+    it('copyRecordedPlatformFeeToTicketInfo copies PI application fee', () => {
+        const ticketInfo = {};
+        copyRecordedPlatformFeeToTicketInfo(ticketInfo, {
+            paymentIntent: { application_fee_amount: 300 },
+            stripeMetadata: { platformFeeBasis: PLATFORM_FEE_BASIS, platformFeeUnitCents: '150' },
+        });
+        expect(ticketInfo.platformFee).toBe(300);
+        expect(ticketInfo.platformFeeBasis).toBe(PLATFORM_FEE_BASIS);
+        expect(ticketInfo.platformFeeUnitCents).toBe('150');
+    });
+
+    it('falls back to env default for checkout config only', () => {
         const prev = process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS;
         process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS = '150';
         try {
@@ -96,25 +99,15 @@ describe('merchantPlatformFee', () => {
         }
     });
 
-    it('prefers merchant config over env default', () => {
-        const prev = process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS;
-        process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS = '15';
-        try {
-            expect(resolveConfiguredStripePlatformFeeCents({ otherInfo: { stripe: 150 } })).toBe(150);
-        } finally {
-            if (prev === undefined) delete process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS;
-            else process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS = prev;
-        }
+    it('scalePlatformFeeByOrderQuantity is checkout-only', () => {
+        expect(scalePlatformFeeByOrderQuantity(150, 4)).toBe(600);
     });
 
-    it('exposes per-transaction fee basis constant', () => {
-        expect(PLATFORM_FEE_BASIS).toBe('per_transaction');
+    it('readTicketInfoStoredInt returns null when field missing', () => {
+        expect(readTicketInfoStoredInt({ ticketInfo: {} }, 'orderQuantity')).toBeNull();
     });
 
-    it('normalizePerTransactionPlatformFeeCents leaves non-scaled fees unchanged', () => {
-        expect(normalizePerTransactionPlatformFeeCents(500, {
-            orderQuantity: 3,
-            configuredFeeCents: 150,
-        })).toBe(500);
+    it('resolveOrderQuantityFromMetadata for checkout PI', () => {
+        expect(resolveOrderQuantityFromMetadata({ orderQuantity: '3', quantity: '5' })).toBe(3);
     });
 });

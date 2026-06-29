@@ -10,7 +10,7 @@ import { info, error } from '../model/logger.js';
 import * as consts from '../const.js';
 import { buildSiloTicketEmailOptionsFromPaymentData, resolveSiloCheckoutChannel } from '../util/siloCheckoutEmail.js';
 import { publishTicketCreationEvent } from './front.controller.js';
-import { publishPaymentCompleted, resolvePlatformFeeCents } from '../services/accountingEventPublisher.js';
+import { publishPaymentCompleted } from '../services/accountingEventPublisher.js';
 import {
     applyTicketQuantitiesToTicketInfo,
     findTicketTypeConfig,
@@ -387,12 +387,6 @@ async function _createTicketFromPaytrailPaymentBody(paymentData, transactionId, 
     try {
         const merchant = await Merchant.getMerchantById(paymentData.merchantId);
         const grossCents = Number(paymentData.amount || 0);
-        const platformFeeCents = resolvePlatformFeeCents({
-            method: 'paytrail',
-            grossCents,
-            commission: paymentData.commission,
-            commissionRate: paymentData.commissionRate,
-        });
         await publishPaymentCompleted({
             ticket,
             event,
@@ -400,7 +394,6 @@ async function _createTicketFromPaytrailPaymentBody(paymentData, transactionId, 
             method: 'paytrail',
             externalPaymentId: transactionId,
             grossCents,
-            platformFeeCents,
             pspFeeCents: 0,
             checkoutChannel: resolveSiloCheckoutChannel(merchant, paymentData.checkoutHostname),
             currency: 'eur',

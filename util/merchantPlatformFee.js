@@ -1,8 +1,9 @@
 /**
- * Merchant-configured Stripe platform fee (cents) from otherInfo.stripe.
- * This is a flat per-transaction fee, not multiplied by ticket quantity.
+ * Platform fee helpers.
+ * Checkout (createPaymentIntent) may compute Stripe application_fee_amount.
+ * Ledger / RabbitMQ must only read values already stored on the ticket.
  */
-import { info } from '../model/logger.js';
+export const PLATFORM_FEE_BASIS = 'per_order_quantity';
 
 export function getMerchantConfiguredStripePlatformFeeCents(merchant) {
     if (!merchant) return 0;
@@ -13,18 +14,17 @@ export function getMerchantConfiguredStripePlatformFeeCents(merchant) {
     return Number.isFinite(fee) && fee > 0 ? fee : 0;
 }
 
-/** Env fallback when merchant has no configured Stripe platform fee (cents). */
 export function getDefaultStripePlatformFeeCents() {
     const fee = Number(process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS || 0);
     return Number.isFinite(fee) && fee > 0 ? Math.round(fee) : 0;
 }
 
-/** Merchant config first, then env default — used at checkout and accounting publish. */
+/** Used at checkout PI creation only — not for ledger. */
 export function resolveConfiguredStripePlatformFeeCents(merchant) {
     return getMerchantConfiguredStripePlatformFeeCents(merchant) || getDefaultStripePlatformFeeCents();
 }
 
-function ticketInfoPlain(ticketInfo) {
+export function ticketInfoPlain(ticketInfo) {
     if (!ticketInfo) return {};
     if (ticketInfo instanceof Map) return Object.fromEntries(ticketInfo.entries());
     if (typeof ticketInfo === 'object') return ticketInfo;
@@ -38,86 +38,113 @@ function parsePositiveInt(value, fallback = null) {
     return parsed;
 }
 
-/**
- * Commerce order quantity from a ticket document (packs/orders, not admission headcount).
- */
+/** Checkout metadata before ticket exists — PI creation only. */
+export function resolveOrderQuantityFromMetadata(metadata = {}) {
+    const fromOrderQty = parsePositiveInt(metadata?.orderQuantity, null);
+    if (fromOrderQty) return fromOrderQty;
+    return parsePositiveInt(metadata?.quantity, 1) || 1;
+}
+
+/** Checkout PI creation only — not for ledger. */
+export function scalePlatformFeeByOrderQuantity(unitFeeCents, orderQuantity = 1) {
+    const unit = Math.round(Number(unitFeeCents || 0));
+    if (unit <= 0) return 0;
+    const qty = Math.max(1, Math.round(Number(orderQuantity) || 1));
+    return unit * qty;
+}
+
+/** Read a ticketInfo field as stored — no defaults, no derivation. */
+export function readTicketInfoValue(ticket, field) {
+    const raw = ticketInfoPlain(ticket?.ticketInfo)[field];
+    if (raw == null || raw === '') return null;
+    return raw;
+}
+
+/** Read a positive int field from ticketInfo — null when not recorded. */
+export function readTicketInfoStoredInt(ticket, field) {
+    const raw = readTicketInfoValue(ticket, field);
+    if (raw == null) return null;
+    const parsed = parseInt(String(raw), 10);
+    return Number.isFinite(parsed) && parsed >= 1 ? parsed : null;
+}
+
+/** orderQuantity from ticket only. */
 export function resolveOrderQuantityFromTicket(ticket) {
-    const ticketInfoData = ticketInfoPlain(ticket?.ticketInfo);
+    return readTicketInfoStoredInt(ticket, 'orderQuantity');
+}
 
-    const orderQty = parsePositiveInt(ticketInfoData.orderQuantity, null);
-    if (orderQty) return orderQty;
+/** admission quantity (ticketInfo.quantity) from ticket only. */
+export function resolveAdmissionQuantityFromTicket(ticket) {
+    return readTicketInfoStoredInt(ticket, 'quantity');
+}
 
-    const admissionQty = parsePositiveInt(ticketInfoData.quantity, null) || 1;
-    const packSize = parsePositiveInt(ticketInfoData.packSize, null) || 1;
+/** Platform fee cents recorded on the ticket (Stripe platformFee or Paytrail/Nabil commission). */
+export function readRecordedPlatformFeeCents(ticket) {
+    const info = ticketInfoPlain(ticket?.ticketInfo);
 
-    if (packSize > 1 && admissionQty >= packSize) {
-        return Math.max(1, Math.round(admissionQty / packSize));
+    if (info.platformFee != null && info.platformFee !== '') {
+        const fee = Number(info.platformFee);
+        if (Number.isFinite(fee) && fee >= 0) return Math.round(fee);
     }
 
-    return admissionQty;
+    const commission = info.platformCommission;
+    if (commission == null || commission === '') return 0;
+
+    if (typeof commission === 'object') {
+        const cents = Number(commission.platformAmount ?? commission.platform_amount ?? 0);
+        return Number.isFinite(cents) && cents > 0 ? Math.round(cents) : 0;
+    }
+
+    const num = Number(commission);
+    if (!Number.isFinite(num) || num <= 0) return 0;
+    return Math.round(num);
 }
 
-/**
- * Platform fee is charged once per payment transaction. If a stored value was
- * accidentally scaled by order quantity, normalize back to the per-transaction fee.
- */
-export function normalizePerTransactionPlatformFeeCents(feeCents, {
-    orderQuantity = 1,
-    configuredFeeCents = 0,
-} = {}) {
-    const fee = Math.round(Number(feeCents || 0));
-    if (fee <= 0) return 0;
+/** Platform fee cents for ledger publish: ticket first, else env unit fee × orderQuantity. */
+export function resolvePublishedPlatformFeeCents(ticket, { grossCents = 0, method = 'stripe' } = {}) {
+    const recorded = readRecordedPlatformFeeCents(ticket);
+    if (recorded > 0) return recorded;
 
-    const qty = Math.max(1, Math.round(Number(orderQuantity) || 1));
-    if (qty <= 1) return fee;
+    const normalizedMethod = String(method || '').toLowerCase();
+    if (normalizedMethod === 'free' || grossCents <= 0) return 0;
 
-    const configured = Math.round(Number(configuredFeeCents || 0));
-    if (configured <= 0) return fee;
+    const unitFee = getDefaultStripePlatformFeeCents();
+    if (unitFee <= 0) return 0;
 
-    const scaled = configured * qty;
-    if (fee === scaled) return configured;
-    if (fee % configured === 0 && fee / configured === qty) return configured;
-
-    return fee;
+    const orderQty = resolveOrderQuantityFromTicket(ticket) ?? 1;
+    const scaled = scalePlatformFeeByOrderQuantity(unitFee, orderQty);
+    return Math.min(scaled, Math.round(grossCents));
 }
 
-/**
- * Resolve platform fee cents for Stripe payments (PI application fee, metadata, merchant config).
- * Always returns a flat per-transaction amount.
- */
-export function resolveStripePlatformFeeCents({
+/** Copy platform fee fields from payment intent / metadata onto ticketInfo at checkout. */
+export function copyRecordedPlatformFeeToTicketInfo(ticketInfo, {
     paymentIntent = null,
     stripeMetadata = {},
-    merchant = null,
     fulfillment = {},
-    orderQuantity = 1,
 } = {}) {
-    const merchantConfiguredFeeCents = getMerchantConfiguredStripePlatformFeeCents(merchant);
-    let feeCents = 0;
-
     const fromPi = paymentIntent?.application_fee_amount;
-    if (fromPi != null && Number(fromPi) > 0) {
-        feeCents = Math.round(Number(fromPi));
+    if (fromPi != null && fromPi !== '') {
+        const fee = Number(fromPi);
+        if (Number.isFinite(fee) && fee >= 0) {
+            ticketInfo.platformFee = Math.round(fee);
+        }
     } else {
-        const fromMeta = Number(stripeMetadata.platformFee || fulfillment.platformFee || 0);
-        if (fromMeta > 0) {
-            feeCents = Math.round(fromMeta);
-        } else {
-            feeCents = resolveConfiguredStripePlatformFeeCents(merchant);
+        const metaFee = stripeMetadata.platformFee ?? fulfillment.platformFee;
+        if (metaFee != null && metaFee !== '') {
+            const fee = Number(metaFee);
+            if (Number.isFinite(fee) && fee >= 0) {
+                ticketInfo.platformFee = Math.round(fee);
+            }
         }
     }
 
-    const normalized = normalizePerTransactionPlatformFeeCents(feeCents, {
-        orderQuantity,
-        configuredFeeCents: merchantConfiguredFeeCents,
-    });
-
-    if (normalized !== feeCents && feeCents > 0) {
-        info('[merchantPlatformFee] Normalized qty-scaled platform fee %d -> %d (orderQty=%d, configured=%d)',
-            feeCents, normalized, orderQuantity, merchantConfiguredFeeCents);
+    const unit = stripeMetadata.platformFeeUnitCents ?? fulfillment.platformFeeUnitCents;
+    if (unit != null && unit !== '') {
+        ticketInfo.platformFeeUnitCents = String(unit);
     }
 
-    return normalized;
+    const basis = stripeMetadata.platformFeeBasis ?? fulfillment.platformFeeBasis;
+    if (basis) {
+        ticketInfo.platformFeeBasis = basis;
+    }
 }
-
-export const PLATFORM_FEE_BASIS = 'per_transaction';
