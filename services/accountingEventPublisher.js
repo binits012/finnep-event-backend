@@ -90,6 +90,13 @@ function centsFromMajor(amount) {
     return Math.round(n * 100);
 }
 
+function resolveAdmissionQuantityFromTicket(ticket, orderQuantity = 1) {
+    const raw = ticket?.ticketInfo?.get?.('quantity') ?? ticket?.ticketInfo?.quantity;
+    const parsed = parseInt(String(raw ?? ''), 10);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    return Math.max(1, parseInt(String(orderQuantity || 1), 10) || 1);
+}
+
 /**
  * Normalize platform fee to cents from ticket info / payment payloads.
  */
@@ -178,6 +185,7 @@ export async function publishPaymentCompleted({
 }) {
     const normalizedMethod = (method || 'stripe').toLowerCase();
     const orderQuantity = resolveOrderQuantityFromTicket(ticket);
+    const admissionQuantity = resolveAdmissionQuantityFromTicket(ticket, orderQuantity);
     const configuredFeeCents = getMerchantConfiguredStripePlatformFeeCents(merchant);
 
     let effectivePlatformFeeCents = Number(platformFeeCents || 0);
@@ -204,6 +212,7 @@ export async function publishPaymentCompleted({
         platformFeeCents: resolvedPlatformFeeCents,
         platformFeeBasis: PLATFORM_FEE_BASIS,
         orderQuantity,
+        admissionQuantity,
         configuredPlatformFeeCents: configuredFeeCents || null,
         pspFeeCents,
         merchantNetCents: merchantNet,
