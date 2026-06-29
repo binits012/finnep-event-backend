@@ -34,11 +34,23 @@ export async function resolveTicketMerchant(db, ticket) {
     return { event, merchant: null, febMerchantId: null, emsMerchantId: null };
   }
 
+  let merchant = null;
+  const merchantFilters = [];
+  if (febMerchantId && ObjectId.isValid(String(febMerchantId))) {
+    merchantFilters.push({ _id: new ObjectId(String(febMerchantId)) });
+  }
+  if (emsMerchantId) {
+    merchantFilters.push({ merchantId: String(emsMerchantId) });
+  }
+  if (merchantFilters.length > 0) {
+    merchant = await db.collection('merchants').findOne({ $or: merchantFilters });
+  }
+
   return {
     event,
     febMerchantId: febMerchantId ? String(febMerchantId) : null,
     emsMerchantId: emsMerchantId ? String(emsMerchantId) : null,
-    merchant: {
+    merchant: merchant || {
       _id: febMerchantId,
       merchantId: emsMerchantId,
     },

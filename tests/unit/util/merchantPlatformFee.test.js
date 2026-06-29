@@ -52,6 +52,37 @@ describe('merchantPlatformFee', () => {
         expect(readRecordedPlatformFeeCents(ticket)).toBe(250);
     });
 
+    it('resolvePublishedPlatformFeeCents scales flat platformFee when unit cannot be resolved', () => {
+        const ticket = {
+            ticketInfo: {
+                platformFee: 150,
+                platformFeeBasis: 'per_order_quantity',
+                orderQuantity: '4',
+                quantity: '4',
+            },
+        };
+        expect(resolvePublishedPlatformFeeCents(ticket, null, { grossCents: 41400, method: 'stripe' })).toBe(600);
+    });
+
+    it('resolvePublishedPlatformFeeCents keeps already-scaled platformFee total', () => {
+        const prev = process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS;
+        process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS = '150';
+        try {
+            const ticket = {
+                ticketInfo: {
+                    platformFee: 600,
+                    platformFeeBasis: 'per_order_quantity',
+                    orderQuantity: '4',
+                    quantity: '4',
+                },
+            };
+            expect(resolvePublishedPlatformFeeCents(ticket, null, { grossCents: 41400, method: 'stripe' })).toBe(600);
+        } finally {
+            if (prev === undefined) delete process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS;
+            else process.env.ACCOUNTING_DEFAULT_PLATFORM_FEE_CENTS = prev;
+        }
+    });
+
     it('resolvePublishedPlatformFeeCents scales unit × orderQuantity even when ticket has flat platformFee', () => {
         const merchant = { otherInfo: { stripe: 150 } };
         const ticket = {

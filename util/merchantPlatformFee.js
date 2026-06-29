@@ -110,6 +110,33 @@ export function resolvePublishedUnitPlatformFeeCents(ticket, merchant = null) {
 }
 
 /**
+ * When only ticket.platformFee is present (no unit field), decide if it is per-unit or already scaled.
+ */
+function resolveRecordedPlatformFeeForPerOrderQuantity(recorded, orderQty, merchant) {
+    const grossQty = Math.max(1, Math.round(Number(orderQty) || 1));
+    if (grossQty === 1) {
+        return recorded;
+    }
+
+    const scaledFromRecorded = scalePlatformFeeByOrderQuantity(recorded, grossQty);
+    const configuredUnit = getMerchantConfiguredStripePlatformFeeCents(merchant)
+        || getDefaultStripePlatformFeeCents();
+
+    if (configuredUnit > 0) {
+        if (recorded <= configuredUnit) {
+            return scaledFromRecorded;
+        }
+        const expectedTotal = scalePlatformFeeByOrderQuantity(configuredUnit, grossQty);
+        if (recorded === expectedTotal) {
+            return recorded;
+        }
+    }
+
+    // Legacy tickets stored the unit fee in platformFee without scaling.
+    return scaledFromRecorded;
+}
+
+/**
  * Ledger platform fee cents.
  * Stripe per_order_quantity: unit × orderQuantity (ignores flat platformFee on ticket).
  * Paytrail/Nabil: recorded commission on ticket.
@@ -125,14 +152,26 @@ export function resolvePublishedPlatformFeeCents(ticket, merchant = null, { gros
 
     const basis = readTicketInfoValue(ticket, 'platformFeeBasis') || PLATFORM_FEE_BASIS;
     const orderQty = resolveOrderQuantityFromTicket(ticket) ?? 1;
-    const unitFee = resolvePublishedUnitPlatformFeeCents(ticket, merchant);
+    const gross = Math.round(grossCents);
 
-    if (basis === PLATFORM_FEE_BASIS && unitFee > 0) {
-        return Math.min(scalePlatformFeeByOrderQuantity(unitFee, orderQty), Math.round(grossCents));
+    if (basis !== PLATFORM_FEE_BASIS) {
+        const recorded = readRecordedPlatformFeeCents(ticket);
+        return recorded > 0 ? Math.min(recorded, gross) : 0;
     }
 
+    let unitFee = resolvePublishedUnitPlatformFeeCents(ticket, merchant);
     const recorded = readRecordedPlatformFeeCents(ticket);
-    return recorded > 0 ? Math.min(recorded, Math.round(grossCents)) : 0;
+
+    if (unitFee <= 0 && recorded > 0) {
+        const fee = resolveRecordedPlatformFeeForPerOrderQuantity(recorded, orderQty, merchant);
+        return Math.min(fee, gross);
+    }
+
+    if (unitFee > 0) {
+        return Math.min(scalePlatformFeeByOrderQuantity(unitFee, orderQty), gross);
+    }
+
+    return 0;
 }
 
 /** Copy platform fee fields from payment intent / metadata onto ticketInfo at checkout. */

@@ -4891,8 +4891,9 @@ export const handlePaymentSuccess = async (req, res, next) => {
             const { publishPaymentCompleted } = await import('../services/accountingEventPublisher.js');
             const checkoutHostname = extractCheckoutHostname({ req, metadata: requestMetadata, fulfillment });
             const checkoutChannel = resolveSiloCheckoutChannel(merchant, checkoutHostname);
+            const ticketForAccounting = await Ticket.getTicketById(ticket._id, false);
             await publishPaymentCompleted({
-                ticket,
+                ticket: ticketForAccounting || ticket,
                 event,
                 merchant,
                 method: paymentProvider,
