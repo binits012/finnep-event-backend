@@ -592,7 +592,7 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
             socialMedidFB = merchantObj?.socialMedia?.facebook || '';
             socialMedidLN = merchantObj?.socialMedia?.linkedin || '';
             organizerName = merchantObj?.orgName || merchantObj?.name || venueInfo.name || 'Event Organizer';
-            organizerEmail = merchantObj?.companyEmail || merchantObj?.email || process.env.EMAIL_USERNAME || 'info@finnep.fi';
+            organizerEmail = siloBranding.brandingContactEmail || merchantObj?.companyEmail || merchantObj?.email || '';
             organizerPhone = merchantObj?.companyPhoneNumber || merchantObj?.phone || '';
         } else {
             const branding = await resolvePlatformBrandingAsync(marketCountryCode);
@@ -796,9 +796,25 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
 async function deliverTicketEmailPayload(ticketId, emailPayload, options = {}) {
     if (options.channel === 'silo' && options.merchant) {
         const { sendSiloEmail, resolveSiloSmtpConfig } = await import('./siloMail.js');
-        if (resolveSiloSmtpConfig(options.merchant)) {
-            await sendSiloEmail(options.merchant, emailPayload);
+        let merchant = options.merchant;
+        if (!resolveSiloSmtpConfig(merchant)) {
+            const Merchant = await import('../model/merchant.js');
+            const merchantId = merchant?._id || merchant?.id;
+            if (merchantId) {
+                const fresh = await Merchant.getMerchantById(merchantId);
+                if (fresh) merchant = fresh;
+            }
+        }
+        if (resolveSiloSmtpConfig(merchant)) {
+            await sendSiloEmail(merchant, emailPayload);
         } else {
+            warn('[ticketMaster] Silo checkout ticket email but merchant SMTP is not configured; using platform mail', {
+                merchantId: String(merchant?._id || merchant?.id || ''),
+                checkoutHostname: options.checkoutHostname || null,
+            });
+            if (!emailPayload.from && process.env.EMAIL_USERNAME) {
+                emailPayload.from = process.env.EMAIL_USERNAME;
+            }
             await forward(emailPayload);
         }
     } else {

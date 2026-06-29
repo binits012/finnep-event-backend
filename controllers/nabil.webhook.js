@@ -7,6 +7,7 @@ import * as commonUtil from '../util/common.js';
 import redisClient from '../model/redisConnect.js';
 import { info, error } from '../model/logger.js';
 import * as consts from '../const.js';
+import { resolveSiloCheckoutChannel } from '../util/siloCheckoutEmail.js';
 import { queueTicketEmail } from '../workers/emailWorker.js';
 import { publishTicketCreationEvent } from './front.controller.js';
 import { publishPaymentCompleted, resolvePlatformFeeCents } from '../services/accountingEventPublisher.js';
@@ -241,7 +242,7 @@ async function _createTicketFromNabilPaymentBody(paymentData, transactionId, sta
                 commission: paymentData.commission,
             }),
             pspFeeCents: 0,
-            checkoutChannel: paymentData.siloHostname ? 'silo' : 'marketplace',
+            checkoutChannel: resolveSiloCheckoutChannel(merchant, paymentData.checkoutHostname),
             currency: (paymentData.currency || 'npr').toLowerCase(),
         });
     } catch (accountingErr) {

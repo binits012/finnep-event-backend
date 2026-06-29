@@ -19,16 +19,19 @@ function parseHostnameFromUrlish(raw) {
 	}
 }
 
-export function extractCheckoutHostname({ req, metadata } = {}) {
+export function extractCheckoutHostname({ req, metadata, fulfillment } = {}) {
+	// Snapshot / explicit body hints beat Origin — proxy or API callers may send a misleading Origin.
 	const candidates = []
-	if (req && typeof req.get === 'function') {
-		const fromHeader = parseHostnameFromUrlish(req.get('Origin') || req.get('Referer'))
-		if (fromHeader) candidates.push(fromHeader)
-	}
+	const fulfillmentHint = sanitizeCheckoutHostname(fulfillment?.checkoutHostname)
+	if (fulfillmentHint) candidates.push(fulfillmentHint)
 	const bodyHint = sanitizeCheckoutHostname(req?.body?.checkoutHostname)
 	if (bodyHint) candidates.push(bodyHint)
 	const metadataHint = sanitizeCheckoutHostname(metadata?.checkoutHostname)
 	if (metadataHint) candidates.push(metadataHint)
+	if (req && typeof req.get === 'function') {
+		const fromHeader = parseHostnameFromUrlish(req.get('Origin') || req.get('Referer'))
+		if (fromHeader) candidates.push(fromHeader)
+	}
 	return candidates.find(Boolean) || null
 }
 
@@ -80,7 +83,12 @@ export function shouldUseSiloTicketEmail(merchant, checkoutHostname) {
 	return domains.some((domain) => hostnameMatchesSiloDomain(hostname, domain))
 }
 
-export async function resolveTicketEmailOptions({ req, merchant, metadata, marketCountryCode }) {
+/** Accounting / analytics channel for a checkout origin. */
+export function resolveSiloCheckoutChannel(merchant, checkoutHostname) {
+	return shouldUseSiloTicketEmail(merchant, checkoutHostname) ? 'silo' : 'marketplace'
+}
+
+export async function resolveTicketEmailOptions({ req, merchant, metadata, fulfillment, marketCountryCode }) {
 	const base = {
 		marketCountryCode: marketCountryCode ?? null
 	}
@@ -91,7 +99,7 @@ export async function resolveTicketEmailOptions({ req, merchant, metadata, marke
 	}
 	if (!merchantDoc) return base
 
-	const checkoutHostname = extractCheckoutHostname({ req, metadata })
+	const checkoutHostname = extractCheckoutHostname({ req, metadata, fulfillment })
 	if (shouldUseSiloTicketEmail(merchantDoc, checkoutHostname)) {
 		return {
 			...base,

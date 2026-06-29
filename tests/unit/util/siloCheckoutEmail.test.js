@@ -21,6 +21,36 @@ describe('siloCheckoutEmail', () => {
 		expect(hostnameMatchesSiloDomain('okazzo.eu', 'merchant.com')).toBe(false)
 	})
 
+	it('extracts checkout hostname from fulfillment snapshot', () => {
+		expect(extractCheckoutHostname({
+			req: { get: () => null, body: {} },
+			fulfillment: { checkoutHostname: 'aayogorkhalievents.okazzo.eu' },
+		})).toBe('aayogorkhalievents.okazzo.eu')
+	})
+
+	it('prefers fulfillment snapshot hostname over Origin header', () => {
+		const req = {
+			get: (name) => (name === 'Origin' ? 'https://api.okazzo.eu' : null),
+			body: {},
+		}
+		expect(extractCheckoutHostname({
+			req,
+			fulfillment: { checkoutHostname: 'aayogorkhalievents.okazzo.eu' },
+		})).toBe('aayogorkhalievents.okazzo.eu')
+	})
+
+	it('resolveSiloCheckoutChannel returns silo for matching hostname', async () => {
+		const { resolveSiloCheckoutChannel } = await import('../../../util/siloCheckoutEmail.js')
+		const merchant = {
+			siloSettings: {
+				enabled: true,
+				domain: 'aayogorkhalievents.okazzo.eu',
+			},
+		}
+		expect(resolveSiloCheckoutChannel(merchant, 'aayogorkhalievents.okazzo.eu')).toBe('silo')
+		expect(resolveSiloCheckoutChannel(merchant, 'okazzo.eu')).toBe('marketplace')
+	})
+
 	it('uses silo email when silo is enabled and hostname matches', () => {
 		const merchant = {
 			siloSettings: {

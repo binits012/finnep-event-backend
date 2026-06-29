@@ -8,7 +8,7 @@ import * as commonUtil from '../util/common.js';
 import redisClient from '../model/redisConnect.js';
 import { info, error } from '../model/logger.js';
 import * as consts from '../const.js';
-import { buildSiloTicketEmailOptionsFromPaymentData } from '../util/siloCheckoutEmail.js';
+import { buildSiloTicketEmailOptionsFromPaymentData, resolveSiloCheckoutChannel } from '../util/siloCheckoutEmail.js';
 import { publishTicketCreationEvent } from './front.controller.js';
 import { publishPaymentCompleted, resolvePlatformFeeCents } from '../services/accountingEventPublisher.js';
 import {
@@ -402,7 +402,7 @@ async function _createTicketFromPaytrailPaymentBody(paymentData, transactionId, 
             grossCents,
             platformFeeCents,
             pspFeeCents: 0,
-            checkoutChannel: paymentData.siloHostname ? 'silo' : 'marketplace',
+            checkoutChannel: resolveSiloCheckoutChannel(merchant, paymentData.checkoutHostname),
             currency: 'eur',
         });
     } catch (accountingErr) {

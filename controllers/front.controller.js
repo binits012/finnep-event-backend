@@ -24,7 +24,7 @@ import {
 import { computeTicketLinePricing, roundMoney, moneyPercentOfExactSum, moneyPercentOf, moneyAdd } from '../util/money.js'
 import * as sendMail from '../util/sendMail.js'
 import { isPlatformStripeAccount } from '../util/stripePlatform.js'
-import { getMerchantConfiguredStripePlatformFeeCents, resolveStripePlatformFeeCents } from '../util/merchantPlatformFee.js'
+import { getMerchantConfiguredStripePlatformFeeCents, resolveStripePlatformFeeCents, resolveConfiguredStripePlatformFeeCents, resolveOrderQuantityFromTicket, PLATFORM_FEE_BASIS } from '../util/merchantPlatformFee.js'
 import Stripe from 'stripe'
 const stripe = new Stripe(process.env.STRIPE_KEY)
 const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET
@@ -88,7 +88,7 @@ import {
     resolveMergedPlatformSettings,
     pickDefaultPlatformDoc,
 } from '../util/platformSettings.js'
-import { resolveTicketEmailOptions, extractCheckoutHostname, shouldUseSiloTicketEmail } from '../util/siloCheckoutEmail.js'
+import { resolveTicketEmailOptions, extractCheckoutHostname, shouldUseSiloTicketEmail, resolveSiloCheckoutChannel } from '../util/siloCheckoutEmail.js'
 import { normalizeCountryCode, expandCountryAliases } from '../util/regionalAccess.js'
 import {
     assertDualPaymentV1Allowed,
@@ -720,14 +720,32 @@ export const completeOrderTicket = async (req, res, next) => {
                 try {
                     const { publishPaymentCompleted } = await import('../services/accountingEventPublisher.js');
                     const paymentIntentId = sessionDetails.payment_intent || sessionDetails.id;
+                    let legacyMerchant = null;
+                    if (ticketInfo.merchantId) {
+                        const merchants = await Merchant.genericSearchMerchant(ticketInfo.merchantId, ticketInfo.externalMerchantId);
+                        legacyMerchant = merchants.length > 0 ? merchants[0] : null;
+                    }
+                    const legacyTicket = ticketData || ticket;
+                    let legacyPaymentIntent = null;
+                    if (paymentIntentId && String(paymentIntentId).startsWith('pi_')) {
+                        try {
+                            legacyPaymentIntent = await stripe.paymentIntents.retrieve(String(paymentIntentId));
+                        } catch (legacyPiErr) {
+                            error('Legacy checkout: could not retrieve payment intent for platform fee', { error: legacyPiErr?.message });
+                        }
+                    }
                     await publishPaymentCompleted({
-                        ticket: ticketData || ticket,
+                        ticket: legacyTicket,
                         event,
-                        merchant: ticketInfo.merchantId ? { _id: ticketInfo.merchantId, merchantId: ticketInfo.externalMerchantId } : null,
+                        merchant: legacyMerchant || (ticketInfo.merchantId ? { _id: ticketInfo.merchantId, merchantId: ticketInfo.externalMerchantId } : null),
                         method: 'stripe',
                         externalPaymentId: String(paymentIntentId),
                         grossCents: Number(sessionDetails.amount_total || 0),
-                        platformFeeCents: 0,
+                        platformFeeCents: resolveStripePlatformFeeCents({
+                            paymentIntent: legacyPaymentIntent,
+                            merchant: legacyMerchant,
+                            orderQuantity: resolveOrderQuantityFromTicket(legacyTicket),
+                        }),
                         pspFeeCents: 0,
                         checkoutChannel: 'marketplace',
                         currency: (sessionDetails.currency || 'eur').toLowerCase(),
@@ -1966,6 +1984,10 @@ const completeZeroAmountCheckout = async (req, res, { metadata, parsedMetadata, 
         event,
         ticketTypeConfig
     );
+    const zeroCheckoutHostname = extractCheckoutHostname({ req, metadata: fulfillmentMetadata });
+    if (zeroCheckoutHostname) {
+        fulfillmentMetadata.checkoutHostname = zeroCheckoutHostname;
+    }
     const ticketTypeName = ticketTypeConfig?.name || fulfillmentMetadata.ticketName;
 
     const ticketInfo = {
@@ -1997,6 +2019,9 @@ const completeZeroAmountCheckout = async (req, res, { metadata, parsedMetadata, 
         country: fulfillmentMetadata.country || null,
         marketingOptIn: fulfillmentMetadata.marketingOptIn || false,
     };
+    if (zeroCheckoutHostname) {
+        ticketInfo.checkoutHostname = zeroCheckoutHostname;
+    }
     attachCouponFieldsToTicketInfo(ticketInfo, fulfillmentMetadata);
 
     if (event?.venue) {
@@ -2192,6 +2217,7 @@ const completeZeroAmountCheckout = async (req, res, { metadata, parsedMetadata, 
         req,
         merchant,
         metadata: fulfillmentMetadata,
+        fulfillment: fulfillmentMetadata,
         marketCountryCode: parseRequestMarketCountryCode(req)
     }));
 
@@ -2216,7 +2242,10 @@ const completeZeroAmountCheckout = async (req, res, { metadata, parsedMetadata, 
             grossCents: 0,
             platformFeeCents: 0,
             pspFeeCents: 0,
-            checkoutChannel: fulfillmentMetadata.siloHostname ? 'silo' : 'marketplace',
+            checkoutChannel: resolveSiloCheckoutChannel(
+                merchant,
+                extractCheckoutHostname({ req, metadata: fulfillmentMetadata })
+            ),
             currency: (currency || 'eur').toLowerCase(),
         });
     } catch (accountingErr) {
@@ -2458,6 +2487,7 @@ export const createPaymentIntent = async (req, res, next) => {
         const { seatTickets, placeIds, locale: _, ...stripeMetadataBase } = metadata;
         const stripeMetadata = {
             ...stripeMetadataBase,
+            paymentProvider,
             ...(parsedMetadata.couponCode ? { couponCode: parsedMetadata.couponCode } : {}),
             ...(parsedMetadata.couponId ? { couponId: parsedMetadata.couponId } : {}),
             ...(parsedMetadata.couponDiscountAmount != null
@@ -2471,14 +2501,11 @@ export const createPaymentIntent = async (req, res, next) => {
         // Only apply connected account logic if merchant is NOT the platform account
         if (!isPlatformStripeAccount(merchant.stripeAccount)) {
 
-            const configuredPlatformFee = typeof merchant?.otherInfo?.get === 'function'
-                ? merchant.otherInfo.get("stripe")
-                : merchant?.otherInfo?.stripe;
-            const platformFee = Math.round(Number(configuredPlatformFee ?? 30));
+            const platformFee = resolveConfiguredStripePlatformFeeCents(merchant);
             if (!Number.isFinite(platformFee) || platformFee < 0) {
                 throw new Error('Invalid Stripe platform fee configuration');
             }
-            if (platformFee > baseAmount) {
+            if (platformFee > 0 && platformFee > baseAmount) {
                 throw new Error('Stripe platform fee cannot exceed payment amount');
             }
 
@@ -2496,6 +2523,7 @@ export const createPaymentIntent = async (req, res, next) => {
                     clientId: clientId, // Track client for monitoring
                     baseAmount: baseAmount.toString(),
                     platformFee: platformFee.toString(),
+                    platformFeeBasis: PLATFORM_FEE_BASIS,
                     chargeType: 'direct',
                     locale: locale // Store locale for email templates
                 },
@@ -2509,14 +2537,11 @@ export const createPaymentIntent = async (req, res, next) => {
                 stripeAccount: merchant.stripeAccount
             };
         } else {
-            const configuredPlatformFee = Math.round(Number(
-                (typeof merchant?.otherInfo?.get === 'function'
-                    ? merchant.otherInfo.get('stripe')
-                    : merchant?.otherInfo?.stripe) ?? 0
-            ));
-            const platformFeeMetadata = Number.isFinite(configuredPlatformFee) && configuredPlatformFee > 0
+            const platformFee = resolveConfiguredStripePlatformFeeCents(merchant);
+            const platformFeeMetadata = platformFee > 0
                 ? {
-                    platformFee: configuredPlatformFee.toString(),
+                    platformFee: platformFee.toString(),
+                    platformFeeBasis: PLATFORM_FEE_BASIS,
                     chargeType: 'platform',
                 }
                 : {};
@@ -2568,7 +2593,11 @@ export const createPaymentIntent = async (req, res, next) => {
                 currency: paymentIntent.currency,
                 merchant,
                 metadata,
-                parsedMetadata,
+                parsedMetadata: {
+                    ...parsedMetadata,
+                    checkoutHostname: extractCheckoutHostname({ req, metadata: parsedMetadata }),
+                    paymentProvider,
+                },
                 expectedPrice,
                 event,
             })
@@ -4342,6 +4371,12 @@ export const handlePaymentSuccess = async (req, res, next) => {
         const stripeMetadata = paymentIntent.metadata || {};
         const requestMetadata = metadata || {};
         const fulfillment = checkoutSnapshot.fulfillment || {};
+        const paymentProvider = String(
+            fulfillment.paymentProvider ||
+            stripeMetadata.paymentProvider ||
+            requestMetadata.paymentProvider ||
+            'stripe'
+        ).toLowerCase();
 
         const mergedMetadata = {
             ...fulfillment,
@@ -4496,11 +4531,6 @@ export const handlePaymentSuccess = async (req, res, next) => {
             // Store total values for seated events with different ticket types
             totalBasePrice: sanitizedMetadata.totalBasePrice !== undefined ? sanitizedMetadata.totalBasePrice : null,
             totalServiceFee: sanitizedMetadata.totalServiceFee !== undefined ? sanitizedMetadata.totalServiceFee : null,
-            platformFee: resolveStripePlatformFeeCents({
-                paymentIntent,
-                stripeMetadata,
-                merchant,
-            }) || null,
         };
 
         const ticketTypeConfig = findTicketTypeConfig(event, sanitizedMetadata.ticketId);
@@ -4552,6 +4582,21 @@ export const handlePaymentSuccess = async (req, res, next) => {
             seatCount
         });
         Object.assign(ticketInfo, ticketInfoWithQty);
+
+        const checkoutHostnameForTicket = extractCheckoutHostname({ req, metadata: requestMetadata, fulfillment });
+        if (checkoutHostnameForTicket) {
+            ticketInfo.checkoutHostname = checkoutHostnameForTicket;
+        }
+
+        const resolvedPlatformFeeCents = resolveStripePlatformFeeCents({
+            paymentIntent,
+            stripeMetadata,
+            merchant,
+            fulfillment,
+            orderQuantity: resolveOrderQuantityFromTicket({ ticketInfo }),
+        });
+        ticketInfo.platformFee = resolvedPlatformFeeCents || null;
+        ticketInfo.platformFeeBasis = PLATFORM_FEE_BASIS;
 
         if (sanitizedMetadata.ticketId) {
             try {
@@ -4612,6 +4657,7 @@ export const handlePaymentSuccess = async (req, res, next) => {
                         req,
                         merchant,
                         metadata: sanitizedMetadata,
+                        fulfillment,
                         marketCountryCode: parseRequestMarketCountryCode(req)
                     });
                     if (!existingTicket.isSend) {
@@ -4732,7 +4778,7 @@ export const handlePaymentSuccess = async (req, res, next) => {
         }
 
         await Ticket.updateTicketById(ticket._id, {
-            paymentProvider: 'stripe',
+            paymentProvider,
             paymentReference: paymentIntentId,
             paymentIntentId,
             paymentStatus: 'paid'
@@ -4832,6 +4878,7 @@ export const handlePaymentSuccess = async (req, res, next) => {
             req,
             merchant,
             metadata: sanitizedMetadata,
+            fulfillment,
             marketCountryCode: parseRequestMarketCountryCode(req)
         }));
 
@@ -4852,12 +4899,13 @@ export const handlePaymentSuccess = async (req, res, next) => {
 
         try {
             const { publishPaymentCompleted } = await import('../services/accountingEventPublisher.js');
-            const checkoutChannel = (fulfillment.siloHostname || sanitizedMetadata.siloHostname) ? 'silo' : 'marketplace';
+            const checkoutHostname = extractCheckoutHostname({ req, metadata: requestMetadata, fulfillment });
+            const checkoutChannel = resolveSiloCheckoutChannel(merchant, checkoutHostname);
             await publishPaymentCompleted({
                 ticket,
                 event,
                 merchant,
-                method: 'stripe',
+                method: paymentProvider,
                 externalPaymentId: paymentIntentId,
                 grossCents: paymentIntent.amount,
                 platformFeeCents: resolveStripePlatformFeeCents({
@@ -4865,6 +4913,7 @@ export const handlePaymentSuccess = async (req, res, next) => {
                     stripeMetadata,
                     merchant,
                     fulfillment,
+                    orderQuantity: resolveOrderQuantityFromTicket(ticket),
                 }),
                 pspFeeCents: 0,
                 checkoutChannel,
@@ -5466,6 +5515,10 @@ export const handleFreeEventRegistration = async (req, res, next) => {
             iosApnsToken: iosApnsToken ? sanitizeString(iosApnsToken, 2048) : null,
             sectionSelections: Array.isArray(sectionSelections) ? sectionSelections : []
         };
+        const freeCheckoutHostname = extractCheckoutHostname({ req, metadata: sanitizedData });
+        if (freeCheckoutHostname) {
+            sanitizedData.checkoutHostname = freeCheckoutHostname;
+        }
 
         // Validate email format
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -5566,6 +5619,9 @@ export const handleFreeEventRegistration = async (req, res, next) => {
             paymentProvider: 'free',
             isFree: true
         };
+        if (freeCheckoutHostname) {
+            ticketInfo.checkoutHostname = freeCheckoutHostname;
+        }
         if (Array.isArray(sanitizedData.sectionSelections) && sanitizedData.sectionSelections.length > 0) {
             ticketInfo.sectionSelections = sanitizedData.sectionSelections;
         }
@@ -5677,6 +5733,7 @@ export const handleFreeEventRegistration = async (req, res, next) => {
             req,
             merchant,
             metadata: sanitizedData,
+            fulfillment: sanitizedData,
             marketCountryCode: parseRequestMarketCountryCode(req)
         }));
 
@@ -5705,7 +5762,10 @@ export const handleFreeEventRegistration = async (req, res, next) => {
                 grossCents: 0,
                 platformFeeCents: 0,
                 pspFeeCents: 0,
-                checkoutChannel: sanitizedData.siloHostname ? 'silo' : 'marketplace',
+                checkoutChannel: resolveSiloCheckoutChannel(
+                    merchant,
+                    freeCheckoutHostname || extractCheckoutHostname({ req, metadata: sanitizedData })
+                ),
                 currency: 'eur',
             });
         } catch (accountingErr) {

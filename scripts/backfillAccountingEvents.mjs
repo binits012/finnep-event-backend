@@ -9,7 +9,10 @@ import 'dotenv/config';
 import mongoose from 'mongoose';
 import '../model/dbConnect.js';
 import { publishPaymentCompleted, resolvePlatformFeeCents } from '../services/accountingEventPublisher.js';
-import { getMerchantConfiguredStripePlatformFeeCents } from '../util/merchantPlatformFee.js';
+import {
+  getMerchantConfiguredStripePlatformFeeCents,
+  resolveOrderQuantityFromTicket,
+} from '../util/merchantPlatformFee.js';
 import { resolveTicketMerchant, ticketInfoObject } from './lib/resolveTicketMerchant.mjs';
 import * as Merchant from '../model/merchant.js';
 
@@ -49,6 +52,7 @@ async function main() {
   let count = 0;
   let published = 0;
   let skipped = 0;
+  const publishedPaymentRefs = new Set();
 
   while (await cursor.hasNext()) {
     const ticket = await cursor.next();
@@ -70,6 +74,16 @@ async function main() {
       ticket.nabilTransactionId ||
       `ticket:${ticket._id}`;
 
+    if (publishedPaymentRefs.has(externalPaymentId)) {
+      skipped += 1;
+      continue;
+    }
+
+    const orderQuantity = resolveOrderQuantityFromTicket(ticket);
+    const configuredFeeCents = method === 'stripe'
+      ? getMerchantConfiguredStripePlatformFeeCents(merchant)
+      : 0;
+
     const priceMajor = Number(info.price ?? info.totalPrice ?? info.totalAmount ?? 0);
     const grossCents = method === 'free' ? 0 : Math.round(priceMajor * 100);
 
@@ -88,14 +102,17 @@ async function main() {
       method,
       grossCents,
       platformFee: info.platformFee
-        || (method === 'stripe' ? getMerchantConfiguredStripePlatformFeeCents(merchant) : 0),
+        || (method === 'stripe' ? configuredFeeCents : 0),
       platformCommission: info.platformCommission,
       commissionRate,
+      orderQuantity,
+      configuredFeeCents,
     });
 
     if (dryRun) {
-      console.log('[dry-run]', externalPaymentId, method, grossCents);
+      console.log('[dry-run]', externalPaymentId, method, grossCents, 'fee', platformFeeCents, 'qty', orderQuantity);
       published += 1;
+      publishedPaymentRefs.add(externalPaymentId);
       continue;
     }
 
@@ -114,6 +131,7 @@ async function main() {
         completedAt: ticket.createdAt?.toISOString?.() || new Date().toISOString(),
       });
       published += 1;
+      publishedPaymentRefs.add(externalPaymentId);
     } catch (err) {
       console.error('Failed', externalPaymentId, err?.message);
     }

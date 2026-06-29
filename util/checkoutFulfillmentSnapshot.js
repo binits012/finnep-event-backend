@@ -118,6 +118,8 @@ export function extractFulfillmentFromCheckout({
 		couponId: source.couponId != null ? String(source.couponId).trim() : null,
 		couponDiscountAmount: source.couponDiscountAmount,
 		catalogBaseSubtotal: source.catalogBaseSubtotal,
+		paymentProvider: source.paymentProvider != null ? String(source.paymentProvider).trim().toLowerCase() : null,
+		checkoutHostname: source.checkoutHostname != null ? String(source.checkoutHostname).trim().toLowerCase() : null,
 		serverCalculatedTotal: expectedPrice?.totalAmount ?? null,
 		pricingModel: event?.venue?.pricingModel || null,
 		isVenueEvent: Boolean(event?.venue?.venueId),
