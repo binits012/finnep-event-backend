@@ -31,11 +31,15 @@ const DEFAULT_REGION = process.env.SILO_DEPLOYMENT_AWS_REGION
 	|| process.env.AWS_REGION
 	|| process.env.BUCKET_REGION
 	|| 'eu-central-1'
-const BUCKET_PREFIX = (
-	process.env.SILO_DEPLOYMENT_BUCKET_PREFIX
-	|| process.env.BUCKET_NAME
-	|| 'okazzo-silo'
-).trim().toLowerCase()
+
+function getBucketPrefix() {
+	return (
+		process.env.SILO_DEPLOYMENT_BUCKET_PREFIX
+		|| process.env.BUCKET_NAME
+		|| 'okazzo-silo'
+	).trim().toLowerCase()
+}
+
 const PRICE_CLASS = process.env.SILO_DEPLOYMENT_CLOUDFRONT_PRICE_CLASS || 'PriceClass_100'
 
 function resolveAwsCredentials() {
@@ -93,11 +97,32 @@ function sanitizeOacName(name) {
 }
 
 function buildBucketName(merchantId) {
-	return sanitizeBucketName(`${BUCKET_PREFIX}-${merchantId}`)
+	return sanitizeBucketName(`${getBucketPrefix()}-${merchantId}`)
 }
 
 export function getPlannedSiloBucketName(merchantId) {
 	return buildBucketName(merchantId)
+}
+
+function siloDeploymentIsLive(existingDeployment = {}) {
+	const status = String(existingDeployment.status || '').toLowerCase()
+	return status === 'provisioned'
+		&& Boolean(existingDeployment.lastProvisionedAt)
+		&& Boolean(String(existingDeployment.cloudfrontDistributionId || '').trim())
+}
+
+/**
+ * Bucket for the current provision attempt.
+ * Live deployments keep their stored bucket; failed/pending retries use the
+ * current env prefix (SILO_DEPLOYMENT_BUCKET_PREFIX || BUCKET_NAME).
+ */
+export function resolveSiloBucketNameForProvision(merchantId, existingDeployment = {}) {
+	const planned = getPlannedSiloBucketName(merchantId)
+	const stored = String(existingDeployment.s3Bucket || '').trim()
+	if (siloDeploymentIsLive(existingDeployment) && stored) {
+		return stored
+	}
+	return planned
 }
 
 function buildOacName(merchantId) {
@@ -263,6 +288,16 @@ function buildBffOrigin(merchantId) {
 	}
 }
 
+const API_CACHE_ALLOWED_METHODS = ['GET', 'HEAD', 'OPTIONS', 'PUT', 'POST', 'PATCH', 'DELETE']
+export const API_CACHE_FORWARDED_HEADERS = [
+	'Origin',
+	'Referer',
+	'Content-Type',
+	'Accept',
+	'Authorization',
+	'x-market-country-code'
+]
+
 function buildApiCacheBehavior(bffOriginId, existing = {}) {
 	return {
 		...existing,
@@ -271,15 +306,15 @@ function buildApiCacheBehavior(bffOriginId, existing = {}) {
 		ViewerProtocolPolicy: 'redirect-to-https',
 		SmoothStreaming: existing.SmoothStreaming ?? false,
 		AllowedMethods: {
-			Quantity: 7,
-			Items: ['GET', 'HEAD', 'OPTIONS', 'PUT', 'POST', 'PATCH', 'DELETE'],
+			Quantity: API_CACHE_ALLOWED_METHODS.length,
+			Items: API_CACHE_ALLOWED_METHODS,
 			CachedMethods: { Quantity: 2, Items: ['GET', 'HEAD'] }
 		},
 		ForwardedValues: {
 			QueryString: true,
 			Headers: {
-				Quantity: 7,
-				Items: ['Origin', 'Referer', 'Content-Type', 'Accept', 'Authorization', 'x-market-country-code']
+				Quantity: API_CACHE_FORWARDED_HEADERS.length,
+				Items: API_CACHE_FORWARDED_HEADERS
 			},
 			Cookies: { Forward: 'none' },
 			QueryStringCacheKeys: { Quantity: 0 }
@@ -588,7 +623,7 @@ function bffOriginHasRequiredHeaders(origin, merchantId) {
 export async function inspectSiloDeploymentAws({ merchantId, existingDeployment = {} }) {
 	assertAwsCredentials()
 	const issues = []
-	const bucketName = existingDeployment.s3Bucket || buildBucketName(merchantId)
+	const bucketName = resolveSiloBucketNameForProvision(merchantId, existingDeployment)
 	const distributionId = existingDeployment.cloudfrontDistributionId || ''
 
 	if (!distributionId) {
@@ -662,7 +697,7 @@ export async function inspectSiloDeploymentAws({ merchantId, existingDeployment 
 
 export async function provisionSiloDeploymentAws({ merchantId, existingDeployment = {} }) {
 	assertAwsCredentials()
-	const bucketName = existingDeployment.s3Bucket || buildBucketName(merchantId)
+	const bucketName = resolveSiloBucketNameForProvision(merchantId, existingDeployment)
 	await ensureBucketExists(bucketName, DEFAULT_REGION)
 	const bucketRegion = await resolveBucketRegion(bucketName)
 	const oacId = await ensureOriginAccessControl(merchantId)

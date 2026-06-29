@@ -5,7 +5,7 @@ import {
 	provisionSiloDeploymentAws,
 	deprovisionSiloDeploymentAws,
 	formatDeploymentError,
-	getPlannedSiloBucketName
+	resolveSiloBucketNameForProvision
 } from '../../util/siloDeploymentAws.js'
 import { publishMerchantSiloDeploymentStatusChangedSafe } from '../../util/merchantEventPublisher.js'
 import { syncSiloStorefrontAllowedDomains } from '../../model/merchant.js'
@@ -53,10 +53,17 @@ export async function handleSiloDeploymentRequest(message) {
 	}
 
 	const existingSilo = normalizeSiloSettings(merchant.siloSettings || {})
+	const existingDeployment = existingSilo.deployment || {}
 
 	try {
-		const bucketName = existingSilo.deployment?.s3Bucket
-			|| (action === 'provision' ? getPlannedSiloBucketName(merchantId) : '')
+		const bucketName = action === 'provision'
+			? resolveSiloBucketNameForProvision(merchantId, existingDeployment)
+			: String(existingDeployment.s3Bucket || '').trim()
+
+		const deploymentForProvision = {
+			...existingDeployment,
+			...(bucketName ? { s3Bucket: bucketName } : {})
+		}
 
 		await updateMerchantDeploymentState(merchant, {
 			mode: 'per_merchant',
@@ -69,11 +76,11 @@ export async function handleSiloDeploymentRequest(message) {
 		const result = action === 'provision'
 			? await provisionSiloDeploymentAws({
 				merchantId,
-				existingDeployment: existingSilo.deployment || {}
+				existingDeployment: deploymentForProvision
 			})
 			: await deprovisionSiloDeploymentAws({
 				merchantId,
-				existingDeployment: existingSilo.deployment || {}
+				existingDeployment: deploymentForProvision
 			})
 
 		await updateMerchantDeploymentState(merchant, result)
