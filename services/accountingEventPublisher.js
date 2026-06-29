@@ -105,15 +105,17 @@ export async function publishPaymentCompleted({
     pspFeeCents = 0,
     checkoutChannel = 'marketplace',
     currency = 'eur',
-    completedAt = new Date().toISOString()
+    completedAt = new Date().toISOString(),
+    packSizeHint = null
 }) {
     const normalizedMethod = (method || 'stripe').toLowerCase();
-    const orderQuantity = resolveOrderQuantityFromTicket(ticket);
+    const orderQuantity = resolveOrderQuantityFromTicket(ticket, { packSizeHint });
     const admissionQuantity = resolveAdmissionQuantityFromTicket(ticket);
     const unitPlatformFeeCents = resolvePublishedUnitPlatformFeeCents(ticket, merchant);
     const platformFeeCents = resolvePublishedPlatformFeeCents(ticket, merchant, {
         grossCents,
         method: normalizedMethod,
+        packSizeHint,
     });
     const platformFeeBasis = readTicketInfoValue(ticket, 'platformFeeBasis') || (
         platformFeeCents > 0 && (normalizedMethod === 'stripe') ? PLATFORM_FEE_BASIS : null

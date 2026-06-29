@@ -32,27 +32,59 @@ describe('merchantPlatformFee', () => {
         expect(resolveAdmissionQuantityFromTicket(ticket)).toBe(6);
     });
 
-    it('returns null for orderQuantity when not recorded', () => {
-        const ticket = { ticketInfo: { quantity: '3' } };
-        expect(resolveOrderQuantityFromTicket(ticket)).toBeNull();
+    it('derives legacy orderQuantity from quantity when packSize is 1', () => {
+        const ticket = { ticketInfo: { quantity: '2' } };
+        expect(resolveOrderQuantityFromTicket(ticket)).toBe(2);
+        expect(resolveAdmissionQuantityFromTicket(ticket)).toBe(2);
+    });
+
+    it('derives orderQuantity from quantity and packSize for pack tickets', () => {
+        const ticket = { ticketInfo: { quantity: '3', packSize: '3' } };
+        expect(resolveOrderQuantityFromTicket(ticket)).toBe(1);
         expect(resolveAdmissionQuantityFromTicket(ticket)).toBe(3);
     });
 
-    it('reads platformFee from ticket only', () => {
-        const ticket = { ticketInfo: { platformFee: 300, orderQuantity: '2', quantity: '2' } };
-        expect(readRecordedPlatformFeeCents(ticket)).toBe(300);
+    it('prefers stored orderQuantity over quantity', () => {
+        const ticket = { ticketInfo: { orderQuantity: '1', quantity: '3', packSize: '3' } };
+        expect(resolveOrderQuantityFromTicket(ticket)).toBe(1);
     });
 
-    it('reads platformCommission object from ticket', () => {
+    it('uses packSizeHint for legacy pack tickets without stored packSize', () => {
+        const ticket = { ticketInfo: { quantity: '3' } };
+        expect(resolveOrderQuantityFromTicket(ticket)).toBe(3);
+        expect(resolveOrderQuantityFromTicket(ticket, { packSizeHint: 3 })).toBe(1);
+    });
+
+    it('stored packSize wins over packSizeHint', () => {
+        const ticket = { ticketInfo: { quantity: '6', packSize: '3' } };
+        expect(resolveOrderQuantityFromTicket(ticket, { packSizeHint: 2 })).toBe(2);
+    });
+
+    it('returns null when quantity is not a whole multiple of packSizeHint', () => {
+        const ticket = { ticketInfo: { quantity: '5' } };
+        expect(resolveOrderQuantityFromTicket(ticket, { packSizeHint: 3 })).toBeNull();
+    });
+
+    it('legacy pack ticket fee uses packSizeHint (group of 3 = 1 order)', () => {
+        const merchant = { otherInfo: { stripe: 150 } };
+        const ticket = { ticketInfo: { quantity: '3', platformFee: 150 } };
+        expect(resolvePublishedPlatformFeeCents(ticket, merchant, { grossCents: 23700, method: 'stripe', packSizeHint: 3 })).toBe(150);
+    });
+
+    it('Hobart backfill case: qty 2 legacy ticket × 150¢ unit = 300¢', () => {
+        const merchant = { otherInfo: { stripe: 150 } };
         const ticket = {
             ticketInfo: {
-                platformCommission: { platformAmount: 250 },
+                quantity: '2',
+                platformFee: 150,
             },
         };
-        expect(readRecordedPlatformFeeCents(ticket)).toBe(250);
+        expect(resolveOrderQuantityFromTicket(ticket)).toBe(2);
+        expect(resolvePublishedPlatformFeeCents(ticket, merchant, { grossCents: 15800, method: 'stripe' })).toBe(300);
     });
 
     it('resolvePublishedPlatformFeeCents scales flat platformFee when unit cannot be resolved', () => {
+        const merchant = { otherInfo: { stripe: 150 } };
         const ticket = {
             ticketInfo: {
                 platformFee: 150,
@@ -61,7 +93,7 @@ describe('merchantPlatformFee', () => {
                 quantity: '4',
             },
         };
-        expect(resolvePublishedPlatformFeeCents(ticket, null, { grossCents: 41400, method: 'stripe' })).toBe(600);
+        expect(resolvePublishedPlatformFeeCents(ticket, merchant, { grossCents: 41400, method: 'stripe' })).toBe(600);
     });
 
     it('resolvePublishedPlatformFeeCents keeps already-scaled platformFee total', () => {
@@ -84,6 +116,20 @@ describe('merchantPlatformFee', () => {
     });
 
     it('resolvePublishedPlatformFeeCents scales unit × orderQuantity even when ticket has flat platformFee', () => {
+        const ticket = { ticketInfo: { platformFee: 300, orderQuantity: '2', quantity: '2' } };
+        expect(readRecordedPlatformFeeCents(ticket)).toBe(300);
+    });
+
+    it('reads platformCommission object from ticket', () => {
+        const ticket = {
+            ticketInfo: {
+                platformCommission: { platformAmount: 250 },
+            },
+        };
+        expect(readRecordedPlatformFeeCents(ticket)).toBe(250);
+    });
+
+    it('reads platformFee from ticket only', () => {
         const merchant = { otherInfo: { stripe: 150 } };
         const ticket = {
             ticketInfo: {

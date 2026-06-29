@@ -2,6 +2,7 @@
  * Resolve FEB + EMS merchant ids for accounting backfill / outbox repair.
  */
 import mongoose from 'mongoose';
+import { getPackSizeFromTicketType } from '../../util/ticketQuantity.js';
 
 const { ObjectId } = mongoose.Types;
 
@@ -10,6 +11,44 @@ export function ticketInfoObject(ticket) {
   return ticket.ticketInfo instanceof Map
     ? Object.fromEntries(ticket.ticketInfo)
     : ticket.ticketInfo;
+}
+
+const normalizeName = (value) =>
+  value == null ? '' : String(value).trim().toLowerCase();
+
+/**
+ * Find the event ticket-type config for a (possibly legacy) ticket.
+ * Match by ticketInfo.ticketId → ticketInfo[]._id, else by name.
+ */
+function findTicketTypeConfigForTicket(event, ticket) {
+  const types = Array.isArray(event?.ticketInfo) ? event.ticketInfo : [];
+  if (types.length === 0) return null;
+
+  const info = ticketInfoObject(ticket);
+  const ticketId = info.ticketId != null ? String(info.ticketId) : null;
+  if (ticketId) {
+    const byId = types.find((t) => String(t?._id ?? t?.id ?? '') === ticketId);
+    if (byId) return byId;
+  }
+
+  const candidateNames = [ticket?.type, info.ticketName, info.name]
+    .map(normalizeName)
+    .filter((n) => n.length > 0);
+  if (candidateNames.length > 0) {
+    const byName = types.find((t) => candidateNames.includes(normalizeName(t?.name)));
+    if (byName) return byName;
+  }
+
+  return null;
+}
+
+/**
+ * Pack size for a legacy ticket, derived from the event ticket-type config using
+ * the SAME heuristic as checkout (getPackSizeFromTicketType). Returns 1 when unknown.
+ */
+export function resolveTicketPackSize(event, ticket) {
+  const config = findTicketTypeConfigForTicket(event, ticket);
+  return getPackSizeFromTicketType(config);
 }
 
 export async function resolveTicketMerchant(db, ticket) {

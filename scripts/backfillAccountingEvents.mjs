@@ -12,8 +12,9 @@ import { publishPaymentCompleted } from '../services/accountingEventPublisher.js
 import {
   resolveOrderQuantityFromTicket,
   readRecordedPlatformFeeCents,
+  resolvePublishedPlatformFeeCents,
 } from '../util/merchantPlatformFee.js';
-import { resolveTicketMerchant, ticketInfoObject } from './lib/resolveTicketMerchant.mjs';
+import { resolveTicketMerchant, ticketInfoObject, resolveTicketPackSize } from './lib/resolveTicketMerchant.mjs';
 
 const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');
@@ -78,14 +79,20 @@ async function main() {
       continue;
     }
 
-    const orderQuantity = resolveOrderQuantityFromTicket(ticket);
+    const packSizeHint = resolveTicketPackSize(event, ticket);
+    const orderQuantity = resolveOrderQuantityFromTicket(ticket, { packSizeHint });
     const platformFeeCents = readRecordedPlatformFeeCents(ticket);
 
     const priceMajor = Number(info.price ?? info.totalPrice ?? info.totalAmount ?? 0);
     const grossCents = method === 'free' ? 0 : Math.round(priceMajor * 100);
 
     if (dryRun) {
-      console.log('[dry-run]', externalPaymentId, method, grossCents, 'fee', platformFeeCents, 'qty', orderQuantity);
+      const publishedFee = resolvePublishedPlatformFeeCents(ticket, merchant, {
+        grossCents,
+        method: method === 'free' || grossCents === 0 ? 'free' : method,
+        packSizeHint,
+      });
+      console.log('[dry-run]', externalPaymentId, method, 'gross', grossCents, 'recordedFee', platformFeeCents, '-> publishFee', publishedFee, 'orderQty', orderQuantity, 'packSize', packSizeHint);
       published += 1;
       publishedPaymentRefs.add(externalPaymentId);
       continue;
@@ -103,6 +110,7 @@ async function main() {
         checkoutChannel: 'marketplace',
         currency: (info.currency || 'eur').toLowerCase(),
         completedAt: ticket.createdAt?.toISOString?.() || new Date().toISOString(),
+        packSizeHint,
       });
       published += 1;
       publishedPaymentRefs.add(externalPaymentId);
