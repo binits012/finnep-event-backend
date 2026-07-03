@@ -47,5 +47,16 @@ export async function resolvePartnerThemeMedia(theme) {
 			})
 		)
 	}
+	if (Array.isArray(next.partners) && next.partners.length > 0) {
+		next.partners = await Promise.all(
+			next.partners.map(async (partner) => {
+				if (!partner || typeof partner !== 'object') return partner
+				return {
+					...partner,
+					logoUrl: partner.logoUrl ? await resolvePartnerPublicMediaUrl(partner.logoUrl) : partner.logoUrl
+				}
+			})
+		)
+	}
 	return next
 }

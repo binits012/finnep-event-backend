@@ -872,6 +872,16 @@ const merchantSchema = new mongoose.Schema({
 		galleryPhotos: [{
 			url: { type: String, default: '' },
 			position: { type: Number, default: 0 }
+		}],
+		partnersEnabled: { type: Boolean, default: false },
+		partners: [{
+			name: { type: String, default: '' },
+			designation: { type: String, default: '' },
+			message: { type: String, default: '' },
+			logoUrl: { type: String, default: '' },
+			url: { type: String, default: '' },
+			tier: { type: String, enum: ['partner', 'supporter'], default: 'partner' },
+			position: { type: Number, default: 0 }
 		}]
 	},
 	socialMedia: {

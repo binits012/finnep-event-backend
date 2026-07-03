@@ -392,7 +392,7 @@ async function ensurePublishedDynamicRoutesFunctionArn() {
 	const name = SILO_CLOUDFRONT_DYNAMIC_ROUTES_FUNCTION_NAME
 	const functionCode = Buffer.from(SILO_CLOUDFRONT_DYNAMIC_ROUTES_SOURCE, 'utf8')
 	const functionConfig = {
-		Comment: 'Rewrite silo storefront /events/:id URLs to static shell HTML',
+		Comment: 'Silo storefront static export — resolve directory index.html paths',
 		Runtime: 'cloudfront-js-2.0'
 	}
 

@@ -64,7 +64,29 @@ const DEFAULT_SILO_SETTINGS = {
 			fromName: ''
 		},
 		replyTo: ''
-	}
+	},
+	partnersEnabled: false,
+	partners: []
+}
+
+const SILO_PARTNER_TIERS = new Set(['partner', 'supporter'])
+
+function normalizePartners(value, fallback = []) {
+	const source = Array.isArray(value) ? value : fallback
+	return source
+		.map((item) => ({
+			name: typeof item?.name === 'string' ? item.name.trim() : '',
+			designation: typeof item?.designation === 'string' ? item.designation.trim() : '',
+			message: typeof item?.message === 'string' ? item.message.trim() : '',
+			logoUrl: typeof item?.logoUrl === 'string' ? item.logoUrl.trim() : '',
+			url: typeof item?.url === 'string' ? item.url.trim() : '',
+			tier: SILO_PARTNER_TIERS.has(item?.tier) ? item.tier : 'partner',
+			position: Number.isFinite(Number(item?.position)) ? Number(item.position) : 0,
+		}))
+		// Image (logoUrl) and company website (url) are both mandatory.
+		.filter((item) => item.logoUrl && item.url)
+		.map((item, index) => ({ ...item, position: item.position || index + 1 }))
+		.sort((a, b) => a.position - b.position)
 }
 
 function normalizeHexColor(value, fallback) {
@@ -191,7 +213,13 @@ export function normalizeSiloSettings(value = {}, existing = {}) {
 		),
 		galleryPhotos: settings.galleryPhotos !== undefined
 			? normalizeGalleryPhotos(settings.galleryPhotos)
-			: normalizeGalleryPhotos(prev.galleryPhotos)
+			: normalizeGalleryPhotos(prev.galleryPhotos),
+		partnersEnabled: settings.partnersEnabled !== undefined
+			? Boolean(settings.partnersEnabled)
+			: Boolean(prev.partnersEnabled),
+		partners: settings.partners !== undefined
+			? normalizePartners(settings.partners)
+			: normalizePartners(prev.partners)
 	}
 }
 
@@ -247,7 +275,8 @@ export function toPartnerThemePayload(merchant) {
 		},
 		enabled: silo.enabled,
 		domain: silo.domain,
-		galleryPhotos: silo.enabled ? silo.galleryPhotos : []
+		galleryPhotos: silo.enabled ? silo.galleryPhotos : [],
+		partners: silo.enabled && silo.partnersEnabled ? silo.partners : []
 	}
 
 	if (silo.enabled && hasLegalHtmlContent(silo.content?.aboutHtml)) {
