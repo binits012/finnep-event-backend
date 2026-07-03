@@ -1,30 +1,61 @@
-import { getCloudFrontUrl } from './common.js'
-
 function cloudfrontBaseUrl() {
 	return String(process.env.CLOUDFRONT_URL || '').replace(/\/+$/, '')
 }
 
-/** True for assets stored on the platform private CloudFront / S3 origin. */
+const S3_ORIGIN_PATTERN = /https?:\/\/[^.]+\.s3\.[^.]+\.amazonaws\.com/i
+
+/** True for assets stored on the platform CloudFront / S3 origin. */
 export function isPrivateCdnMediaUrl(url) {
 	if (!url || typeof url !== 'string') return false
 	const trimmed = url.trim()
 	if (!trimmed) return false
 	const cfBase = cloudfrontBaseUrl()
 	if (cfBase && trimmed.startsWith(cfBase)) return true
-	return /\.s3\.[^.]+\.amazonaws\.com/i.test(trimmed)
+	return S3_ORIGIN_PATTERN.test(trimmed)
 }
 
-/** Sign private CDN URLs for browser use (silo storefront, partner API). */
+function stripCloudFrontSignatureQuery(url) {
+	try {
+		const parsed = new URL(url)
+		if (
+			!parsed.searchParams.has('Policy')
+			&& !parsed.searchParams.has('Signature')
+			&& !parsed.searchParams.has('Key-Pair-Id')
+		) {
+			return url
+		}
+		parsed.searchParams.delete('Policy')
+		parsed.searchParams.delete('Signature')
+		parsed.searchParams.delete('Key-Pair-Id')
+		const next = parsed.toString()
+		return next.endsWith('?') ? next.slice(0, -1) : next
+	} catch {
+		return url
+	}
+}
+
+function normalizePublicCdnUrl(url) {
+	const trimmed = url.trim()
+	if (!trimmed) return ''
+
+	let normalized = stripCloudFrontSignatureQuery(trimmed)
+	const cfBase = cloudfrontBaseUrl()
+	if (cfBase && S3_ORIGIN_PATTERN.test(normalized)) {
+		normalized = normalized.replace(S3_ORIGIN_PATTERN, cfBase)
+	}
+	return normalized
+}
+
+/**
+ * Resolve platform CDN media for public silo storefront / partner API responses.
+ * Objects are served unsigned via CloudFront OAC — do not attach signed-URL query params.
+ */
 export async function resolvePartnerPublicMediaUrl(url) {
 	if (!url || typeof url !== 'string') return ''
 	const trimmed = url.trim()
 	if (!trimmed) return ''
 	if (!isPrivateCdnMediaUrl(trimmed)) return trimmed
-	try {
-		return await getCloudFrontUrl(trimmed)
-	} catch {
-		return trimmed
-	}
+	return normalizePublicCdnUrl(trimmed)
 }
 
 export async function resolvePartnerThemeMedia(theme) {
