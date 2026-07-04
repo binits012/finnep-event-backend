@@ -869,6 +869,9 @@ const merchantSchema = new mongoose.Schema({
 			},
 			replyTo: { type: String, default: '' }
 		},
+		checkout: {
+			paymentMethodTypes: [{ type: String }]
+		},
 		galleryPhotos: [{
 			url: { type: String, default: '' },
 			position: { type: Number, default: 0 }

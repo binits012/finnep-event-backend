@@ -122,42 +122,60 @@ const normalizeStripeCurrency = (raw) => {
 
 let warnedCheckoutPaymentMethodTypesPrependedCard = false;
 
-/**
- * PaymentIntent `payment_method_types` for createPaymentIntent (not automatic_payment_methods).
- * Override with env `STRIPE_CHECKOUT_PAYMENT_METHOD_TYPES` — comma-separated Stripe type IDs
- * (see https://stripe.com/docs/api/payment_intents/create#create_payment_intent-payment_method_types).
- * Example: card,afterpay_clearpay,mobilepay,revolut_pay,billie
- * Apple Pay / Google Pay need `card`. If `card` is omitted from env, it is prepended automatically.
- */
-function getCheckoutPaymentIntentMethodTypes() {
-    const defaults = ['card',  'mobilepay', 'revolut_pay', 'billie'];
-    const raw = process.env.STRIPE_CHECKOUT_PAYMENT_METHOD_TYPES;
-    if (raw == null || String(raw).trim() === '') {
+function normalizeCheckoutPaymentMethodTypes(raw, sourceLabel = 'unknown') {
+    const defaults = ['card', 'mobilepay', 'revolut_pay', 'billie'];
+    const source = Array.isArray(raw) ? raw : (raw == null ? null : String(raw).split(','));
+
+    if (!source) {
         return defaults;
     }
-    const parts = String(raw)
-        .split(',')
-        .map((s) => s.trim().toLowerCase())
-        .filter(Boolean);
-    const valid = parts.filter((t) => /^[a-z][a-z0-9_]*$/.test(t));
+
+    const valid = source
+        .map((s) => String(s ?? '').trim().toLowerCase())
+        .filter(Boolean)
+        .filter((t) => /^[a-z][a-z0-9_]*$/.test(t));
+
     if (valid.length === 0) {
         console.warn(
-            '[Stripe] STRIPE_CHECKOUT_PAYMENT_METHOD_TYPES has no valid entries; using defaults'
+            `[Stripe] ${sourceLabel} has no valid entries; using defaults`
         );
         return defaults;
     }
+
     const deduped = [...new Set(valid)];
     if (!deduped.includes('card')) {
         if (!warnedCheckoutPaymentMethodTypesPrependedCard) {
             warnedCheckoutPaymentMethodTypesPrependedCard = true;
             console.warn(
-                '[Stripe] STRIPE_CHECKOUT_PAYMENT_METHOD_TYPES did not include "card" — prepending it (required for Apple Pay / Google Pay).'
+                `[Stripe] ${sourceLabel} did not include "card" — prepending it (required for Apple Pay / Google Pay).`
             );
         }
         return ['card', ...deduped];
     }
     const withoutCard = deduped.filter((t) => t !== 'card');
     return ['card', ...withoutCard];
+}
+
+/**
+ * PaymentIntent `payment_method_types` for createPaymentIntent (not automatic_payment_methods).
+ * Merchant override: `siloSettings.checkout.paymentMethodTypes` (array of Stripe type IDs).
+ * Fallback env: `STRIPE_CHECKOUT_PAYMENT_METHOD_TYPES` — comma-separated Stripe type IDs
+ * (see https://stripe.com/docs/api/payment_intents/create#create_payment_intent-payment_method_types).
+ * Example: card,afterpay_clearpay,mobilepay,revolut_pay,billie
+ * Apple Pay / Google Pay need `card`. If `card` is omitted, it is prepended automatically.
+ */
+function getCheckoutPaymentIntentMethodTypes(merchant) {
+    const merchantConfigured = merchant?.siloSettings?.checkout?.paymentMethodTypes;
+    if (Array.isArray(merchantConfigured) && merchantConfigured.length > 0) {
+        return normalizeCheckoutPaymentMethodTypes(
+            merchantConfigured,
+            'siloSettings.checkout.paymentMethodTypes'
+        );
+    }
+    return normalizeCheckoutPaymentMethodTypes(
+        process.env.STRIPE_CHECKOUT_PAYMENT_METHOD_TYPES,
+        'STRIPE_CHECKOUT_PAYMENT_METHOD_TYPES'
+    );
 }
 
 const resolveSectionMode = (section) => {
@@ -2518,7 +2536,7 @@ export const createPaymentIntent = async (req, res, next) => {
                     locale: locale // Store locale for email templates
                 },
 
-                payment_method_types: getCheckoutPaymentIntentMethodTypes(),
+                payment_method_types: getCheckoutPaymentIntentMethodTypes(merchant),
             };
             if (platformFee > 0) {
                 stripePaymentIntentPayload.application_fee_amount = platformFee;
@@ -2555,7 +2573,7 @@ export const createPaymentIntent = async (req, res, next) => {
                     locale: locale, // Store locale for email templates
                     ...platformFeeMetadata,
                 },
-                payment_method_types: getCheckoutPaymentIntentMethodTypes(),
+                payment_method_types: getCheckoutPaymentIntentMethodTypes(merchant),
             };
         }
         console.log('stripePaymentIntentPayload', stripePaymentIntentPayload, '\n', merchant.stripeAccount);

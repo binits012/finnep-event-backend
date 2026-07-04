@@ -15,6 +15,8 @@ import {
 } from './sanitizeLegalHtml.js'
 import { normalizeSiloEmail } from './siloEmailSettings.js'
 
+const STRIPE_PAYMENT_METHOD_TYPE_PATTERN = /^[a-z][a-z0-9_]*$/
+
 const DEFAULT_SILO_SETTINGS = {
 	enabled: false,
 	domain: '',
@@ -65,6 +67,9 @@ const DEFAULT_SILO_SETTINGS = {
 		},
 		replyTo: ''
 	},
+	checkout: {
+		paymentMethodTypes: []
+	},
 	partnersEnabled: false,
 	partners: []
 }
@@ -104,6 +109,21 @@ function normalizeGalleryPhotos(value, fallback = []) {
 			position: Number.isFinite(Number(item.position)) ? Number(item.position) : index + 1,
 		}))
 		.sort((a, b) => a.position - b.position)
+}
+
+function normalizeCheckoutPaymentMethodTypes(value, fallback = []) {
+	const source = Array.isArray(value)
+		? value
+		: (typeof value === 'string' ? value.split(',') : fallback)
+
+	const normalized = source
+		.map((entry) => String(entry ?? '').trim().toLowerCase())
+		.filter((entry) => entry && STRIPE_PAYMENT_METHOD_TYPE_PATTERN.test(entry))
+
+	if (!normalized.length) return []
+	const deduped = [...new Set(normalized)]
+	const withoutCard = deduped.filter((type) => type !== 'card')
+	return ['card', ...withoutCard]
 }
 
 export function normalizeSiloSettings(value = {}, existing = {}) {
@@ -211,6 +231,11 @@ export function normalizeSiloSettings(value = {}, existing = {}) {
 			settings.email !== undefined ? settings.email : {},
 			prev.email || {}
 		),
+		checkout: {
+			paymentMethodTypes: settings?.checkout?.paymentMethodTypes !== undefined
+				? normalizeCheckoutPaymentMethodTypes(settings.checkout.paymentMethodTypes)
+				: normalizeCheckoutPaymentMethodTypes(prev?.checkout?.paymentMethodTypes)
+		},
 		galleryPhotos: settings.galleryPhotos !== undefined
 			? normalizeGalleryPhotos(settings.galleryPhotos)
 			: normalizeGalleryPhotos(prev.galleryPhotos),
