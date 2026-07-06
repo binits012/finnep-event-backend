@@ -226,7 +226,10 @@ RABBITMQ_REJECT_UNAUTHORIZED=true
 ```env
 # Stripe Payment Gateway
 STRIPE_KEY=sk_test_your_stripe_secret_key
-STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret
+# Platform account webhook endpoint ("Your account" in Stripe Dashboard)
+STRIPE_WEBHOOK_SECRET=whsec_your_platform_webhook_secret
+# Connect webhook endpoint ("Connected accounts" in Stripe Dashboard) — required for merchant PI events
+STRIPE_CONNECT_WEBHOOK_SECRET=whsec_your_connect_webhook_secret
 ```
 
 #### AWS Configuration

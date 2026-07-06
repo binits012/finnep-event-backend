@@ -74,7 +74,8 @@ RABBITMQ_HEARTBEAT=60
 
 # Stripe Configuration
 STRIPE_KEY=sk_live_your_stripe_secret_key
-STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret
+STRIPE_WEBHOOK_SECRET=whsec_your_platform_webhook_secret
+STRIPE_CONNECT_WEBHOOK_SECRET=whsec_your_connect_webhook_secret
 
 # AWS Configuration
 AWS_ACCESS_KEY_ID=your_aws_access_key

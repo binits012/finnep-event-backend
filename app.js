@@ -19,6 +19,12 @@ import partner from './routes/partner.js'
 import Stripe from 'stripe'
 import {checkoutSuccess} from './util/paymentActions.js'
 import { handleStripeRefundWebhookEvent } from './util/stripeRefundWebhook.js'
+import {
+	getStripeWebhookPayload,
+	isStripeJsonWebhookRequest,
+	resolveStripeWebhookSecrets,
+	verifyStripeWebhookEvent,
+} from './util/stripeWebhook.js'
 import { setupQueues } from './rabbitMQ/services/queueSetup.js';
 import { messageConsumer } from './rabbitMQ/services/messageConsumer.js';
 import { rabbitMQ } from './util/rabbitmq.js';
@@ -32,7 +38,7 @@ import {
   refreshPartnerCorsOriginsFromMerchants
 } from './util/corsAllowlist.js';
 const stripe = new Stripe(process.env.STRIPE_KEY)
-const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET
+const stripeWebhookSecrets = resolveStripeWebhookSecrets()
 var app = express();
 const rabbitConsumerWatchQueues = ['event-events-queue', 'merchant-events-queue'];
 
@@ -146,27 +152,61 @@ app.use(compression({
 
 //app.use(logger('dev'));
 
-app.post('/webhook', express.raw({ type: 'application/json' }), async (request, response, next) => {
-    if (!endpointSecret && process.env.NODE_ENV === 'production') {
-        console.error('STRIPE_WEBHOOK_SECRET is required in production');
+// Stripe signature verification must use the raw body (before express.json()).
+const stripeWebhookRawParser = express.raw({
+	type: (req) => isStripeJsonWebhookRequest(req),
+});
+
+app.post('/webhook', stripeWebhookRawParser, async (request, response, next) => {
+    if (stripeWebhookSecrets.length === 0 && process.env.NODE_ENV === 'production') {
+        console.error(
+            'Stripe webhook secrets required in production (STRIPE_WEBHOOK_SECRET and/or STRIPE_CONNECT_WEBHOOK_SECRET)'
+        );
         return response.sendStatus(500);
     }
 
     let event = request.body;
-    // Only verify the event if you have an endpoint secret defined.
-    // Otherwise use the basic event deserialized with JSON.parse
-    if (endpointSecret) {
-        // Get the signature sent by Stripe
-        const signature = request.headers['stripe-signature'];
+    let webhookSecretLabel = null;
+
+    if (stripeWebhookSecrets.length > 0) {
         try {
-            event = stripe.webhooks.constructEvent(
-                request.body,
-                signature,
-                endpointSecret
-            );
+            const verified = verifyStripeWebhookEvent(stripe, request, stripeWebhookSecrets);
+            event = verified.event;
+            webhookSecretLabel = verified.secretLabel;
         } catch (err) {
+            console.error('[Stripe webhook] Signature verification failed:', {
+                message: err?.message || String(err),
+                code: err?.code || undefined,
+                configuredSecrets: stripeWebhookSecrets.map((s) => s.label),
+                hasRawBody: Boolean(getStripeWebhookPayload(request)),
+                contentType: request.headers['content-type'] || null,
+                hasSignature: Boolean(request.headers['stripe-signature']),
+            });
+            return response.status(400).send(`Webhook Error: ${err?.message || 'Invalid signature'}`);
+        }
+    } else {
+        try {
+            const payload = getStripeWebhookPayload(request);
+            if (payload) {
+                event = JSON.parse(typeof payload === 'string' ? payload : payload.toString('utf8'));
+            } else if (typeof request.body === 'object' && request.body !== null) {
+                event = request.body;
+            } else {
+                event = JSON.parse(String(request.body || '{}'));
+            }
+        } catch (parseErr) {
+            console.error('[Stripe webhook] Failed to parse body without verification:', parseErr?.message);
             return response.sendStatus(400);
         }
+    }
+
+    if (webhookSecretLabel) {
+        console.log('[Stripe webhook] Verified event', {
+            type: event?.type,
+            id: event?.id,
+            account: event?.account || null,
+            secretLabel: webhookSecretLabel,
+        });
     }
 
     // Handle the event
