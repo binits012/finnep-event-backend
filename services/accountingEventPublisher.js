@@ -124,6 +124,11 @@ export async function publishPaymentCompleted({
         ?? (unitPlatformFeeCents > 0 ? String(unitPlatformFeeCents) : null);
 
     const merchantNet = Math.max(0, grossCents - platformFeeCents - pspFeeCents);
+    const stripeAccount = merchant?.stripeAccount
+        && String(merchant.stripeAccount).startsWith('acct_')
+        ? String(merchant.stripeAccount)
+        : null;
+
     await publishAccountingEvent('payment.completed', {
         platformMerchantId: merchant?.merchantId || ticket?.externalMerchantId,
         febMerchantId: merchant?._id?.toString?.() || ticket?.merchant?.toString?.(),
@@ -144,6 +149,7 @@ export async function publishPaymentCompleted({
         method: normalizedMethod,
         currency: (currency || 'eur').toLowerCase(),
         externalPaymentId: String(externalPaymentId),
+        ...(stripeAccount ? { stripeAccount } : {}),
         checkoutChannel,
         completedAt,
         region: resolveRegion(merchant, event)
