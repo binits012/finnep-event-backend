@@ -625,10 +625,12 @@ export async function revokeApiCredential(merchantId, keyId) {
 }
 
 export async function touchApiCredentialLastUsed(merchantId, keyId) {
-  await model.Merchant.updateOne(
+  // Use native collection update to avoid triggering audit middleware for
+  // read/auth side-effects (partner API key usage heartbeat).
+  await model.Merchant.collection.updateOne(
     { _id: merchantId, 'apiCredentials.keyId': keyId },
     { $set: { 'apiCredentials.$.lastUsedAt': new Date() } }
-  ).exec();
+  );
 }
 
 export async function getAllPartnerCorsOrigins() {
