@@ -94,6 +94,28 @@ beforeAll(async () => {
     cacheShortCodeMapping: jest.fn().mockResolvedValue(undefined),
   }));
 
+  const publishPolicyPath = resolve(__dirname, '../../../../src/services/eventPublishPolicy.js');
+  jest.unstable_mockModule(publishPolicyPath, () => ({
+    resolvePublishPolicy: jest.fn().mockResolvedValue({
+      active: false,
+      featured: null,
+      completedCount: 0,
+      tier: 0,
+    }),
+    countCompletedEvents: jest.fn().mockResolvedValue(0),
+    buildAutoFeaturePayload: jest.fn(),
+    TRUST_AUTO_PUBLISH_MIN: 1,
+    TRUST_AUTO_FEATURE_MIN: 5,
+    AUTO_FEATURE_DEFAULT_PRIORITY: 97,
+  }));
+
+  const statusSyncPath = resolve(__dirname, '../../../../src/services/eventStatusSyncService.js');
+  jest.unstable_mockModule(statusSyncPath, () => ({
+    syncEventStatusToEms: jest.fn().mockResolvedValue({ published: 0, failed: 0 }),
+    buildEventStatusOutboxMessage: jest.fn(),
+    publishEventStatusUpdates: jest.fn().mockResolvedValue({ published: 0, failed: 0 }),
+  }));
+
   eventHandler = await import('../../../../rabbitMQ/handlers/eventHandler.js');
   Event = await import('../../../../model/event.js');
   inboxModel = (await import('../../../../model/inboxMessage.js')).inboxModel;

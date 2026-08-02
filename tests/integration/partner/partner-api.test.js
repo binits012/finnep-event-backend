@@ -213,6 +213,63 @@ describe('Partner API integration', () => {
 		await model.Event.deleteOne({ _id: inactivePastEvent._id })
 	})
 
+	it('includes completed events and excludes inactive upcoming drafts', async () => {
+		const past = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000)
+		const future = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
+
+		const completedEvent = await model.Event.create({
+			eventTitle: 'Completed Partner Event',
+			eventDescription: 'Done',
+			eventDate: past,
+			event_end_date: past,
+			active: false,
+			status: 'completed',
+			merchant: merchantA._id,
+			externalMerchantId: 'partner-test-a',
+			externalEventId: 'evt-a-completed'
+		})
+		const draftEvent = await model.Event.create({
+			eventTitle: 'Draft Upcoming Partner Event',
+			eventDescription: 'Unpublished',
+			eventDate: future,
+			event_end_date: future,
+			active: false,
+			status: 'up-coming',
+			merchant: merchantA._id,
+			externalMerchantId: 'partner-test-a',
+			externalEventId: 'evt-a-draft'
+		})
+
+		const listResponse = await request(app)
+			.get('/partner/v1/events')
+			.set('x-api-key', keyA)
+			.set('x-api-secret', secretA)
+			.set('Origin', 'https://silo-a.example.com')
+
+		expect(listResponse.status).toBe(200)
+		const titles = listResponse.body.items.map((item) => item.eventTitle)
+		expect(titles).toContain('Completed Partner Event')
+		expect(titles).not.toContain('Draft Upcoming Partner Event')
+
+		const completedDetail = await request(app)
+			.get(`/partner/v1/events/${completedEvent._id}`)
+			.set('x-api-key', keyA)
+			.set('x-api-secret', secretA)
+			.set('Origin', 'https://silo-a.example.com')
+		expect(completedDetail.status).toBe(200)
+
+		const draftDetail = await request(app)
+			.get(`/partner/v1/events/${draftEvent._id}`)
+			.set('x-api-key', keyA)
+			.set('x-api-secret', secretA)
+			.set('Origin', 'https://silo-a.example.com')
+		expect(draftDetail.status).toBe(404)
+
+		await model.Event.deleteMany({
+			_id: { $in: [completedEvent._id, draftEvent._id] }
+		})
+	})
+
 	it('returns 404 for another merchant event id', async () => {
 		const response = await request(app)
 			.get(`/partner/v1/events/${eventB._id}`)

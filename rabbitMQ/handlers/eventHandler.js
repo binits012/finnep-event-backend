@@ -8,6 +8,8 @@ import { pricingManifestSyncService } from '../../src/services/pricingManifestSy
 import { sendPricingSyncErrorEmail } from '../../util/sendMail.js';
 import { generateUniqueShortCode, cacheShortCodeMapping } from '../../util/shortCode.js';
 import moment from 'moment-timezone';
+import { resolvePublishPolicy } from '../../src/services/eventPublishPolicy.js';
+import { syncEventStatusToEms } from '../../src/services/eventStatusSyncService.js';
 
 function normalizeTicketInfoForMongo(ticketInfo, message = {}) {
     if (!Array.isArray(ticketInfo)) return ticketInfo;
@@ -225,7 +227,6 @@ async function handleEventCreated(message) {
     const socialMedia = message?.social_media;
     const lang = message?.lang;
     const position = message?.position;
-    const active = message?.active;
     const eventName =externalMerchantId+'_'+ message.id;
     const videoUrl = message?.video_url;
     const otherInfo = buildOtherInfoFromMessage(message);
@@ -242,6 +243,19 @@ async function handleEventCreated(message) {
     const event_end_date = resolveEventEndDate({ message });
     const isSeatedEvent = resolveIsSeatedEvent({ message, venue });
 
+    const publishPolicy = await resolvePublishPolicy(merchant, externalMerchantId, {
+        eventEndDate: event_end_date,
+    });
+    const active = publishPolicy.active;
+    info('[handleEventCreated] Publish policy resolved', {
+        externalEventId,
+        externalMerchantId,
+        tier: publishPolicy.tier,
+        completedCount: publishPolicy.completedCount,
+        active,
+        autoFeature: Boolean(publishPolicy.featured),
+    });
+
     console.log('[handleEventCreated] Creating event in MongoDB', {
         externalEventId,
         externalMerchantId,
@@ -250,7 +264,7 @@ async function handleEventCreated(message) {
 
     const shortCode = await generateUniqueShortCode(EventModel);
 
-    const savedEvent = await Event.createEvent(
+    let savedEvent = await Event.createEvent(
         eventTitle, eventDescription, eventDate, occupancy,
         ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress,
         eventLocationGeoCode, transportLink, socialMedia, lang, position,
@@ -263,11 +277,27 @@ async function handleEventCreated(message) {
         await cacheShortCodeMapping(shortCode, savedEvent._id.toString());
     }
 
+    if (savedEvent?._id && publishPolicy.featured) {
+        savedEvent = await Event.updateEventById(savedEvent._id, {
+            featured: publishPolicy.featured,
+        });
+    }
+
+    if (savedEvent?._id && active === true) {
+        await syncEventStatusToEms({
+            event: savedEvent,
+            before: { active: false, status: 'up-coming' },
+            after: { active: true, status: savedEvent.status || 'up-coming' },
+            updatedBy: 'system-trust-policy',
+        });
+    }
+
     await inboxModel.markProcessed(message?.metaData?.causationId);
     console.log('[handleEventCreated] Successfully created event and marked inbox message processed', {
         externalEventId,
         merchantId: externalMerchantId,
-        shortCode
+        shortCode,
+        active,
     });
 }
 
@@ -296,7 +326,6 @@ async function handleEventUpdated(message) {
     const socialMedia = message?.social_media;
     const lang = message?.lang;
     const position = message?.position;
-    const active = message?.active;
     const eventName =externalMerchantId+'_'+ message.id;
     const videoUrl = message?.video_url;
     const otherInfo = buildOtherInfoFromMessage(message);
@@ -351,24 +380,41 @@ async function handleEventUpdated(message) {
 
     if (!existingEvent) {
         console.log(`Event with ID ${externalEventId} not found, creating new event instead`);
+        const publishPolicy = await resolvePublishPolicy(merchant, externalMerchantId, {
+            eventEndDate: event_end_date,
+        });
         const shortCode = await generateUniqueShortCode(EventModel);
-        const createdEvent = await Event.createEvent(
+        let createdEvent = await Event.createEvent(
             eventTitle, eventDescription, eventDate, occupancy,
             ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress,
             eventLocationGeoCode, transportLink, socialMedia, lang, position,
-            active, eventName, videoUrl, otherInfo, eventTimezone,
+            publishPolicy.active, eventName, videoUrl, otherInfo, eventTimezone,
             city, country, venueInfo, externalMerchantId, merchant, externalEventId, venue,
             waitlistConfig, event_end_date, isSeatedEvent, shortCode, stripeCurrency
         );
         if (createdEvent?._id && shortCode) {
             await cacheShortCodeMapping(shortCode, createdEvent._id.toString());
         }
+        if (createdEvent?._id && publishPolicy.featured) {
+            createdEvent = await Event.updateEventById(createdEvent._id, {
+                featured: publishPolicy.featured,
+            });
+        }
+        if (createdEvent?._id && publishPolicy.active === true) {
+            await syncEventStatusToEms({
+                event: createdEvent,
+                before: { active: false, status: 'up-coming' },
+                after: { active: true, status: createdEvent.status || 'up-coming' },
+                updatedBy: 'system-trust-policy',
+            });
+        }
     } else {
+        // Content sync from EMS must not clobber FEB publish state (active/featured).
         const updatePayload = {
             eventTitle, eventDescription, eventDate, occupancy,
             ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress,
             eventLocationGeoCode, transportLink, socialMedia, lang, position,
-            active, eventName, videoUrl, otherInfo, eventTimezone,
+            eventName, videoUrl, otherInfo, eventTimezone,
             city, country, venueInfo, venue,
             waitlistConfig, event_end_date, isSeatedEvent,
             ...(stripeCurrency ? { stripeCurrency } : {}),

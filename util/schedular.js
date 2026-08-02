@@ -15,8 +15,11 @@ import { getOutboxMessagesForRetry, updateOutboxMessageById, createOutboxMessage
 import { messageConsumer } from '../rabbitMQ/services/messageConsumer.js';
 import { Event, OutboxMessage } from '../model/mongoModel.js';
 import { QUEUE_PREFETCH } from '../rabbitMQ/services/queueSetup.js';
-import { v4 as uuidv4 } from 'uuid';
 import { compileMjmlTemplate } from './emailTemplateLoader.js';
+import {
+  buildEventStatusOutboxMessage,
+  publishEventStatusUpdates,
+} from '../src/services/eventStatusSyncService.js';
 
 dotenv.config();
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -431,44 +434,42 @@ function defineJobs() {
       info('inactive past events ================== Starting job at', now);
       info(`Deactivating events with effective end date before: ${fiveHoursAgo} (5 hours buffer)`);
 
-      // Self-heal: reactivate events that are still within validity window but were previously marked completed.
-      const baseReactivationFilter = {
+      // Self-heal ONLY wrongly-completed events whose end date is still in the future
+      // (e.g. dates were extended). Never reactivate intentional active:false (moderation queue).
+      const wronglyCompleted = await Event.find({
+        status: 'completed',
         $expr: { $gte: [effectiveEndDateExpr, now] },
-        $or: [{ active: false }, { status: 'completed' }]
-      };
-      const reactivateOngoing = await Event.updateMany(
-        {
-          ...baseReactivationFilter,
-          eventDate: { $lte: now }
-        },
-        {
-          $set: { active: true, status: 'on-going', updatedAt: new Date() }
+      }).lean();
+
+      const selfHealMessages = [];
+      for (const event of wronglyCompleted) {
+        const nextStatus = event.eventDate && new Date(event.eventDate) <= now ? 'on-going' : 'up-coming';
+        await Event.updateOne(
+          { _id: event._id },
+          { $set: { active: true, status: nextStatus, updatedAt: now } }
+        );
+        if (event.externalMerchantId && event.externalEventId != null) {
+          selfHealMessages.push(
+            buildEventStatusOutboxMessage({
+              event,
+              before: { active: event.active, status: event.status },
+              after: { active: true, status: nextStatus },
+              eventType: 'EventActivated',
+              updatedBy: 'system',
+              updatedAt: now,
+            })
+          );
         }
-      );
-      const reactivateUpcoming = await Event.updateMany(
-        {
-          ...baseReactivationFilter,
-          eventDate: { $gt: now }
-        },
-        {
-          $set: { active: true, status: 'up-coming', updatedAt: new Date() }
-        }
-      );
-      const reactivatedCount = (reactivateOngoing.modifiedCount || 0) + (reactivateUpcoming.modifiedCount || 0);
-      if (reactivatedCount > 0) {
-        info(`Reactivated ${reactivatedCount} events still valid by end date`);
+      }
+      if (wronglyCompleted.length > 0) {
+        info(`Self-healed ${wronglyCompleted.length} wrongly completed events still valid by end date`);
+        await publishEventStatusUpdates(selfHealMessages);
       }
 
-      // First, find all past events that need to be deactivated (before updating)
-      // Primary condition: effective end date is at least 5 hours in the past
-      // (event_end_date -> eventEndDate -> eventDate fallback)
-      // We deactivate ALL such events regardless of:
-      //   - Current status (up-coming, on-going, etc.)
-      //   - Active state (true or false)
-      // The only optimization: skip events already marked as 'completed' to avoid unnecessary updates
+      // Find past events that need to be marked completed (before updating)
       const eventsToDeactivate = await Event.find({
-        $expr: { $lt: [effectiveEndDateExpr, fiveHoursAgo] }, // PRIMARY CONDITION: effective end date is at least 5 hours in the past
-        status: { $ne: 'completed' } // Optimization: skip already-completed events
+        $expr: { $lt: [effectiveEndDateExpr, fiveHoursAgo] },
+        status: { $ne: 'completed' },
       }).lean();
 
       info(`Found ${eventsToDeactivate.length} past events to deactivate`);
@@ -478,97 +479,43 @@ function defineJobs() {
         return;
       }
 
-      // Get event IDs for the update query
-      const eventIds = eventsToDeactivate.map(event => event._id);
-
-      // Batch update all past events to inactive in a single operation
-      // Primary condition: effective end date < (now - 5 hours) to account for ongoing events
-      // We update ALL past events regardless of their current status or active state
+      const eventIds = eventsToDeactivate.map((event) => event._id);
       const result = await Event.updateMany(
         {
           _id: { $in: eventIds },
-          $expr: { $lt: [effectiveEndDateExpr, fiveHoursAgo] } // Primary condition: effective end date is at least 5 hours in the past
-          // No status filter - we update all past events found above
+          $expr: { $lt: [effectiveEndDateExpr, fiveHoursAgo] },
         },
         {
-          $set: { active: false, status: 'completed', updatedAt: new Date() }
+          $set: { active: false, status: 'completed', updatedAt: now },
         }
       );
 
       info(`inactive past events ================== Updated ${result.modifiedCount} events`);
 
       if (result.modifiedCount > 0) {
-        info(`Deactivated ${result.modifiedCount} past events`);
+        const outboxMessages = eventsToDeactivate
+          .filter((event) => {
+            if (!event.externalMerchantId || event.externalEventId == null) {
+              error(`Event ${event._id} missing external ids, skipping outbox message`);
+              return false;
+            }
+            return true;
+          })
+          .map((event) =>
+            buildEventStatusOutboxMessage({
+              event,
+              before: { active: event.active, status: event.status },
+              after: { active: false, status: 'completed' },
+              eventType: 'EventDeactivated',
+              updatedBy: 'system',
+              updatedAt: now,
+            })
+          );
 
-        // Use the events we found before the update to create outbox messages
-        // Filter to only include events that have externalMerchantId
-        const routingKey = 'external.event.status.updated';
-        const eventType = 'EventDeactivated';
-
-        const validEvents = eventsToDeactivate.filter(event => {
-          if (!event.externalMerchantId) {
-            error(`Event ${event._id} missing externalMerchantId, skipping outbox message`);
-            return false;
-          }
-          return true;
-        });
-
-        if (validEvents.length > 0) {
-          // Prepare outbox messages for all deactivated events
-          const outboxMessages = validEvents.map(event => {
-            const correlationId = uuidv4();
-            const messageId = uuidv4();
-
-            return {
-              messageId: messageId,
-              exchange: 'event-merchant-exchange',
-              routingKey: routingKey,
-              messageBody: {
-                eventType: eventType,
-                aggregateId: event._id.toString(),
-                data: {
-                  merchantId: event.externalMerchantId,
-                  eventId: event.externalEventId,
-                  before: {
-                    active: event.active,
-                    status: event.status
-                  },
-                  after: {
-                    active: false,
-                    status: 'completed'
-                  },
-                  updatedBy: 'system',
-                  updatedAt: now
-                },
-                metadata: {
-                  correlationId: correlationId,
-                  causationId: messageId,
-                  timestamp: new Date().toISOString(),
-                  version: 1
-                }
-              },
-              headers: {
-                'content-type': 'application/json',
-                'message-type': eventType,
-                'correlation-id': correlationId
-              },
-              correlationId: correlationId,
-              eventType: eventType,
-              aggregateId: event._id.toString(),
-              status: 'pending',
-              attempts: 0, // Explicitly set to ensure query works
-              maxRetries: 3, // Explicitly set max retries
-              createdAt: new Date(), // Explicitly set createdAt for proper sorting
-              exchangeType: 'topic'
-            };
-          });
-
-          if (outboxMessages.length > 0) {
-            // Batch write to outbox
-            await batchWriteToOutbox(outboxMessages);
-            info(`Created ${outboxMessages.length} outbox messages for completed events`);
-          }
-        }
+        const syncResult = await publishEventStatusUpdates(outboxMessages);
+        info(
+          `Completed-event status sync: published=${syncResult.published}, failed=${syncResult.failed}`
+        );
       } else {
         info('No events were modified (they may have already been deactivated)');
       }
@@ -582,26 +529,45 @@ function defineJobs() {
   agenda.define('change status of up-coming to on-going for today\'s events', async(job) => {
     try {
       const now = new Date();
-      // Get start and end of today (ignoring time)
       const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
       const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 
-      console.log('startOfToday', startOfToday);
-      console.log('endOfToday', endOfToday);
-      const result = await Event.updateMany(
-        {
-          eventDate: { $gte: startOfToday, $lte: endOfToday },
-          status: { $ne: 'on-going' },
-          active: { $ne: false }
-        },
-        {
-          $set: { status: 'on-going', updatedAt:new Date() }
-        }
-      );
-      if (result.modifiedCount > 0) {
-        console.log('result', result);
-        info(`Changed status of ${result.modifiedCount} up-coming events to on-going`);
+      const eventsToMarkOngoing = await Event.find({
+        eventDate: { $gte: startOfToday, $lte: endOfToday },
+        status: { $ne: 'on-going' },
+        active: { $ne: false },
+      }).lean();
+
+      if (eventsToMarkOngoing.length === 0) {
+        info('No up-coming events to mark on-going');
+        return;
       }
+
+      const eventIds = eventsToMarkOngoing.map((event) => event._id);
+      const result = await Event.updateMany(
+        { _id: { $in: eventIds } },
+        { $set: { status: 'on-going', updatedAt: now } }
+      );
+
+      info(`Changed status of ${result.modifiedCount} up-coming events to on-going`);
+
+      const outboxMessages = eventsToMarkOngoing
+        .filter((event) => event.externalMerchantId && event.externalEventId != null)
+        .map((event) =>
+          buildEventStatusOutboxMessage({
+            event,
+            before: { active: event.active, status: event.status },
+            after: { active: true, status: 'on-going' },
+            eventType: 'EventActivated',
+            updatedBy: 'system',
+            updatedAt: now,
+          })
+        );
+
+      const syncResult = await publishEventStatusUpdates(outboxMessages);
+      info(
+        `On-going status sync: published=${syncResult.published}, failed=${syncResult.failed}`
+      );
     } catch (err) {
       error('Error in change status of up-coming to on-going for today\'s events job:', err);
     }

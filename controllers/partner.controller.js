@@ -141,7 +141,7 @@ export const getPartnerEventById = async (req, res) => {
 			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({ error: RESOURCE_NOT_FOUND })
 		}
 
-		if (event.active === false && !Event.isEventPastByEndDate(event)) {
+		if (!Event.isPartnerEventPubliclyVisible(event)) {
 			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({ error: RESOURCE_NOT_FOUND })
 		}
 

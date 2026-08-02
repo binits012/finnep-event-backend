@@ -21,6 +21,7 @@
     "migrate": "node scripts/migrate-schemas.js",
     "migrate:user-regional-scopes": "node scripts/backfill-user-regional-scopes.mjs",
     "migrate:event-end-date": "node scripts/backfill-event-end-date.mjs",
+    "migrate:completed-events": "node scripts/backfill-completed-events.mjs",
     "migrate:event-short-code": "node scripts/backfill-event-short-code.mjs",
     "migrate:partner-waitlist-scope": "node scripts/backfill-partner-waitlist-scope.mjs",
     "migrate:silo-email-to-mongo": "node scripts/backfill-silo-email-to-mongo.mjs",
@@ -28,12 +29,12 @@
     "preview:email": "node scripts/preview-email.js",
     "preview:email:list": "node scripts/preview-email.js --list",
     "test:email:templates": "node scripts/test-all-email-templates.js",
-    "test": "NODE_OPTIONS=--experimental-vm-modules jest",
-    "test:watch": "NODE_OPTIONS=--experimental-vm-modules jest --watch",
-    "test:coverage": "NODE_OPTIONS=--experimental-vm-modules jest --coverage",
-    "test:unit": "NODE_OPTIONS=--experimental-vm-modules jest --testPathPattern=unit",
-    "test:integration": "NODE_OPTIONS=--experimental-vm-modules jest --testPathPattern=integration",
-    "test:ci": "NODE_OPTIONS=--experimental-vm-modules jest --ci --coverage --maxWorkers=2"
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest --config=jest.config.json",
+    "test:watch": "NODE_OPTIONS=--experimental-vm-modules jest --config=jest.config.json --watch",
+    "test:coverage": "NODE_OPTIONS=--experimental-vm-modules jest --config=jest.config.json --coverage",
+    "test:unit": "NODE_OPTIONS=--experimental-vm-modules jest --config=jest.config.json --testPathPattern=unit",
+    "test:integration": "NODE_OPTIONS=--experimental-vm-modules jest --config=jest.config.json --testPathPattern=integration",
+    "test:ci": "NODE_OPTIONS=--experimental-vm-modules jest --config=jest.config.json --ci --coverage --maxWorkers=2"
   },
   "type": "module",
   "overrides": {

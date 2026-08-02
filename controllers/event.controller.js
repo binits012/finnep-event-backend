@@ -159,6 +159,18 @@ export const getEvents = async(req,res,next)=>{
             if (req.query.category) {
                 filters.category = req.query.category
             }
+            if (req.query.active != null && req.query.active !== '') {
+                filters.active = req.query.active
+            }
+            if (req.query.status) {
+                filters.status = req.query.status
+            }
+            if (req.query.needsReview != null && req.query.needsReview !== '') {
+                filters.needsReview = req.query.needsReview
+            }
+            if (req.query.search && String(req.query.search).trim()) {
+                filters.search = String(req.query.search).trim()
+            }
 
             if (filters.country && !canAccessCountry(data, filters.country)) {
                 return sendRegionalForbidden(res)

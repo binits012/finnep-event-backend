@@ -31,11 +31,25 @@ export const isEventPastByEndDate = (event, now = new Date()) => {
     return end.getTime() < now.getTime()
 }
 
+/** Public partner/silo visibility: live events + completed/past archive; hide inactive drafts. */
+export const isPartnerEventPubliclyVisible = (event, now = new Date()) => {
+    if (!event) return false
+    if (event.status === 'completed') return true
+    if (event.active === false) {
+        return isEventPastByEndDate(event, now)
+    }
+    return true
+}
+
 const buildPartnerMerchantEventsQuery = ({ city, country, merchantId, now = new Date() }) => {
     const q = {
         merchant: merchantId,
         $or: [
+            // Published / live events
             { active: { $ne: false } },
+            // Explicitly completed (scheduler sets active:false + status:completed)
+            { status: 'completed' },
+            // Inactive past archive when status may still be lagging
             {
                 active: false,
                 $expr: { $lt: [effectiveEventEndDateExpr, now] }
@@ -181,6 +195,31 @@ export const getEvents = async(page = 1, limit = 10, filters = {}) =>{
 
     if (filters.category) {
         queryFilter['otherInfo.categoryName'] = filters.category
+    }
+
+    if (filters.search && String(filters.search).trim()) {
+        const searchTerm = escapeRegExp(String(filters.search).trim())
+        queryFilter.$or = [
+            { eventTitle: new RegExp(searchTerm, 'i') },
+            { eventName: new RegExp(searchTerm, 'i') },
+        ]
+    }
+
+    if (filters.needsReview === true || filters.needsReview === 'true') {
+        queryFilter.active = false
+        queryFilter.status = { $ne: 'completed' }
+    } else {
+        if (filters.active !== undefined && filters.active !== null && filters.active !== '') {
+            const activeRaw = String(filters.active).toLowerCase()
+            if (activeRaw === 'true' || activeRaw === '1') {
+                queryFilter.active = true
+            } else if (activeRaw === 'false' || activeRaw === '0') {
+                queryFilter.active = false
+            }
+        }
+        if (filters.status) {
+            queryFilter.status = filters.status
+        }
     }
 
     // CMS listing must include full lifecycle events (active/inactive/past).
