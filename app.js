@@ -384,20 +384,41 @@ try {
         queueWatchdogRunning = true;
         try {
             const channel = messageConsumer.consumeChannel;
-            if (!channel) return;
+            if (!channel) {
+                console.warn('Queue watchdog: consume channel not available, skipping check');
+                return;
+            }
+
+            // Check if channel connection is valid before attempting operations
+            if (channel.connection?.closed || channel.connection?.destroyed) {
+                console.warn('Queue watchdog: consume channel connection is closed, will trigger reconnection on next operation');
+                return;
+            }
+
             const zeroConsumerQueues = [];
             for (const queueName of rabbitConsumerWatchQueues) {
-                const queueInfo = await channel.checkQueue(queueName);
-                if ((queueInfo?.consumerCount || 0) === 0) {
-                    zeroConsumerQueues.push(queueName);
+                try {
+                    const queueInfo = await channel.checkQueue(queueName);
+                    if ((queueInfo?.consumerCount || 0) === 0) {
+                        zeroConsumerQueues.push(queueName);
+                    }
+                } catch (checkError) {
+                    if (checkError.message?.includes('Channel closed') || checkError.message?.includes('closed')) {
+                        console.warn(`Queue watchdog: channel closed while checking ${queueName}, will reconnect`);
+                        return; // Exit watchdog, let reconnect handler deal with it
+                    }
+                    throw checkError; // Re-throw non-channel-closed errors
                 }
             }
+
             if (zeroConsumerQueues.length > 0) {
                 console.warn('Queue watchdog detected missing consumers, forcing queue setup:', zeroConsumerQueues.join(', '));
                 await setupQueues(true);
             }
         } catch (watchdogError) {
-            console.error('Queue watchdog error:', watchdogError.message || watchdogError);
+            console.error('Queue watchdog error:', watchdogError.message || watchdogError, {
+                stack: watchdogError.stack
+            });
         } finally {
             queueWatchdogRunning = false;
         }

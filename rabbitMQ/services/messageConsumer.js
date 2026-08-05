@@ -19,7 +19,6 @@ class MessageConsumer {
             info('Initializing MessageConsumer channels...');
 
             // Create separate channels for publishing and consuming
-
             this.publishChannel = await rabbitMQ.getChannel();
             this.consumeChannel = await rabbitMQ.getChannel();
 
@@ -27,11 +26,30 @@ class MessageConsumer {
                 throw new Error('Failed to get RabbitMQ channels');
             }
 
+            // Set up error handlers on channels to detect disconnections
+            this.publishChannel.on('error', (err) => {
+                error('Publish channel error:', { message: err.message, stack: err.stack });
+                this.isInitialized = false;
+                this.publishChannel = null;
+            });
+
+            this.consumeChannel.on('error', (err) => {
+                error('Consume channel error:', { message: err.message, stack: err.stack });
+                this.isInitialized = false;
+                this.activeConsumers.clear();
+                this.consumeChannel = null;
+            });
+
             this.isInitialized = true;
             info('MessageConsumer channels initialized successfully');
         } catch (err) {
-            error('Failed to initialize MessageConsumer channels', { error: err.message, stack: err.stack });
+            error('Failed to initialize MessageConsumer channels', { 
+                message: err.message, 
+                stack: err.stack 
+            });
             this.isInitialized = false;
+            this.publishChannel = null;
+            this.consumeChannel = null;
             throw err;
         }
     }
@@ -53,7 +71,10 @@ class MessageConsumer {
                 this.isInitialized = false;
                 // Clear active consumers since channels are being re-initialized
                 this.activeConsumers.clear();
-                info('Channels not ready or closed, clearing consumers and initializing...');
+                info('Channels not ready or closed, clearing consumers and initializing...', {
+                    publishChannelInvalid,
+                    consumeChannelInvalid
+                });
                 await this.initialize();
             }
 
@@ -67,7 +88,12 @@ class MessageConsumer {
                 throw new Error('Channels have invalid connections after initialization');
             }
         } catch (err) {
-            error('Error ensuring channels are ready:', err);
+            error('Error ensuring channels are ready:', { 
+                message: err.message,
+                stack: err.stack,
+                publishChannelExists: !!this.publishChannel,
+                consumeChannelExists: !!this.consumeChannel
+            });
             // Reset state to force re-initialization on next attempt
             this.publishChannel = null;
             this.consumeChannel = null;
@@ -126,42 +152,64 @@ class MessageConsumer {
 
         info(`Starting to consume queue: ${queueName}`);
 
-        const { consumerTag } = await this.consumeChannel.consume(queueName, async (msg) => {
-            if (msg) {
-                try {
-                    const parsed = JSON.parse(msg.content.toString());
-                    // Broker routing key is authoritative for how the message was routed to this queue.
-                    // JSON body can omit or disagree (truncated publish, bad merge, legacy payloads) — that caused intermittent wrong/no handlers while inbox still stored the body.
-                    const envelopeRoutingKey = msg.fields?.routingKey;
-                    const messageForHandler = { ...parsed };
-                    if (envelopeRoutingKey) {
-                        if (
-                            parsed.routingKey != null &&
-                            parsed.routingKey !== '' &&
-                            parsed.routingKey !== envelopeRoutingKey
-                        ) {
-                            warn(`Queue ${queueName}: JSON routingKey differs from AMQP envelope — using AMQP`, {
-                                jsonRoutingKey: parsed.routingKey,
-                                amqpRoutingKey: envelopeRoutingKey
+        try {
+            const { consumerTag } = await this.consumeChannel.consume(queueName, async (msg) => {
+                if (msg) {
+                    try {
+                        const parsed = JSON.parse(msg.content.toString());
+                        // Broker routing key is authoritative for how the message was routed to this queue.
+                        // JSON body can omit or disagree (truncated publish, bad merge, legacy payloads) — that caused intermittent wrong/no handlers while inbox still stored the body.
+                        const envelopeRoutingKey = msg.fields?.routingKey;
+                        const messageForHandler = { ...parsed };
+                        if (envelopeRoutingKey) {
+                            if (
+                                parsed.routingKey != null &&
+                                parsed.routingKey !== '' &&
+                                parsed.routingKey !== envelopeRoutingKey
+                            ) {
+                                warn(`Queue ${queueName}: JSON routingKey differs from AMQP envelope — using AMQP`, {
+                                    jsonRoutingKey: parsed.routingKey,
+                                    amqpRoutingKey: envelopeRoutingKey
+                                });
+                            }
+                            messageForHandler.routingKey = envelopeRoutingKey;
+                        }
+
+                        info(`Received message from ${queueName}`, { message: messageForHandler });
+
+                        await handler(messageForHandler);
+                        this.consumeChannel.ack(msg);
+                    } catch (err) {
+                        error(`Error processing message from ${queueName}`, { 
+                            error: err.message, 
+                            stack: err.stack 
+                        });
+                        try {
+                            this.consumeChannel.nack(msg, false, false); // Don't requeue
+                        } catch (nackErr) {
+                            error(`Failed to nack message from ${queueName}`, { 
+                                error: nackErr.message 
                             });
                         }
-                        messageForHandler.routingKey = envelopeRoutingKey;
                     }
-
-                    info(`Received message from ${queueName}`, { message: messageForHandler });
-
-                    await handler(messageForHandler);
-                    this.consumeChannel.ack(msg);
-                } catch (err) {
-                    error(`Error processing message from ${queueName}`, { error: err.message, stack: err.stack });
-                    this.consumeChannel.nack(msg, false, false); // Don't requeue
                 }
-            }
-        });
+            });
 
-        // Track this consumer to prevent duplicates
-        this.activeConsumers.add(queueName);
-        info(`Consumer registered for queue ${queueName} with tag: ${consumerTag}`);
+            // Track this consumer to prevent duplicates
+            this.activeConsumers.add(queueName);
+            info(`Consumer registered for queue ${queueName} with tag: ${consumerTag}`);
+        } catch (consumeErr) {
+            error(`Failed to start consuming queue ${queueName}`, { 
+                error: consumeErr.message,
+                stack: consumeErr.stack
+            });
+            // Check if it's a channel closed error
+            if (consumeErr.message?.includes('Channel closed') || consumeErr.message?.includes('closed')) {
+                this.isInitialized = false;
+                this.consumeChannel = null;
+            }
+            throw consumeErr;
+        }
     }
 
     async publishMessage(queueName, message) {
