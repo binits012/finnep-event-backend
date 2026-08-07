@@ -105,10 +105,17 @@ function normalizeGalleryPhotos(value, fallback = []) {
 	const source = Array.isArray(value) ? value : fallback
 	return source
 		.filter((item) => item && typeof item.url === 'string' && item.url.trim())
-		.map((item, index) => ({
-			url: item.url.trim(),
-			position: Number.isFinite(Number(item.position)) ? Number(item.position) : index + 1,
-		}))
+		.map((item, index) => {
+			const thumbUrl =
+				typeof item.thumbUrl === 'string' && item.thumbUrl.trim()
+					? item.thumbUrl.trim()
+					: undefined
+			return {
+				url: item.url.trim(),
+				...(thumbUrl ? { thumbUrl } : {}),
+				position: Number.isFinite(Number(item.position)) ? Number(item.position) : index + 1,
+			}
+		})
 		.sort((a, b) => a.position - b.position)
 }
 

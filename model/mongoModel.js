@@ -874,6 +874,7 @@ const merchantSchema = new mongoose.Schema({
 		},
 		galleryPhotos: [{
 			url: { type: String, default: '' },
+			thumbUrl: { type: String, default: '' },
 			position: { type: Number, default: 0 }
 		}],
 		galleryIncludeEventPhotos: { type: Boolean, default: false },

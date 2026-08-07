@@ -79,6 +79,28 @@ describe('siloSettings util', () => {
 		expect(result.deployment.cloudfrontDistributionId).toBe('E123')
 	})
 
+	it('preserves gallery photo thumbUrl through normalization', () => {
+		const result = normalizeSiloSettings({
+			enabled: true,
+			galleryPhotos: [
+				{
+					url: 'https://cdn.example.com/a.webp',
+					thumbUrl: 'https://cdn.example.com/a_thumb.webp',
+					position: 2
+				},
+				{ url: 'https://cdn.example.com/b.webp', position: 1 }
+			]
+		})
+		expect(result.galleryPhotos).toEqual([
+			{ url: 'https://cdn.example.com/b.webp', position: 1 },
+			{
+				url: 'https://cdn.example.com/a.webp',
+				thumbUrl: 'https://cdn.example.com/a_thumb.webp',
+				position: 2
+			}
+		])
+	})
+
 	it('builds partner theme payload with merchant logo fallback', () => {
 		const theme = toPartnerThemePayload({
 			logo: 'https://cdn.example.com/logo.png',
