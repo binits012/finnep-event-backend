@@ -876,6 +876,7 @@ const merchantSchema = new mongoose.Schema({
 			url: { type: String, default: '' },
 			position: { type: Number, default: 0 }
 		}],
+		galleryIncludeEventPhotos: { type: Boolean, default: false },
 		partnersEnabled: { type: Boolean, default: false },
 		partners: [{
 			name: { type: String, default: '' },

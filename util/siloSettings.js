@@ -70,6 +70,7 @@ const DEFAULT_SILO_SETTINGS = {
 	checkout: {
 		paymentMethodTypes: []
 	},
+	galleryIncludeEventPhotos: false,
 	partnersEnabled: false,
 	partners: []
 }
@@ -239,6 +240,9 @@ export function normalizeSiloSettings(value = {}, existing = {}) {
 		galleryPhotos: settings.galleryPhotos !== undefined
 			? normalizeGalleryPhotos(settings.galleryPhotos)
 			: normalizeGalleryPhotos(prev.galleryPhotos),
+		galleryIncludeEventPhotos: settings.galleryIncludeEventPhotos !== undefined
+			? Boolean(settings.galleryIncludeEventPhotos)
+			: Boolean(prev.galleryIncludeEventPhotos),
 		partnersEnabled: settings.partnersEnabled !== undefined
 			? Boolean(settings.partnersEnabled)
 			: Boolean(prev.partnersEnabled),
@@ -301,6 +305,7 @@ export function toPartnerThemePayload(merchant) {
 		enabled: silo.enabled,
 		domain: silo.domain,
 		galleryPhotos: silo.enabled ? silo.galleryPhotos : [],
+		galleryIncludeEventPhotos: silo.enabled ? Boolean(silo.galleryIncludeEventPhotos) : false,
 		partners: silo.enabled && silo.partnersEnabled ? silo.partners : []
 	}
 

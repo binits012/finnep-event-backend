@@ -86,6 +86,7 @@ describe('siloSettings util', () => {
 				enabled: true,
 				domain: 'tickets.example.com',
 				themePreset: 'gallery',
+				galleryIncludeEventPhotos: true,
 				brandConfig: {
 					primaryColor: '#d4af37',
 					darkColor: '#111827',
@@ -99,6 +100,17 @@ describe('siloSettings util', () => {
 		expect(theme.brandConfig.logoUrl).toBe('https://cdn.example.com/logo.png')
 		expect(theme.enabled).toBe(true)
 		expect(theme.domain).toBe('tickets.example.com')
+		expect(theme.galleryIncludeEventPhotos).toBe(true)
+	})
+
+	it('defaults galleryIncludeEventPhotos to false', () => {
+		const result = normalizeSiloSettings({ enabled: true })
+		expect(result.galleryIncludeEventPhotos).toBe(false)
+
+		const theme = toPartnerThemePayload({
+			siloSettings: { enabled: true }
+		})
+		expect(theme.galleryIncludeEventPhotos).toBe(false)
 	})
 
 	it('includes content and announcements in theme payload when published', () => {
