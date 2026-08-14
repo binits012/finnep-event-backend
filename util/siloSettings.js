@@ -70,6 +70,7 @@ const DEFAULT_SILO_SETTINGS = {
 	checkout: {
 		paymentMethodTypes: []
 	},
+	galleryPhotos: [],
 	galleryIncludeEventPhotos: false,
 	partnersEnabled: false,
 	partners: []

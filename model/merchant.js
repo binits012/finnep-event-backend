@@ -354,13 +354,27 @@ export async function updateMerchantById(id, updateData) {
 
     // Native $set of the whole siloSettings object. findByIdAndUpdate / doc.set()
     // flatten nested DocumentArrays to index paths, so deletes never drop the tail.
+    // A second $set on the array paths is required: nested `galleryPhotos: []`
+    // is omitted from some BSON payloads, which leaves the last photo in Mongo.
     if (payload.siloSettings !== undefined) {
-      payload.siloSettings = toPlainUpdateValue(payload.siloSettings);
-      const result = await model.Merchant.collection.updateOne(
-        { _id: toMerchantObjectId(id) },
-        { $set: payload }
-      );
+      const siloSettings = toPlainUpdateValue(payload.siloSettings) || {};
+      const galleryPhotos = Array.isArray(siloSettings.galleryPhotos) ? siloSettings.galleryPhotos : [];
+      const partners = Array.isArray(siloSettings.partners) ? siloSettings.partners : [];
+      siloSettings.galleryPhotos = galleryPhotos;
+      siloSettings.partners = partners;
+      payload.siloSettings = siloSettings;
+
+      const filter = { _id: toMerchantObjectId(id) };
+      const result = await model.Merchant.collection.updateOne(filter, { $set: payload });
       if (!result?.matchedCount) return null;
+
+      await model.Merchant.collection.updateOne(filter, {
+        $set: {
+          'siloSettings.galleryPhotos': galleryPhotos,
+          'siloSettings.partners': partners
+        }
+      });
+
       const updatedMerchant = await model.Merchant.findById(id);
       if (updatedMerchant) {
         info('Merchant updated successfully: %s', id);

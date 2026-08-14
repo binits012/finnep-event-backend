@@ -270,13 +270,28 @@ describe('Merchant Model', () => {
       const result = await Merchant.updateMerchantById(merchantId, updateData);
 
       expect(mockMerchantModel.findByIdAndUpdate).not.toHaveBeenCalled();
-      expect(mockMerchantModel.collection.updateOne).toHaveBeenCalledWith(
+      expect(mockMerchantModel.collection.updateOne).toHaveBeenNthCalledWith(
+        1,
         { _id: merchantId },
         {
           $set: expect.objectContaining({
             name: 'Raag',
-            siloSettings: { enabled: true, galleryPhotos: [] }
+            siloSettings: expect.objectContaining({
+              enabled: true,
+              galleryPhotos: [],
+              partners: []
+            })
           })
+        }
+      );
+      expect(mockMerchantModel.collection.updateOne).toHaveBeenNthCalledWith(
+        2,
+        { _id: merchantId },
+        {
+          $set: {
+            'siloSettings.galleryPhotos': [],
+            'siloSettings.partners': []
+          }
         }
       );
       expect(result.siloSettings.galleryPhotos).toEqual([]);
