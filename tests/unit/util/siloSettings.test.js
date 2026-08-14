@@ -123,6 +123,12 @@ describe('siloSettings util', () => {
 			existing
 		)
 		expect(emptied.galleryPhotos).toEqual([])
+
+		const omittedAfterDeleteAll = mergeSiloSettingsFromEmsSync(
+			{ themePreset: 'festival' },
+			existing
+		)
+		expect(omittedAfterDeleteAll.galleryPhotos).toEqual([])
 	})
 
 	it('builds partner theme payload with merchant logo fallback', () => {

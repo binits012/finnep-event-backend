@@ -265,6 +265,11 @@ export function mergeSiloSettingsFromEmsSync(incoming = {}, existingMongo = {}) 
 	const merged = normalizeSiloSettings(incoming, existingMongo)
 	merged.enabled = Boolean(existingMongo?.enabled)
 	merged.deployment = normalizeSiloSettings({}, existingMongo).deployment
+	// EMS JSON/outbox omits empty arrays, so a full gallery delete arrives WITHOUT
+	// `galleryPhotos`. Falling back to Mongo prev is what left the last photo stuck.
+	merged.galleryPhotos = Array.isArray(incoming.galleryPhotos)
+		? normalizeGalleryPhotos(incoming.galleryPhotos)
+		: []
 	return merged
 }
 
