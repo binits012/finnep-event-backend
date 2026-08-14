@@ -28,6 +28,9 @@ mockMerchantModel.findOneAndUpdate = jest.fn();
 mockMerchantModel.findByIdAndUpdate = jest.fn();
 mockMerchantModel.findByIdAndDelete = jest.fn();
 mockMerchantModel.deleteOne = jest.fn();
+mockMerchantModel.collection = {
+  updateOne: jest.fn()
+};
 
 const mockModel = {
   Merchant: mockMerchantModel
@@ -72,6 +75,7 @@ describe('Merchant Model', () => {
     mockMerchantModel.findByIdAndUpdate.mockClear();
     mockMerchantModel.findByIdAndDelete.mockClear();
     mockMerchantModel.deleteOne.mockClear();
+    mockMerchantModel.collection.updateOne.mockClear();
     mockLogger.error.mockClear();
     mockLogger.info.mockClear();
   });
@@ -243,6 +247,39 @@ describe('Merchant Model', () => {
       );
       expect(result).toBeDefined();
       expect(result.name).toBe(updateData.name);
+    });
+
+    it('replaces siloSettings with a native $set so galleryPhotos deletes persist', async () => {
+      const merchantId = new mongoose.Types.ObjectId();
+      const updateData = {
+        name: 'Raag',
+        siloSettings: {
+          enabled: true,
+          galleryPhotos: []
+        }
+      };
+      const updatedMerchant = {
+        _id: merchantId,
+        name: 'Raag',
+        siloSettings: { enabled: true, galleryPhotos: [] }
+      };
+
+      mockMerchantModel.collection.updateOne.mockResolvedValue({ matchedCount: 1, modifiedCount: 1 });
+      mockMerchantModel.findById.mockResolvedValue(updatedMerchant);
+
+      const result = await Merchant.updateMerchantById(merchantId, updateData);
+
+      expect(mockMerchantModel.findByIdAndUpdate).not.toHaveBeenCalled();
+      expect(mockMerchantModel.collection.updateOne).toHaveBeenCalledWith(
+        { _id: merchantId },
+        {
+          $set: expect.objectContaining({
+            name: 'Raag',
+            siloSettings: { enabled: true, galleryPhotos: [] }
+          })
+        }
+      );
+      expect(result.siloSettings.galleryPhotos).toEqual([]);
     });
   });
 

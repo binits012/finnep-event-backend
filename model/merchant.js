@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import * as model from '../model/mongoModel.js';
 import { error, info } from './logger.js';
 import { buildCountryMatchFilter } from '../util/regionalAccess.js';
@@ -337,12 +338,39 @@ export async function getAllMerchants(filters = {}) {
   }
 }
 
+function toMerchantObjectId(id) {
+  if (id instanceof mongoose.Types.ObjectId) return id;
+  return new mongoose.Types.ObjectId(id);
+}
+
+function toPlainUpdateValue(value) {
+  if (value == null || typeof value !== 'object') return value;
+  return JSON.parse(JSON.stringify(value));
+}
+
 export async function updateMerchantById(id, updateData) {
   try {
-    updateData.updatedAt = Date.now();
+    const payload = { ...updateData, updatedAt: Date.now() };
+
+    // Native $set of the whole siloSettings object. findByIdAndUpdate / doc.set()
+    // flatten nested DocumentArrays to index paths, so deletes never drop the tail.
+    if (payload.siloSettings !== undefined) {
+      payload.siloSettings = toPlainUpdateValue(payload.siloSettings);
+      const result = await model.Merchant.collection.updateOne(
+        { _id: toMerchantObjectId(id) },
+        { $set: payload }
+      );
+      if (!result?.matchedCount) return null;
+      const updatedMerchant = await model.Merchant.findById(id);
+      if (updatedMerchant) {
+        info('Merchant updated successfully: %s', id);
+      }
+      return updatedMerchant;
+    }
+
     const updatedMerchant = await model.Merchant.findByIdAndUpdate(
       id,
-      updateData,
+      payload,
       { new: true, runValidators: true }
     );
     if (updatedMerchant) {

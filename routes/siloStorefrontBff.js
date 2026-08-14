@@ -16,6 +16,7 @@ const router = express.Router()
 router.use((req, res, next) => {
 	try {
 		assertSiloBffOriginAllowed(req)
+		res.set('Cache-Control', 'no-store')
 		next()
 	} catch (error) {
 		sendSiloBffError(res, error)

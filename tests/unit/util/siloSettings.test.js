@@ -101,6 +101,30 @@ describe('siloSettings util', () => {
 		])
 	})
 
+	it('replaces galleryPhotos with the incoming EMS array on sync, including deletes', () => {
+		const existing = {
+			enabled: true,
+			galleryPhotos: [
+				{ url: 'https://cdn.example.com/keep.webp', position: 1 },
+				{ url: 'https://cdn.example.com/removed.webp', position: 2 }
+			]
+		}
+
+		const shortened = mergeSiloSettingsFromEmsSync(
+			{ galleryPhotos: [{ url: 'https://cdn.example.com/keep.webp', position: 1 }] },
+			existing
+		)
+		expect(shortened.galleryPhotos).toEqual([
+			{ url: 'https://cdn.example.com/keep.webp', position: 1 }
+		])
+
+		const emptied = mergeSiloSettingsFromEmsSync(
+			{ galleryPhotos: [] },
+			existing
+		)
+		expect(emptied.galleryPhotos).toEqual([])
+	})
+
 	it('builds partner theme payload with merchant logo fallback', () => {
 		const theme = toPartnerThemePayload({
 			logo: 'https://cdn.example.com/logo.png',

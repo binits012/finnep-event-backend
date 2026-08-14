@@ -873,6 +873,7 @@ const merchantSchema = new mongoose.Schema({
 			paymentMethodTypes: [{ type: String }]
 		},
 		galleryPhotos: [{
+			_id: false,
 			url: { type: String, default: '' },
 			thumbUrl: { type: String, default: '' },
 			position: { type: Number, default: 0 }
@@ -880,6 +881,7 @@ const merchantSchema = new mongoose.Schema({
 		galleryIncludeEventPhotos: { type: Boolean, default: false },
 		partnersEnabled: { type: Boolean, default: false },
 		partners: [{
+			_id: false,
 			name: { type: String, default: '' },
 			designation: { type: String, default: '' },
 			message: { type: String, default: '' },

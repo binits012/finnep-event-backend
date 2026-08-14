@@ -195,7 +195,9 @@ function buildBankingInfoUpdate(message, existingMerchant) {
 
 function toPlainObject(value) {
 	if (!value) return {}
-	if (typeof value.toObject === 'function') return value.toObject()
+	if (typeof value.toObject === 'function') {
+		return value.toObject({ depopulate: true, flattenMaps: true })
+	}
 	if (value instanceof Map) return Object.fromEntries(value)
 	return { ...value }
 }
