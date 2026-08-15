@@ -43,10 +43,12 @@ router.get('/api/merchant', (req, res) => {
 })
 
 router.get('/api/theme', (req, res) => {
-	withMerchant(req, res, async ({ credential }) => {
+	withMerchant(req, res, async ({ credential, merchant }) => {
 		const data = await partnerFetchForSiloBff(credential, { path: '/partner/v1/theme' })
 		if (data?.theme) {
-			data.theme = await resolvePartnerThemeMedia(data.theme)
+			data.theme = await resolvePartnerThemeMedia(data.theme, {
+				merchantId: merchant?.merchantId
+			})
 		}
 		res.json(data)
 	})

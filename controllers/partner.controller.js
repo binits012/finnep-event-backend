@@ -74,7 +74,9 @@ export const getPartnerTheme = async (req, res) => {
 		if (!merchant) {
 			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({ error: RESOURCE_NOT_FOUND })
 		}
-		const theme = await resolvePartnerThemeMedia(toPartnerThemePayload(merchant))
+		const theme = await resolvePartnerThemeMedia(toPartnerThemePayload(merchant), {
+			merchantId: merchant.merchantId
+		})
 		return res.status(consts.HTTP_STATUS_OK).json({
 			theme
 		})

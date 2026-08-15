@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll } from '@jest/globals'
 import {
 	isPrivateCdnMediaUrl,
-	resolvePartnerPublicMediaUrl
+	resolvePartnerPublicMediaUrl,
+	resolvePartnerThemeMedia
 } from '../../../util/partnerMediaUrls.js'
 
 describe('partnerMediaUrls', () => {
@@ -38,5 +39,31 @@ describe('partnerMediaUrls', () => {
 		await expect(resolvePartnerPublicMediaUrl(url)).resolves.toBe(
 			'https://dpjl2qtfc31de.cloudfront.net/merchants/1/logo/test.webp'
 		)
+	})
+
+	it('keeps only gallery URLs belonging to merchant when merchantId is provided', async () => {
+		const theme = {
+			galleryPhotos: [
+				{ url: 'https://dpjl2qtfc31de.cloudfront.net/merchants/104/gallery/a.webp', position: 1 },
+				{ url: 'https://dpjl2qtfc31de.cloudfront.net/merchants/999/gallery/b.webp', position: 2 },
+				{ url: 'https://example.com/external.webp', position: 3 }
+			]
+		}
+		const resolved = await resolvePartnerThemeMedia(theme, { merchantId: '104' })
+		expect(resolved.galleryPhotos).toEqual([
+			{ url: 'https://dpjl2qtfc31de.cloudfront.net/merchants/104/gallery/a.webp', position: 1 },
+			{ url: 'https://example.com/external.webp', position: 3 }
+		])
+	})
+
+	it('does not filter gallery URLs by merchant when merchantId is missing', async () => {
+		const theme = {
+			galleryPhotos: [
+				{ url: 'https://dpjl2qtfc31de.cloudfront.net/merchants/104/gallery/a.webp', position: 1 },
+				{ url: 'https://dpjl2qtfc31de.cloudfront.net/merchants/999/gallery/b.webp', position: 2 }
+			]
+		}
+		const resolved = await resolvePartnerThemeMedia(theme)
+		expect(resolved.galleryPhotos).toEqual(theme.galleryPhotos)
 	})
 })

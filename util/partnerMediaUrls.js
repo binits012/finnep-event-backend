@@ -46,6 +46,13 @@ function normalizePublicCdnUrl(url) {
 	return normalized
 }
 
+function galleryUrlBelongsToMerchant(url, merchantId) {
+	if (!url || !merchantId) return true
+	const match = String(url).match(/\/merchants\/([^/]+)\/gallery\//)
+	if (!match) return true
+	return String(match[1]) === String(merchantId)
+}
+
 /**
  * Resolve platform CDN media for public silo storefront / partner API responses.
  * Objects are served unsigned via CloudFront OAC — do not attach signed-URL query params.
@@ -58,7 +65,7 @@ export async function resolvePartnerPublicMediaUrl(url) {
 	return normalizePublicCdnUrl(trimmed)
 }
 
-export async function resolvePartnerThemeMedia(theme) {
+export async function resolvePartnerThemeMedia(theme, { merchantId } = {}) {
 	if (!theme || typeof theme !== 'object') return theme
 	const next = { ...theme }
 	if (next.brandConfig?.logoUrl) {
@@ -68,15 +75,19 @@ export async function resolvePartnerThemeMedia(theme) {
 		}
 	}
 	if (Array.isArray(next.galleryPhotos) && next.galleryPhotos.length > 0) {
-		next.galleryPhotos = await Promise.all(
+		const resolvedPhotos = await Promise.all(
 			next.galleryPhotos.map(async (photo) => {
 				if (!photo || typeof photo !== 'object') return photo
+				const resolvedUrl = photo.url ? await resolvePartnerPublicMediaUrl(photo.url) : photo.url
 				return {
 					...photo,
-					url: photo.url ? await resolvePartnerPublicMediaUrl(photo.url) : photo.url
+					url: resolvedUrl
 				}
 			})
 		)
+		next.galleryPhotos = resolvedPhotos
+			.filter(Boolean)
+			.filter((photo) => galleryUrlBelongsToMerchant(photo?.url, merchantId))
 	}
 	if (Array.isArray(next.partners) && next.partners.length > 0) {
 		next.partners = await Promise.all(
