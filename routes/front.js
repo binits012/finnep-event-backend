@@ -67,6 +67,9 @@ router.route('/request-data')
 router.route('/free-event-register')
     .post(front.handleFreeEventRegistration)
 
+router.post('/event/:eventId/registration-upload', siloEventTenancyById, front.uploadRegistrationFormFile)
+router.delete('/event/:eventId/registration-upload/:uploadId', siloEventTenancyById, front.deleteRegistrationFormFile)
+
 /** public seat selection endpoints */
 router.route('/event/:eventId/seats')
     .get(front.getEventSeatsPublic)

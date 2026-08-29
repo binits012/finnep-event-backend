@@ -123,6 +123,15 @@ export function extractFulfillmentFromCheckout({
 		serverCalculatedTotal: expectedPrice?.totalAmount ?? null,
 		pricingModel: event?.venue?.pricingModel || null,
 		isVenueEvent: Boolean(event?.venue?.venueId),
+		registrationAnswers:
+			source.registrationAnswers &&
+			typeof source.registrationAnswers === 'object' &&
+			!Array.isArray(source.registrationAnswers)
+				? source.registrationAnswers
+				: undefined,
+		registrationFileUploads: Array.isArray(source.registrationFileUploads)
+			? source.registrationFileUploads
+			: [],
 	};
 }
 

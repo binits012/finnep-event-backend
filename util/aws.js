@@ -1,6 +1,6 @@
 import dotenv from 'dotenv'
 dotenv.config()
-import { S3Client,PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3'
+import { S3Client,PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3'
 import { Upload } from '@aws-sdk/lib-storage'
 import {error, info} from '../model/logger.js'
 const s3Client = new S3Client({
@@ -84,6 +84,43 @@ export const downloadPricingFromS3 = async (s3Key) => {
         throw new Error(`Failed to download pricing from S3: ${err.message}`);
     }
 }
+
+/** Upload to a private S3 prefix (no public CDN URL returned). */
+export const uploadPrivateObjectToS3 = async (body, contentType, key) => {
+    await s3Client.send(
+        new PutObjectCommand({
+            Bucket: process.env.BUCKET_NAME,
+            Key: key,
+            ContentType: contentType,
+            Body: body,
+        })
+    );
+};
+
+export const downloadPrivateObjectFromS3 = async (key) => {
+    const command = new GetObjectCommand({
+        Bucket: process.env.BUCKET_NAME,
+        Key: key,
+    });
+    const response = await s3Client.send(command);
+    const chunks = [];
+    for await (const chunk of response.Body) {
+        chunks.push(chunk);
+    }
+    return {
+        buffer: Buffer.concat(chunks),
+        contentType: response.ContentType || 'application/octet-stream',
+    };
+};
+
+export const deletePrivateObjectFromS3 = async (key) => {
+    await s3Client.send(
+        new DeleteObjectCommand({
+            Bucket: process.env.BUCKET_NAME,
+            Key: key,
+        })
+    );
+};
 
 /**
  * Upload manifest to S3 with fixed key (overwrites existing)

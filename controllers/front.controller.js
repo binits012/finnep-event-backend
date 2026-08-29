@@ -32,6 +32,22 @@ import redisClient from '../model/redisConnect.js'
 import * as commonUtil from '../util/common.js'
 import * as Merchant from '../model/merchant.js'
 import { sanitizePublicEventForFront } from '../util/publicMerchant.js'
+import {
+    getRegistrationFormFromEvent,
+    resolveRegistrationAnswersForEvent,
+    applyRegistrationAnswersToTicketInfo,
+    isRegistrationFormSupportedForEvent,
+} from '../util/registrationForm.js'
+import {
+    createPendingRegistrationUpload,
+    deletePendingRegistrationUpload,
+    isRegistrationUploadId,
+    markRegistrationUploadsAttached,
+    REGISTRATION_FILE_ALLOWED_MIMES,
+    REGISTRATION_FILE_MAX_BYTES,
+    resolveRegistrationUploadMime,
+} from '../util/registrationFileUpload.js'
+import { RegistrationFileUpload } from '../model/registrationFileUpload.js'
 import * as OutboxMessage from '../model/outboxMessage.js'
 import { messageConsumer } from '../rabbitMQ/services/messageConsumer.js'
 import { v4 as uuidv4 } from 'uuid'
@@ -2047,6 +2063,11 @@ const completeZeroAmountCheckout = async (req, res, { metadata, parsedMetadata, 
         ticketInfo.seats = finalPlaceIds.map((placeId) => ({ placeId }));
     }
 
+    const registrationAnswers = fulfillmentMetadata.registrationAnswers || parsedMetadata.registrationAnswers;
+    applyRegistrationAnswersToTicketInfo(ticketInfo, registrationAnswers);
+    const registrationFileUploads =
+        fulfillmentMetadata.registrationFileUploads || parsedMetadata.registrationFileUploads || [];
+
     const seatCount = resolveSeatCountFromMetadata(parsedMetadata);
     const scanCount = getScanCountFromTicketType(ticketTypeConfig);
     const scanValidation = validateScanCountOrderQuantity(fulfillmentMetadata.quantity, scanCount);
@@ -2154,6 +2175,13 @@ const completeZeroAmountCheckout = async (req, res, { metadata, parsedMetadata, 
         throw new Error('Ticket creation failed');
     }
 
+    if (registrationFileUploads.length > 0) {
+        await markRegistrationUploadsAttached(
+            registrationFileUploads.map((u) => u.uploadId),
+            ticket._id
+        );
+    }
+
     await ticketMaster.provisionGroupChildQRCodes(
         ticket,
         event,
@@ -2231,7 +2259,10 @@ const completeZeroAmountCheckout = async (req, res, { metadata, parsedMetadata, 
             ticket.validUntil = new Date(event.event_end_date);
         }
         const ticketForPublish = await Ticket.getTicketById(ticket._id, false);
-        await publishTicketCreationEvent(ticketForPublish || ticket, event, fulfillmentMetadata, paymentReference);
+        await publishTicketCreationEvent(ticketForPublish || ticket, event, {
+            ...fulfillmentMetadata,
+            registrationFileUploads,
+        }, paymentReference);
     } catch (publishError) {
         console.error('[completeZeroAmountCheckout] Failed to publish ticket creation event:', publishError);
     }
@@ -2418,6 +2449,22 @@ export const createPaymentIntent = async (req, res, next) => {
             parsedSeatTicketsType: typeof parsedMetadata.seatTickets,
             isSeatTicketsArray: Array.isArray(parsedMetadata.seatTickets)
         });
+
+        const registrationResolution = await resolveRegistrationAnswersForEvent(
+            event,
+            req.body.registrationAnswers,
+            { checkoutMetadata: parsedMetadata }
+        );
+        if (!registrationResolution.valid) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                success: false,
+                error: registrationResolution.errors[0] || 'Invalid registration answers',
+            });
+        }
+        if (Object.keys(registrationResolution.mergedAnswers).length > 0) {
+            parsedMetadata.registrationAnswers = registrationResolution.mergedAnswers;
+            parsedMetadata.registrationFileUploads = registrationResolution.registrationFileUploads;
+        }
 
         const expectedPrice = calculateExpectedPrice(ticket, event, parseInt(metadata.quantity), parsedMetadata);
         validatePriceCalculation(amount / 100, expectedPrice);
@@ -2757,6 +2804,22 @@ const _createPaytrailPaymentInternal = async (req, res, next, { redirectSuccessU
 
         const { merchant, event, ticket } = await validateMerchantAndEvent(parsedMetadata);
         if (!assertSiloEventAccess(req, res, event)) return;
+
+        const paytrailRegistrationResolution = await resolveRegistrationAnswersForEvent(
+            event,
+            req.body.registrationAnswers,
+            { checkoutMetadata: parsedMetadata }
+        );
+        if (!paytrailRegistrationResolution.valid) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                success: false,
+                error: paytrailRegistrationResolution.errors[0] || 'Invalid registration answers',
+            });
+        }
+        if (Object.keys(paytrailRegistrationResolution.mergedAnswers).length > 0) {
+            parsedMetadata.registrationAnswers = paytrailRegistrationResolution.mergedAnswers;
+            parsedMetadata.registrationFileUploads = paytrailRegistrationResolution.registrationFileUploads;
+        }
 
         // Check if merchant has Paytrail enabled
         if (!merchant.paytrailEnabled) {
@@ -3978,6 +4041,8 @@ export const verifyPaytrailPayment = async (req, res, next) => {
             checkoutHostname: useRedisData
                 ? (redisData.checkoutHostname || extractCheckoutHostname({ req }))
                 : extractCheckoutHostname({ req }),
+            registrationAnswers: useRedisData ? redisData.registrationAnswers : undefined,
+            registrationFileUploads: useRedisData ? (redisData.registrationFileUploads || []) : [],
         };
 
         console.log('[verifyPaytrailPayment] Payment data being passed to createTicketFromPaytrailPayment:', {
@@ -4571,6 +4636,9 @@ export const handlePaymentSuccess = async (req, res, next) => {
             ticketInfo.sectionSelections = sanitizedMetadata.sectionSelections;
         }
 
+        applyRegistrationAnswersToTicketInfo(ticketInfo, fulfillment.registrationAnswers);
+        const registrationFileUploads = fulfillment.registrationFileUploads || [];
+
         // For seat-based events, store basic seat information
         if (event && event.venue && event.venue.venueId && sanitizedMetadata.placeIds && sanitizedMetadata.placeIds.length > 0) {
             // Just store the placeIds - detailed seat info can be looked up later if needed
@@ -4785,6 +4853,13 @@ export const handlePaymentSuccess = async (req, res, next) => {
             throw new Error('Ticket creation failed');
         }
 
+        if (registrationFileUploads.length > 0) {
+            await markRegistrationUploadsAttached(
+                registrationFileUploads.map((u) => u.uploadId),
+                ticket._id
+            );
+        }
+
         await Ticket.updateTicketById(ticket._id, {
             paymentProvider,
             paymentReference: paymentIntentId,
@@ -4899,7 +4974,10 @@ export const handlePaymentSuccess = async (req, res, next) => {
                 ticket.validUntil = new Date(event.event_end_date);
             }
             const ticketForPublish = await Ticket.getTicketById(ticket._id, false);
-            await publishTicketCreationEvent(ticketForPublish || ticket, event, sanitizedMetadata, paymentIntentId);
+            await publishTicketCreationEvent(ticketForPublish || ticket, event, {
+                ...sanitizedMetadata,
+                registrationFileUploads,
+            }, paymentIntentId);
         } catch (publishError) {
             console.error('Failed to publish ticket creation event:', publishError);
             // Don't fail the entire operation if event publishing fails
@@ -5025,6 +5103,7 @@ export const publishTicketCreationEvent = async (ticket, event, metadata, paymen
                 // Optional push tokens captured during free registration.
                 androidFcmToken: metadata?.androidFcmToken ?? null,
                 iosApnsToken: metadata?.iosApnsToken ?? null,
+                registrationFileUploads: metadata?.registrationFileUploads ?? [],
                 // Timestamps
                 createdAt: new Date(),
                 eventCreatedAt: event.createdAt
@@ -5490,12 +5569,217 @@ export const sendCareerApplication = async (req, res, next) => {
 };
 
 // Free event registration handler - follows same pattern as handlePaymentSuccess
+export const uploadRegistrationFormFile = async (req, res) => {
+    try {
+        const { eventId } = req.params;
+        if (!eventId || !/^[0-9a-fA-F]{24}$/.test(eventId)) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                success: false,
+                error: 'Invalid event id',
+            });
+        }
+
+        const event = await Event.getEventById(eventId);
+        if (!event) {
+            return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+                success: false,
+                error: 'Event not found',
+            });
+        }
+        if (!assertSiloEventAccess(req, res, event)) return;
+
+        const registrationForm = getRegistrationFormFromEvent(event);
+        const fileFields = registrationForm?.fields?.filter((f) => f.type === 'file') || [];
+        if (fileFields.length === 0) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                success: false,
+                error: 'This event has no file registration fields',
+            });
+        }
+        if (!isRegistrationFormSupportedForEvent(event)) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                success: false,
+                error: 'Registration file upload is not available for seat-selection events',
+            });
+        }
+
+        const merchant = event.merchant?._id
+            ? await Merchant.getMerchantById(event.merchant._id)
+            : null;
+        const externalMerchantId = merchant?.merchantId ? String(merchant.merchantId) : null;
+        if (!externalMerchantId) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                success: false,
+                error: 'Merchant not configured for uploads',
+            });
+        }
+
+        const formData = {};
+        let uploadBuffer = null;
+        let uploadMeta = null;
+
+        const bb = busboy({
+            headers: req.headers,
+            limits: { fileSize: REGISTRATION_FILE_MAX_BYTES, files: 1 },
+        });
+
+        await new Promise((resolve, reject) => {
+            bb.on('field', (name, value) => {
+                formData[name] = value;
+            });
+
+            bb.on('file', (name, file, info) => {
+                if (name !== 'file') {
+                    file.resume();
+                    return;
+                }
+                const { filename, mimeType } = info;
+                const resolvedMime = resolveRegistrationUploadMime(mimeType, filename);
+                if (!resolvedMime) {
+                    uploadMeta = { rejectedMime: true };
+                    file.resume();
+                    return;
+                }
+                const chunks = [];
+                file.on('data', (chunk) => chunks.push(chunk));
+                file.on('limit', () => {
+                    uploadBuffer = null;
+                    uploadMeta = { tooLarge: true };
+                });
+                file.on('end', () => {
+                    if (!uploadMeta?.tooLarge) {
+                        uploadBuffer = Buffer.concat(chunks);
+                        uploadMeta = { filename, mimeType: resolvedMime };
+                    }
+                });
+            });
+
+            bb.on('error', reject);
+            bb.on('finish', resolve);
+            req.pipe(bb);
+        });
+
+        const fieldId = String(formData.fieldId || '').trim();
+        const field = fileFields.find((f) => f.id === fieldId);
+        if (!field) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                success: false,
+                error: 'Invalid field id',
+            });
+        }
+
+        if (uploadMeta?.rejectedMime) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                success: false,
+                error: 'File type not allowed',
+            });
+        }
+
+        if (uploadMeta?.tooLarge || !uploadBuffer?.length) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                success: false,
+                error: 'File too large or missing',
+            });
+        }
+
+        const allowedForField = field.accept?.length
+            ? new Set(field.accept)
+            : REGISTRATION_FILE_ALLOWED_MIMES;
+        if (!allowedForField.has(uploadMeta.mimeType)) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                success: false,
+                error: 'File type not allowed for this field',
+            });
+        }
+
+        const record = await createPendingRegistrationUpload({
+            eventId,
+            externalMerchantId,
+            fieldId,
+            fileName: uploadMeta.filename,
+            mimeType: uploadMeta.mimeType,
+            buffer: uploadBuffer,
+        });
+
+        return res.status(consts.HTTP_STATUS_OK).json({
+            success: true,
+            uploadId: record.uploadId,
+            fileName: record.fileName,
+            mimeType: record.mimeType,
+            size: record.size,
+        });
+    } catch (err) {
+        error('uploadRegistrationFormFile failed:', err);
+        return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
+            success: false,
+            error: 'Upload failed',
+        });
+    }
+};
+
+export const deleteRegistrationFormFile = async (req, res) => {
+    try {
+        const { eventId, uploadId } = req.params;
+        if (!eventId || !/^[0-9a-fA-F]{24}$/.test(eventId)) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                success: false,
+                error: 'Invalid event id',
+            });
+        }
+        if (!isRegistrationUploadId(uploadId)) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                success: false,
+                error: 'Invalid upload id',
+            });
+        }
+
+        const event = await Event.getEventById(eventId);
+        if (!event) {
+            return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
+                success: false,
+                error: 'Event not found',
+            });
+        }
+        if (!assertSiloEventAccess(req, res, event)) return;
+
+        const record = await RegistrationFileUpload.findOne({ uploadId }).lean();
+        if (!record || String(record.eventId) !== String(eventId)) {
+            return res.status(consts.HTTP_STATUS_NOT_FOUND).json({
+                success: false,
+                error: 'Upload not found',
+            });
+        }
+        if (record.status !== 'pending') {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                success: false,
+                error: 'Upload cannot be removed',
+            });
+        }
+
+        const deleted = await deletePendingRegistrationUpload(uploadId);
+        if (!deleted) {
+            return res.status(consts.HTTP_STATUS_NOT_FOUND).json({
+                success: false,
+                error: 'Upload not found',
+            });
+        }
+
+        return res.status(consts.HTTP_STATUS_OK).json({ success: true });
+    } catch (err) {
+        error('deleteRegistrationFormFile failed:', err);
+        return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
+            success: false,
+            error: 'Failed to remove file',
+        });
+    }
+};
+
 export const handleFreeEventRegistration = async (req, res, next) => {
     try {
         // Security Layer 1: Request size validation
         validateRequestSize(req.body);
 
-        const { email, quantity, eventId, ticketId, merchantId, externalMerchantId, eventName, ticketName, marketingOptIn, sectionSelections, androidFcmToken, iosApnsToken } = req.body;
+        const { email, quantity, eventId, ticketId, merchantId, externalMerchantId, eventName, ticketName, marketingOptIn, sectionSelections, androidFcmToken, iosApnsToken, registrationAnswers } = req.body;
 
         // Security Layer 2: Validate required fields
         if (!email || !quantity || !eventId || !merchantId || !externalMerchantId || !eventName || !ticketName) {
@@ -5582,6 +5866,18 @@ export const handleFreeEventRegistration = async (req, res, next) => {
             throw new Error('Event is not free');
         }
 
+        const registrationResolution = await resolveRegistrationAnswersForEvent(event, registrationAnswers, {
+            checkoutMetadata: sanitizedData,
+        });
+        if (!registrationResolution.valid) {
+            return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+                success: false,
+                error: registrationResolution.errors[0] || 'Invalid registration answers',
+            });
+        }
+        const mergedRegistrationAnswers = registrationResolution.mergedAnswers;
+        sanitizedData.registrationFileUploads = registrationResolution.registrationFileUploads;
+
         // Validate and check if ticket exists in the event (if ticketId is provided)
         if (sanitizedData.ticketId) {
             const ticketExists = event.ticketInfo && event.ticketInfo.some(ticket => ticket._id.toString() === sanitizedData.ticketId);
@@ -5621,6 +5917,9 @@ export const handleFreeEventRegistration = async (req, res, next) => {
             paymentProvider: 'free',
             isFree: true
         };
+        if (Object.keys(mergedRegistrationAnswers).length > 0) {
+            ticketInfo.registrationAnswers = mergedRegistrationAnswers;
+        }
         if (freeCheckoutHostname) {
             ticketInfo.checkoutHostname = freeCheckoutHostname;
         }
@@ -5702,6 +6001,13 @@ export const handleFreeEventRegistration = async (req, res, next) => {
 
         if (!ticket?._id && !ticket?.id) {
             throw new Error('Ticket creation failed');
+        }
+
+        if (sanitizedData.registrationFileUploads?.length) {
+            await markRegistrationUploadsAttached(
+                sanitizedData.registrationFileUploads.map((u) => u.uploadId),
+                ticket._id
+            );
         }
 
         await ticketMaster.provisionGroupChildQRCodes(

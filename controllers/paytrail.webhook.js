@@ -20,6 +20,8 @@ import {
 } from '../util/ticketQuantity.js';
 import { PlatformMarketingConsent } from '../model/mongoModel.js';
 import { fulfillSeatPurchaseBeforeTicket } from '../src/services/seatPurchaseFulfillmentService.js';
+import { applyRegistrationAnswersToTicketInfo } from '../util/registrationForm.js';
+import { markRegistrationUploadsAttached } from '../util/registrationFileUpload.js';
 
 export const handlePaytrailWebhook = async (req, res, next) => {
     try {
@@ -227,6 +229,8 @@ async function _createTicketFromPaytrailPaymentBody(paymentData, transactionId, 
         seatTickets
     };
 
+    applyRegistrationAnswersToTicketInfo(ticketInfoDraft, paymentData.registrationAnswers);
+
     // Add venue (same structure as Stripe) so ticket display is consistent
     if (event && event.venue) {
         ticketInfoDraft.venue = {
@@ -325,6 +329,14 @@ async function _createTicketFromPaytrailPaymentBody(paymentData, transactionId, 
         paymentData.merchantId,
         paymentData.externalMerchantId
     );
+
+    const registrationFileUploads = paymentData.registrationFileUploads || [];
+    if (registrationFileUploads.length > 0) {
+        await markRegistrationUploadsAttached(
+            registrationFileUploads.map((u) => u.uploadId),
+            ticket._id
+        );
+    }
 
     await ticketMaster.provisionGroupChildQRCodes(
         ticket,

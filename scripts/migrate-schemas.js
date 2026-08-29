@@ -233,6 +233,7 @@ async function ensureIndexes() {
     try {
         const Merchant = mongoModel.Merchant;
         const Event = mongoModel.Event;
+        const Ticket = mongoModel.Ticket;
         const ExternalTicketSales = mongoModel.ExternalTicketSales;
 
         // Helper function to safely create index
@@ -320,6 +321,20 @@ async function ensureIndexes() {
             { background: true }
         );
         info('Event featured index ensured');
+
+        await safeCreateIndex(
+            Event.collection,
+            { 'otherInfo.registrationForm.fields': 1 },
+            { name: 'event_registration_form_fields', sparse: true, background: true }
+        );
+        info('Event registration form index ensured');
+
+        await safeCreateIndex(
+            Ticket.collection,
+            { 'ticketInfo.registrationAnswers': 1 },
+            { name: 'ticket_registration_answers', sparse: true, background: true }
+        );
+        info('Ticket registration answers index ensured');
 
         // Ensure external ticket sales indexes
         await safeCreateIndex(

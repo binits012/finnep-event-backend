@@ -39,8 +39,19 @@ function resolveStripeCurrencyFromMessage(message = {}) {
 
 function buildOtherInfoFromMessage(message = {}) {
     const stripeCurrency = resolveStripeCurrencyFromMessage(message);
+    const otherInfoRaw = message?.other_info && typeof message.other_info === 'object'
+        ? { ...message.other_info }
+        : {};
+    const registrationForm =
+        message?.registration_form ??
+        otherInfoRaw.registrationForm ??
+        null;
+    if (registrationForm != null) {
+        delete otherInfoRaw.registrationForm;
+    }
     return {
-        ...(message?.other_info || {}),
+        ...otherInfoRaw,
+        ...(registrationForm != null ? { registrationForm } : {}),
         categoryName: message?.category_name,
         subCategoryName: message?.subcategory_name,
         eventExtraInfo: {
