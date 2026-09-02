@@ -1,6 +1,6 @@
 /** Event registration form schema + answer validation (free or paid checkout). */
 
-export const REGISTRATION_FIELD_TYPES = ['text', 'phone', 'textarea', 'select', 'checkbox', 'number', 'file'];
+export const REGISTRATION_FIELD_TYPES = ['text', 'phone', 'textarea', 'select', 'radio', 'checkbox', 'number', 'file'];
 
 export const REGISTRATION_FORM_LIMITS = {
     maxFields: 20,
@@ -96,7 +96,7 @@ export function normalizeRegistrationForm(raw) {
         const placeholder = String(field.placeholder || '').trim().slice(0, REGISTRATION_FORM_LIMITS.maxPlaceholderLength);
         if (placeholder) normalized.placeholder = placeholder;
 
-        if (type === 'select') {
+        if (type === 'select' || type === 'radio') {
             const options = normalizeOptions(field.options);
             if (options.length === 0) continue;
             normalized.options = options;
@@ -198,7 +198,7 @@ export function validateRegistrationAnswers(form, answers) {
             continue;
         }
 
-        if (field.type === 'select') {
+        if (field.type === 'select' || field.type === 'radio') {
             if (!field.options.includes(textValue)) {
                 errors.push(`${field.label} has an invalid selection`);
                 continue;

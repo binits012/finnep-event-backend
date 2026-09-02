@@ -18,12 +18,24 @@ describe('registrationForm', () => {
                 { id: 'email', type: 'text', label: 'Bad reserved' },
                 { id: 'bad id', type: 'text', label: 'Spaces' },
                 { id: 'meal', type: 'select', label: 'Meal', options: ['Veg', 'Meat'] },
+                { id: 'size', type: 'radio', label: 'Size', options: ['S', 'M', 'L'] },
                 { id: 'terms', type: 'checkbox', label: 'I agree', required: true },
             ],
         });
 
-        expect(form.fields).toHaveLength(3);
-        expect(form.fields.map((f) => f.id)).toEqual(['full_name', 'meal', 'terms']);
+        expect(form.fields).toHaveLength(4);
+        expect(form.fields.map((f) => f.id)).toEqual(['full_name', 'meal', 'size', 'terms']);
+    });
+
+    it('validates radio answers against options', () => {
+        const form = normalizeRegistrationForm({
+            fields: [{ id: 'size', type: 'radio', label: 'Size', required: true, options: ['S', 'M'] }],
+        });
+        expect(validateRegistrationAnswers(form, {}).valid).toBe(false);
+        expect(validateRegistrationAnswers(form, { size: 'XL' }).valid).toBe(false);
+        const ok = validateRegistrationAnswers(form, { size: 'M' });
+        expect(ok.valid).toBe(true);
+        expect(ok.sanitizedAnswers.size).toBe('M');
     });
 
     it('reads form from event.otherInfo', () => {
