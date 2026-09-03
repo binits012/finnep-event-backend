@@ -1,4 +1,5 @@
 import { hasEncryptedSiloSmtpPassword } from './siloSmtpCrypto.js'
+import { mapLikeToPlain, normalizeMerchantSocialMedia } from './merchantSocialMedia.js'
 
 const DEFAULT_SMTP = {
 	host: '',
@@ -92,18 +93,30 @@ export function stripSiloEmailSecrets(emailSettings) {
 	}
 }
 
+/**
+ * Header/footer branding for silo merchants.
+ * Business ID + social links come from the merchant profile (EMS-synced), not platform Okazzo values.
+ */
 export function resolveSiloEmailBranding(merchant) {
 	const obj = merchant && typeof merchant.toObject === 'function' ? merchant.toObject() : merchant
 	const silo = obj?.siloSettings || {}
 	const email = silo.email || {}
 	const smtp = email.smtp || {}
 	const brand = silo.brandConfig || {}
+	const social = normalizeMerchantSocialMedia(mapLikeToPlain(obj?.socialMedia))
+	const businessId = typeof obj?.code === 'string' ? obj.code.trim() : ''
+
 	return {
 		companyName: smtp.fromName || obj?.orgName || obj?.name || 'Events',
 		companyLogo: brand.logoUrl || obj?.logo || '',
 		accentColor: brand.primaryColor || '#f5b700',
 		brandingContactEmail: email.replyTo || obj?.companyEmail || obj?.email || '',
-		replyTo: email.replyTo || obj?.companyEmail || obj?.email || ''
+		replyTo: email.replyTo || obj?.companyEmail || obj?.email || '',
+		businessId,
+		socialMedidFB: social.facebook || '',
+		socialMedidLN: social.linkedin || '',
+		socialMedidIG: social.instagram || '',
+		socialMedia: social
 	}
 }
 

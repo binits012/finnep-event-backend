@@ -32,7 +32,7 @@ const emailWorker = new Worker(EMAIL_QUEUE_NAME, async (job) => {
         if (type === 'email.silo') {
             const { merchantId, ticketId: siloTicketId } = job.data;
             const Merchant = await import('../model/merchant.js');
-            const { sendSiloEmail } = await import('../util/siloMail.js');
+            const { deliverSiloBrandedEmail } = await import('../util/siloMail.js');
             const merchant = await Merchant.getMerchantById(merchantId);
             if (!merchant) {
                 throw new Error(`Merchant not found: ${merchantId}`);
@@ -44,7 +44,8 @@ const emailWorker = new Worker(EMAIL_QUEUE_NAME, async (job) => {
                     return { success: true, to: emailPayload?.to, skipped: true, reason: 'already_sent' };
                 }
             }
-            await sendSiloEmail(merchant, emailPayload);
+            // Branded content is already in the payload; falls back to platform SMTP if merchant SMTP is unset.
+            await deliverSiloBrandedEmail(merchant, emailPayload);
             if (siloTicketId) {
                 await Ticket.updateTicketById(siloTicketId, { isSend: true });
                 info(`Silo ticket email sent and marked for ticket: ${siloTicketId}`);

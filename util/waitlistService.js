@@ -7,15 +7,16 @@ import { messageConsumer } from '../rabbitMQ/services/messageConsumer.js'
 import redisClient from '../model/redisConnect.js'
 import * as commonUtil from '../util/common.js'
 import { normalizeSiloSettings } from '../util/siloSettings.js'
-import { isSiloSmtpConfigured, resolveSiloEmailBranding } from '../util/siloEmailSettings.js'
+import { resolveSiloEmailBranding } from '../util/siloEmailSettings.js'
 import * as VerificationCode from '../model/verificationCode.js'
 import {
 	loadSiloVerificationCodeTemplate,
 	loadSiloWaitlistJoinedTemplate,
-	getSiloEmailSubject
+	getSiloEmailSubject,
+	queueSiloBrandedEmail,
 } from '../util/siloMail.js'
 import { getEmailSubject } from '../util/emailTranslations.js'
-import { queueGenericEmail, queueSiloEmail } from '../workers/emailWorker.js'
+import { queueGenericEmail } from '../workers/emailWorker.js'
 
 const WAITLIST_OTP_TTL = 300
 const WAITLIST_SEND_COOLDOWN = 60
@@ -41,14 +42,11 @@ function getEventDoc(event) {
 	return event?._doc ?? event
 }
 
-function assertSiloReady(merchant) {
+function assertSiloEnabled(merchant) {
 	const obj = merchant && typeof merchant.toObject === 'function' ? merchant.toObject() : merchant
 	const silo = normalizeSiloSettings(obj?.siloSettings || {})
 	if (!silo.enabled) {
 		throw Object.assign(new Error('Silo storefront is not enabled'), { status: consts.HTTP_STATUS_BAD_REQUEST, code: 'SILO_NOT_ENABLED' })
-	}
-	if (!isSiloSmtpConfigured(silo.email)) {
-		throw Object.assign(new Error('Silo email is not configured'), { status: consts.HTTP_STATUS_SERVICE_UNAVAILABLE, code: 'SILO_EMAIL_NOT_CONFIGURED' })
 	}
 	return { merchant: obj, silo }
 }
@@ -76,7 +74,7 @@ export async function sendWaitlistVerificationCode({
 
 	if (channel === 'silo') {
 		await assertEventOwnedByMerchant(event, merchant._id)
-		assertSiloReady(merchant)
+		assertSiloEnabled(merchant)
 	} else if (!event) {
 		throw Object.assign(new Error('Event not found'), { status: consts.HTTP_STATUS_RESOURCE_NOT_FOUND })
 	}
@@ -102,12 +100,10 @@ export async function sendWaitlistVerificationCode({
 
 	try {
 		if (channel === 'silo') {
-			const merchantObj = merchant && typeof merchant.toObject === 'function' ? merchant.toObject() : merchant
-			const merchantId = String(merchantObj?._id || merchantObj?.id || '')
 			const branding = resolveSiloEmailBranding(merchant)
 			const html = await loadSiloVerificationCodeTemplate(code, locale, branding)
 			const subject = await getSiloEmailSubject('verification_code', locale, { companyName: branding.companyName })
-			await queueSiloEmail(merchantId, { to: normalizedEmail, subject, html })
+			await queueSiloBrandedEmail(merchant, { to: normalizedEmail, subject, html })
 		} else {
 			const html = await commonUtil.loadVerificationCodeTemplate(code, locale)
 			const subject = await getEmailSubject('verification_code', locale, { companyName: process.env.COMPANY_TITLE || 'Finnep' })
@@ -121,9 +117,6 @@ export async function sendWaitlistVerificationCode({
 		}
 	} catch (emailErr) {
 		error('[waitlistService] email send failed', emailErr)
-		if (emailErr.message === 'SILO_EMAIL_NOT_CONFIGURED') {
-			throw Object.assign(new Error('Silo email is not configured'), { status: consts.HTTP_STATUS_SERVICE_UNAVAILABLE, code: 'SILO_EMAIL_NOT_CONFIGURED' })
-		}
 		throw Object.assign(new Error('Failed to send code'), { status: consts.HTTP_STATUS_INTERNAL_SERVER_ERROR })
 	}
 
@@ -148,7 +141,7 @@ export async function joinWaitlist({
 
 	if (channel === 'silo') {
 		await assertEventOwnedByMerchant(event, merchant._id)
-		assertSiloReady(merchant)
+		assertSiloEnabled(merchant)
 	} else if (!event) {
 		throw Object.assign(new Error('Event not found'), { status: consts.HTTP_STATUS_RESOURCE_NOT_FOUND })
 	}
@@ -251,8 +244,6 @@ export async function joinWaitlist({
 		const eventPromotionalPhoto = doc.eventPromotionPhoto || doc.eventPromotionalPhoto || event?.eventPromotionPhoto
 
 		if (channel === 'silo') {
-			const merchantObj = merchant && typeof merchant.toObject === 'function' ? merchant.toObject() : merchant
-			const merchantId = String(merchantObj?._id || merchantObj?.id || '')
 			const branding = resolveSiloEmailBranding(merchant)
 			const html = await loadSiloWaitlistJoinedTemplate(eventTitle, locale, branding, {
 				eventPromotionalPhoto: eventPromotionalPhoto || undefined
@@ -261,7 +252,7 @@ export async function joinWaitlist({
 				companyName: branding.companyName,
 				eventTitle
 			})
-			await queueSiloEmail(merchantId, { to: normalizedEmail, subject, html })
+			await queueSiloBrandedEmail(merchant, { to: normalizedEmail, subject, html })
 		} else {
 			const html = await commonUtil.loadWaitlistJoinedTemplate(eventTitle, locale, {
 				eventPromotionalPhoto: eventPromotionalPhoto || undefined

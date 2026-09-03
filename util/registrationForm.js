@@ -57,6 +57,14 @@ export function getRegistrationFormFromEvent(event) {
     return normalizeRegistrationForm(raw);
 }
 
+/**
+ * Form exists and is collecting answers at checkout.
+ * Missing `active` defaults to true for backward compatibility.
+ */
+export function isRegistrationFormActive(form) {
+    return Boolean(form?.fields?.length) && form.active !== false;
+}
+
 /** GA-only for now — seat-selection / seated events do not expose custom fields yet. */
 export function isRegistrationFormSupportedForEvent(event) {
     if (event?.isSeatedEvent === true) return false;
@@ -113,7 +121,8 @@ export function normalizeRegistrationForm(raw) {
     }
 
     if (fields.length === 0) return null;
-    return { fields };
+    // Default active=true when omitted so existing events keep collecting answers.
+    return { active: raw.active !== false, fields };
 }
 
 function isEmptyAnswer(value) {
@@ -249,7 +258,7 @@ export async function resolveRegistrationAnswersForEvent(event, registrationAnsw
 
     const registrationForm = getRegistrationFormFromEvent(event);
 
-    if (!registrationForm?.fields?.length) {
+    if (!isRegistrationFormActive(registrationForm)) {
         if (Object.keys(answersObj).length > 0) {
             return {
                 valid: false,

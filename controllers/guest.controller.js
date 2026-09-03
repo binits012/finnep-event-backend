@@ -11,8 +11,8 @@ import * as hash from '../util/createHash.js'
 import { PlatformMarketingConsent } from '../model/mongoModel.js'
 import * as Merchant from '../model/merchant.js'
 import { normalizeSiloSettings } from '../util/siloSettings.js'
-import { isSiloSmtpConfigured, resolveSiloEmailBranding } from '../util/siloEmailSettings.js'
-import { loadSiloVerificationCodeTemplate, getSiloEmailSubject } from '../util/siloMail.js'
+import { resolveSiloEmailBranding } from '../util/siloEmailSettings.js'
+import { loadSiloVerificationCodeTemplate, getSiloEmailSubject, queueSiloBrandedEmail } from '../util/siloMail.js'
 
 const RATE_LIMIT_CODES_PER_HOUR = 10;
 
@@ -43,10 +43,10 @@ async function resolveSiloMerchantFromRequest(req) {
     }
 
     const silo = normalizeSiloSettings(merchant.siloSettings || {});
-    if (!silo.enabled || !isSiloSmtpConfigured(silo.email)) {
-        const err = new Error('Silo email is not configured');
-        err.status = consts.HTTP_STATUS_SERVICE_UNAVAILABLE;
-        err.code = 'SILO_EMAIL_NOT_CONFIGURED';
+    if (!silo.enabled) {
+        const err = new Error('Silo storefront is not enabled');
+        err.status = consts.HTTP_STATUS_BAD_REQUEST;
+        err.code = 'SILO_NOT_ENABLED';
         throw err;
     }
 
@@ -143,8 +143,7 @@ export const sendVerificationCode = async (req, res, next) => {
                 const emailSubject = await getSiloEmailSubject('verification_code', locale, {
                     companyName: branding.companyName
                 });
-                const { queueSiloEmail } = await import('../workers/emailWorker.js');
-                await queueSiloEmail(String(siloMerchant._id), {
+                await queueSiloBrandedEmail(siloMerchant, {
                     to: email,
                     subject: emailSubject,
                     html: emailHtml

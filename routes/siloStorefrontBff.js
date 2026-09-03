@@ -10,6 +10,7 @@ import {
 	resolvePartnerPublicMediaUrl,
 	resolvePartnerThemeMedia
 } from '../util/partnerMediaUrls.js'
+import { emitSiloPageview } from '../util/siloTrafficAnalytics.js'
 
 const router = express.Router()
 
@@ -50,6 +51,8 @@ router.get('/api/theme', (req, res) => {
 				merchantId: merchant?.merchantId
 			})
 		}
+		// Soft fallback when storefront beacon is not yet deployed (deduped in FGS within 1m).
+		emitSiloPageview({ req, merchantId: merchant?.merchantId })
 		res.json(data)
 	})
 })
@@ -77,12 +80,18 @@ router.get('/api/events', (req, res) => {
 })
 
 router.get('/api/events/:id', (req, res) => {
-	withMerchant(req, res, async ({ credential }) => {
+	withMerchant(req, res, async ({ credential, merchant }) => {
 		const data = await partnerFetchForSiloBff(credential, {
 			path: `/partner/v1/events/${req.params.id}`,
 			searchParams: {
 				presale: req.query.presale
 			}
+		})
+		// Event detail API hit ≈ page interest when beacon/referer is weak.
+		emitSiloPageview({
+			req,
+			merchantId: merchant?.merchantId,
+			path: `/events/${req.params.id}`,
 		})
 		res.json(data)
 	})
@@ -113,6 +122,24 @@ router.post('/api/events/:id/waitlist', express.json(), (req, res) => {
 router.post('/api/request-data', express.json(), (req, res) => {
 	withMerchant(req, res, async () => {
 		await proxyFebFrontForSiloBff(req, res, 'request-data')
+	})
+})
+
+/**
+ * Explicit SPA pageview beacon — preferred signal for silo traffic matrix.
+ * Body: { path?: string, referer?: string }
+ */
+router.post('/api/analytics/pageview', express.json({ limit: '4kb' }), (req, res) => {
+	withMerchant(req, res, async ({ merchant }) => {
+		const path = typeof req.body?.path === 'string' ? req.body.path : undefined
+		const referer = typeof req.body?.referer === 'string' ? req.body.referer : undefined
+		emitSiloPageview({
+			req,
+			merchantId: merchant?.merchantId,
+			path,
+			referer,
+		})
+		res.status(202).json({ success: true })
 	})
 })
 

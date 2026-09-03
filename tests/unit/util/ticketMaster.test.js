@@ -322,6 +322,85 @@ describe('Ticket Master', () => {
       expect(result.from).toBeUndefined(); // Silo emails don't set from in template
     });
 
+    it('should use silo branding when useSiloBranding is set for marketplace checkout', async () => {
+      const mockEvent = {
+        _id: 'event_123',
+        eventTitle: 'Silo Merchant Marketplace Event',
+        eventPromotionPhoto: 'https://example.com/photo.jpg',
+        otherInfo: {},
+        merchant: {
+          orgName: 'Merchant Org',
+          companyEmail: 'org@merchant.com'
+        }
+      };
+
+      const mockTicketInfo = {
+        id: 'ticket_silo_brand_123',
+        ticketInfo: {
+          quantity: '1',
+          basePrice: '25',
+          serviceFee: '2',
+          entertainmentTax: '0',
+          serviceTax: '0',
+          vatRate: '0',
+          orderFee: '0'
+        }
+      };
+
+      const mockMerchant = {
+        _id: 'merchant_silo_brand',
+        orgName: 'Raag Revolution',
+        code: 'BRAND-1',
+        logo: 'https://merchant.com/fallback-logo.png',
+        toObject: () => ({
+          _id: 'merchant_silo_brand',
+          orgName: 'Raag Revolution',
+          code: 'BRAND-1',
+          logo: 'https://merchant.com/fallback-logo.png',
+          siloSettings: {
+            enabled: true,
+            brandConfig: {
+              logoUrl: 'https://merchant.com/silo-logo.png',
+              primaryColor: '#f5b700'
+            },
+            email: {
+              replyTo: 'hello@merchant.com',
+              smtp: { fromName: 'Raag Tickets' }
+            }
+          },
+          socialMedia: {
+            facebook: 'https://facebook.com/merchant',
+            linkedin: 'https://linkedin.com/company/merchant'
+          }
+        })
+      };
+
+      mockCommon.generateICS.mockResolvedValue('BEGIN:VCALENDAR...');
+      mockCommon.generateQRCode.mockResolvedValue('data:image/png;base64,abc');
+      mockCommon.loadEmailTemplate.mockResolvedValue('<html>Branded</html>');
+      mockTicket.updateTicketById.mockResolvedValue({});
+
+      const result = await ticketMaster.createEmailPayload(
+        mockEvent,
+        mockTicketInfo,
+        'guest@example.com',
+        'CODE123',
+        'en-US',
+        {
+          useSiloBranding: true,
+          merchant: mockMerchant,
+          marketCountryCode: null
+        }
+      );
+
+      const templateVariables = mockCommon.loadEmailTemplate.mock.calls[0][1];
+      expect(templateVariables.isSiloEmail).toBe(true);
+      expect(templateVariables.companyLogo).toBe('https://merchant.com/silo-logo.png');
+      expect(templateVariables.companyName).toBe('Raag Tickets');
+      expect(result.from).toBe(process.env.EMAIL_USERNAME);
+      expect(result.replyTo).toBe('hello@merchant.com');
+    });
+
     it('should use platform branding when silo is not configured', async () => {
       // Arrange
       const mockEvent = {

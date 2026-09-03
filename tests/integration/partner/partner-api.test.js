@@ -388,7 +388,7 @@ describe('Partner API integration', () => {
 		})
 	})
 
-	it('returns 503 for waitlist send-code when silo SMTP is not configured', async () => {
+	it('allows waitlist send-code with silo branding when SMTP is not configured', async () => {
 		await model.Event.updateOne(
 			{ _id: eventA._id },
 			{ $set: { waitlistConfig: { pre_sale_enabled: true } } }
@@ -401,8 +401,9 @@ describe('Partner API integration', () => {
 			.set('Origin', 'https://silo-a.example.com')
 			.send({ email: 'fan@example.com' })
 
-		expect(response.status).toBe(503)
-		expect(response.body.error).toBe('SILO_EMAIL_NOT_CONFIGURED')
+		// Branding no longer requires merchant SMTP — delivery can use platform mail.
+		expect(response.status).toBe(200)
+		expect(response.body.message || response.body.success).toBeTruthy()
 	})
 
 	it('rejects waitlist send-code without waitlist:write scope', async () => {

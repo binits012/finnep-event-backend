@@ -213,7 +213,17 @@ async function _createTicketFromNabilPaymentBody(paymentData, transactionId, sta
     if (!ticket.isSend) {
         const { normalizeLocale } = await import('../util/common.js');
         const locale = paymentData.locale ? normalizeLocale(paymentData.locale) : 'en-US';
-        const emailPayload = await ticketMaster.createEmailPayload(event, ticket, paymentData.email, otp, locale);
+        const merchantForEmail = await Merchant.getMerchantById(paymentData.merchantId);
+        const { buildSiloTicketEmailOptionsFromPaymentData } = await import('../util/siloCheckoutEmail.js');
+        const emailOptions = buildSiloTicketEmailOptionsFromPaymentData(merchantForEmail, paymentData);
+        const emailPayload = await ticketMaster.createEmailPayload(
+            event,
+            ticket,
+            paymentData.email,
+            otp,
+            locale,
+            emailOptions
+        );
         try {
             await queueTicketEmail(ticket._id.toString(), emailPayload);
         } catch (queueError) {

@@ -569,7 +569,12 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
             options && Object.prototype.hasOwnProperty.call(options, 'marketCountryCode')
                 ? options.marketCountryCode
                 : null;
-        const useSiloEmail = options.channel === 'silo' && options.merchant;
+        // Branding follows silo config whenever silo is enabled (marketplace or silo host).
+        // SMTP / from-address still follows channel === 'silo' (hostname-matched checkout).
+        const useSiloBranding = Boolean(
+            options.merchant && (options.useSiloBranding === true || options.channel === 'silo')
+        );
+        const useSiloSmtp = options.channel === 'silo' && options.merchant;
         let companyName;
         let companyLogo;
         let brandingContactEmail;
@@ -580,7 +585,7 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
         let organizerEmail;
         let organizerPhone;
 
-        if (useSiloEmail) {
+        if (useSiloBranding) {
             const siloBranding = resolveSiloEmailBranding(options.merchant);
             companyName = siloBranding.companyName;
             companyLogo = siloBranding.companyLogo;
@@ -588,9 +593,9 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
             const merchantObj = options.merchant && typeof options.merchant.toObject === 'function'
                 ? options.merchant.toObject()
                 : (options.merchant || event.merchant || {});
-            businessId = merchantObj?.code || '';
-            socialMedidFB = merchantObj?.socialMedia?.facebook || '';
-            socialMedidLN = merchantObj?.socialMedia?.linkedin || '';
+            businessId = siloBranding.businessId || '';
+            socialMedidFB = siloBranding.socialMedidFB || '';
+            socialMedidLN = siloBranding.socialMedidLN || '';
             organizerName = merchantObj?.orgName || merchantObj?.name || venueInfo.name || 'Event Organizer';
             organizerEmail = siloBranding.brandingContactEmail || merchantObj?.companyEmail || merchantObj?.email || '';
             organizerPhone = merchantObj?.companyPhoneNumber || merchantObj?.phone || '';
@@ -624,7 +629,7 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
             eventPromotionalPhoto: event.eventPromotionPhoto || event.eventPromotionalPhoto || '',
             eventTitle: event.eventTitle || '',
             companyName: companyName,
-            isSiloEmail: useSiloEmail,
+            isSiloEmail: useSiloBranding,
 
             // Attendee & Ticket
             attendeeName: attendeeName,
@@ -681,14 +686,15 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
             brandingContactEmail,
             businessId: businessId,
             socialMedidFB: socialMedidFB,
-            socialMedidLN: socialMedidLN
+            socialMedidLN: socialMedidLN,
+            hasSiloSocialLinks: Boolean(socialMedidFB || socialMedidLN)
         };
 
         // Check if event has custom email template.
-        // For silo checkout we intentionally force the shared MJML template so merchant branding
+        // For silo-branded emails we intentionally force the shared MJML template so merchant branding
         // (logo/business/social/support visibility) is applied consistently.
         const emailTemplate = event?.otherInfo?.emailTemplate;
-        const useCustomEventTemplate = Boolean(emailTemplate) && !useSiloEmail;
+        const useCustomEventTemplate = Boolean(emailTemplate) && !useSiloBranding;
         let loadedData = null;
 
         if (useCustomEventTemplate) {
@@ -775,8 +781,12 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
             },
             attachments
         };
-        if (!useSiloEmail) {
+        if (!useSiloSmtp) {
             message.from = process.env.EMAIL_USERNAME;
+            if (useSiloBranding) {
+                const siloBranding = resolveSiloEmailBranding(options.merchant);
+                message.replyTo = siloBranding.replyTo || undefined;
+            }
         } else {
             const siloBranding = resolveSiloEmailBranding(options.merchant);
             message.replyTo = siloBranding.replyTo || undefined;

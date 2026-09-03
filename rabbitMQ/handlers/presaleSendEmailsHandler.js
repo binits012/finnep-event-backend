@@ -6,9 +6,9 @@ import redisClient from '../../model/redisConnect.js';
 import { loadPresaleLinkTemplate, loadSoldOutAvailableTemplate } from '../../util/common.js';
 import { getEmailSubject } from '../../util/emailTranslations.js';
 import { normalizeSiloSettings } from '../../util/siloSettings.js';
-import { isSiloSmtpConfigured, resolveSiloEmailBranding, resolveSiloPublicBaseUrl } from '../../util/siloEmailSettings.js';
+import { resolveSiloEmailBranding, resolveSiloPublicBaseUrl } from '../../util/siloEmailSettings.js';
 import {
-	sendSiloEmail,
+	deliverSiloBrandedEmail,
 	loadSiloPresaleLinkTemplate,
 	loadSiloSoldOutAvailableTemplate,
 	getSiloEmailSubject
@@ -56,10 +56,11 @@ function resolveEventBaseUrl(merchant, mongoEventId) {
     return `${baseUrl}/events/${mongoEventId}`;
 }
 
-function useSiloWaitlistEmail(merchant) {
+/** Silo branding whenever silo is enabled — SMTP is optional (platform delivery fallback). */
+function shouldUseSiloWaitlistBranding(merchant) {
     const obj = merchant && typeof merchant.toObject === 'function' ? merchant.toObject() : merchant;
     const silo = normalizeSiloSettings(obj?.siloSettings || {});
-    return silo.enabled && silo.domain && isSiloSmtpConfigured(silo.email);
+    return Boolean(silo.enabled);
 }
 
 export const handlePresaleSendEmails = async (message) => {
@@ -85,7 +86,7 @@ export const handlePresaleSendEmails = async (message) => {
     const mongoEventId = String(doc._id ?? event._id);
     const eventTitle = doc.eventTitle || 'Event';
     const eventUrl = resolveEventBaseUrl(merchant, mongoEventId);
-    const siloMode = useSiloWaitlistEmail(merchant);
+    const siloMode = shouldUseSiloWaitlistBranding(merchant);
     const branding = siloMode ? resolveSiloEmailBranding(merchant) : null;
 
     const templateOptions = {
@@ -101,7 +102,7 @@ export const handlePresaleSendEmails = async (message) => {
                 if (siloMode) {
                     const subject = await getSiloEmailSubject('sold_out_available', DEFAULT_LOCALE, { eventTitle });
                     const html = await loadSiloSoldOutAvailableTemplate(eventTitle, eventUrl, DEFAULT_LOCALE, branding, templateOptions);
-                    await sendSiloEmail(merchant, { to: normalizedEmail, subject, html });
+                    await deliverSiloBrandedEmail(merchant, { to: normalizedEmail, subject, html });
                 } else {
                     const subject = await getEmailSubject('sold_out_available', DEFAULT_LOCALE, { eventTitle });
                     const html = await loadSoldOutAvailableTemplate(eventTitle, eventUrl, DEFAULT_LOCALE, templateOptions);
@@ -114,7 +115,7 @@ export const handlePresaleSendEmails = async (message) => {
                 if (siloMode) {
                     const subject = await getSiloEmailSubject('presale_link', DEFAULT_LOCALE, { eventTitle });
                     const html = await loadSiloPresaleLinkTemplate(eventTitle, presaleLink, PRESALE_LINK_TTL_HOURS, DEFAULT_LOCALE, branding, templateOptions);
-                    await sendSiloEmail(merchant, { to: normalizedEmail, subject, html });
+                    await deliverSiloBrandedEmail(merchant, { to: normalizedEmail, subject, html });
                 } else {
                     const subject = await getEmailSubject('presale_link', DEFAULT_LOCALE, { eventTitle });
                     const html = await loadPresaleLinkTemplate(eventTitle, presaleLink, PRESALE_LINK_TTL_HOURS, DEFAULT_LOCALE, templateOptions);

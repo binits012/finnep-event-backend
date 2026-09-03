@@ -36,6 +36,7 @@ import {
     getRegistrationFormFromEvent,
     resolveRegistrationAnswersForEvent,
     applyRegistrationAnswersToTicketInfo,
+    isRegistrationFormActive,
     isRegistrationFormSupportedForEvent,
 } from '../util/registrationForm.js'
 import {
@@ -735,9 +736,17 @@ export const completeOrderTicket = async (req, res, next) => {
             const event = await Event.getEventById(ticketInfo.eventId);
             // Extract locale from request
             const locale = commonUtil.extractLocaleFromRequest(req);
-            const emailPayload = await ticketMaster.createEmailPayload(event, ticket, ticketFor, orderTicket?.otp, locale, {
+            let legacyMerchant = null;
+            if (ticketInfo.merchantId) {
+                const merchants = await Merchant.genericSearchMerchant(ticketInfo.merchantId, ticketInfo.externalMerchantId);
+                legacyMerchant = merchants.length > 0 ? merchants[0] : null;
+            }
+            const emailPayload = await ticketMaster.createEmailPayload(event, ticket, ticketFor, orderTicket?.otp, locale, await resolveTicketEmailOptions({
+                req,
+                merchant: legacyMerchant,
+                metadata: ticketInfo,
                 marketCountryCode: parseRequestMarketCountryCode(req)
-            });
+            }));
             await new Promise(resolve => setTimeout(resolve, 100)); // intentional delay
             await sendMail.forward(emailPayload).then(async data => {
                 // Update the ticket to mark as sent
@@ -754,11 +763,6 @@ export const completeOrderTicket = async (req, res, next) => {
                 try {
                     const { publishPaymentCompleted } = await import('../services/accountingEventPublisher.js');
                     const paymentIntentId = sessionDetails.payment_intent || sessionDetails.id;
-                    let legacyMerchant = null;
-                    if (ticketInfo.merchantId) {
-                        const merchants = await Merchant.genericSearchMerchant(ticketInfo.merchantId, ticketInfo.externalMerchantId);
-                        legacyMerchant = merchants.length > 0 ? merchants[0] : null;
-                    }
                     const legacyTicket = ticketData || ticket;
                     await publishPaymentCompleted({
                         ticket: legacyTicket,
@@ -5590,7 +5594,7 @@ export const uploadRegistrationFormFile = async (req, res) => {
 
         const registrationForm = getRegistrationFormFromEvent(event);
         const fileFields = registrationForm?.fields?.filter((f) => f.type === 'file') || [];
-        if (fileFields.length === 0) {
+        if (!isRegistrationFormActive(registrationForm) || fileFields.length === 0) {
             return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
                 success: false,
                 error: 'This event has no file registration fields',
@@ -6857,22 +6861,23 @@ export const sendSeatOTP = async (req, res, next) => {
 		const eventMerchantId = event?.merchant?._id?.toString?.() || event?.merchant?.toString?.();
 		const merchant = eventMerchantId ? await Merchant.getMerchantById(eventMerchantId) : null;
 		const checkoutHostname = extractCheckoutHostname({ req });
-		const siloOpts = merchant && shouldUseSiloTicketEmail(merchant, checkoutHostname)
-			? { channel: 'silo', merchant }
-			: null;
+		const { shouldUseSiloEmailBranding } = await import('../util/siloCheckoutEmail.js');
+		const useSiloBranding = Boolean(
+			merchant && (shouldUseSiloEmailBranding(merchant) || shouldUseSiloTicketEmail(merchant, checkoutHostname))
+		);
 
 		try {
-			if (siloOpts) {
+			if (useSiloBranding) {
 				const {
 					loadSiloVerificationCodeTemplate,
-					getSiloEmailSubject
+					getSiloEmailSubject,
+					queueSiloBrandedEmail,
 				} = await import('../util/siloMail.js');
 				const { resolveSiloEmailBranding } = await import('../util/siloEmailSettings.js');
-				const { queueSiloEmail } = await import('../workers/emailWorker.js');
 				const branding = resolveSiloEmailBranding(merchant);
 				const emailHtml = await loadSiloVerificationCodeTemplate(code, locale, branding);
 				const emailSubject = await getSiloEmailSubject('verification_code', locale, { companyName: branding.companyName });
-				await queueSiloEmail(String(merchant._id || merchant.id), {
+				await queueSiloBrandedEmail(merchant, {
 					to: normalizedEmail,
 					subject: emailSubject,
 					html: emailHtml,

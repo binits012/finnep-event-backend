@@ -99,6 +99,70 @@ export async function sendSiloEmail(merchant, { to, subject, html, replyTo, atta
 	return result
 }
 
+/**
+ * Deliver a silo-branded email: merchant SMTP when configured, otherwise platform mail.
+ * Branding belongs in `html` already — this only chooses the transport.
+ */
+export async function deliverSiloBrandedEmail(merchant, payload = {}) {
+	const branding = resolveSiloEmailBranding(merchant)
+	const emailPayload = {
+		...payload,
+		replyTo: payload.replyTo || branding.replyTo || undefined,
+	}
+
+	if (resolveSiloSmtpConfig(merchant)) {
+		return sendSiloEmail(merchant, emailPayload)
+	}
+
+	info('[siloMail] silo SMTP not configured; delivering branded email via platform mail', {
+		merchantId: String(
+			(merchant && typeof merchant.toObject === 'function' ? merchant.toObject() : merchant)?._id
+			|| (merchant && typeof merchant.toObject === 'function' ? merchant.toObject() : merchant)?.id
+			|| ''
+		),
+	})
+	const sendMail = await import('./sendMail.js')
+	return sendMail.forward({
+		from: process.env.EMAIL_USERNAME,
+		to: emailPayload.to,
+		subject: emailPayload.subject,
+		html: emailPayload.html,
+		replyTo: emailPayload.replyTo,
+		attachments: emailPayload.attachments,
+		icalEvent: emailPayload.icalEvent,
+		attachDataUrls: emailPayload.attachDataUrls,
+	})
+}
+
+/**
+ * Queue silo-branded email: silo transport when SMTP is ready, else generic platform queue.
+ */
+export async function queueSiloBrandedEmail(merchant, emailPayload) {
+	const obj = merchant && typeof merchant.toObject === 'function' ? merchant.toObject() : merchant
+	const merchantId = String(obj?._id || obj?.id || '')
+	const branding = resolveSiloEmailBranding(merchant)
+	const payload = {
+		...emailPayload,
+		replyTo: emailPayload.replyTo || branding.replyTo || undefined,
+	}
+
+	const { queueSiloEmail, queueGenericEmail } = await import('../workers/emailWorker.js')
+	if (merchantId && resolveSiloSmtpConfig(merchant)) {
+		return queueSiloEmail(merchantId, payload)
+	}
+
+	return queueGenericEmail({
+		from: process.env.EMAIL_USERNAME,
+		to: payload.to,
+		subject: payload.subject,
+		html: payload.html,
+		replyTo: payload.replyTo,
+		attachments: payload.attachments,
+		icalEvent: payload.icalEvent,
+		attachDataUrls: payload.attachDataUrls,
+	})
+}
+
 async function compileSiloTemplate(localeKey, locale, variables) {
 	const normalizedLocale = normalizeLocale(locale)
 	const translations = await loadTranslations(localeKey, normalizedLocale)

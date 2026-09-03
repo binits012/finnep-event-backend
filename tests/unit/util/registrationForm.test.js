@@ -3,6 +3,7 @@ import {
     normalizeRegistrationForm,
     validateRegistrationAnswers,
     getRegistrationFormFromEvent,
+    isRegistrationFormActive,
 } from '../../../util/registrationForm.js';
 
 describe('registrationForm', () => {
@@ -24,7 +25,26 @@ describe('registrationForm', () => {
         });
 
         expect(form.fields).toHaveLength(4);
+        expect(form.active).toBe(true);
         expect(form.fields.map((f) => f.id)).toEqual(['full_name', 'meal', 'size', 'terms']);
+    });
+
+    it('preserves active=false while keeping fields', () => {
+        const form = normalizeRegistrationForm({
+            active: false,
+            fields: [{ id: 'org', type: 'text', label: 'Organization' }],
+        });
+        expect(form).not.toBeNull();
+        expect(form.active).toBe(false);
+        expect(form.fields).toHaveLength(1);
+        expect(isRegistrationFormActive(form)).toBe(false);
+    });
+
+    it('defaults missing active to true for backward compatibility', () => {
+        const form = normalizeRegistrationForm({
+            fields: [{ id: 'org', type: 'text', label: 'Organization' }],
+        });
+        expect(isRegistrationFormActive(form)).toBe(true);
     });
 
     it('validates radio answers against options', () => {

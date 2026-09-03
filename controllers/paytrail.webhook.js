@@ -370,8 +370,9 @@ async function _createTicketFromPaytrailPaymentBody(paymentData, transactionId, 
         const emailOptions = buildSiloTicketEmailOptionsFromPaymentData(merchant, paymentData);
         
         // Log silo email decision for debugging
-        const isSiloEmail = emailOptions.channel === 'silo';
-        const logContext = `ticketId=${ticket._id}, merchantId=${paymentData.merchantId}, checkoutHostname=${paymentData.checkoutHostname}, isSiloEmail=${isSiloEmail}`;
+        const isSiloSmtp = emailOptions.channel === 'silo';
+        const useSiloBranding = emailOptions.useSiloBranding === true;
+        const logContext = `ticketId=${ticket._id}, merchantId=${paymentData.merchantId}, checkoutHostname=${paymentData.checkoutHostname}, useSiloBranding=${useSiloBranding}, isSiloSmtp=${isSiloSmtp}`;
         info(`[createTicketFromPaytrailPayment] Email options resolved: ${logContext}`);
         
         const emailPayload = await ticketMaster.createEmailPayload(event, ticket, paymentData.email, otp, locale, emailOptions);

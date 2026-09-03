@@ -22,16 +22,16 @@ describe('waitlistService util', () => {
 		})).toBeNull()
 	})
 
-	it('mapWaitlistError maps silo SMTP gate', () => {
-		const err = Object.assign(new Error('Silo email is not configured'), {
-			status: 503,
-			code: 'SILO_EMAIL_NOT_CONFIGURED'
+	it('mapWaitlistError maps structured silo errors', () => {
+		const err = Object.assign(new Error('Silo storefront is not enabled'), {
+			status: 400,
+			code: 'SILO_NOT_ENABLED'
 		})
 		expect(mapWaitlistError(err)).toEqual({
-			status: 503,
+			status: 400,
 			body: {
-				error: 'SILO_EMAIL_NOT_CONFIGURED',
-				message: 'Silo email is not configured'
+				error: 'SILO_NOT_ENABLED',
+				message: 'Silo storefront is not enabled'
 			}
 		})
 	})

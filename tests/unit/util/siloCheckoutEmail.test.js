@@ -77,7 +77,22 @@ describe('siloCheckoutEmail', () => {
 		expect(shouldUseSiloTicketEmail(merchant, 'wrong.cloudfront.net')).toBe(false)
 	})
 
-	it('returns silo options from payment data when configured', () => {
+	it('uses silo branding for silo-enabled merchants even on marketplace host', () => {
+		const merchant = {
+			siloSettings: {
+				enabled: true,
+				domain: 'merchant.com'
+			}
+		}
+		const result = buildSiloTicketEmailOptionsFromPaymentData(merchant, {
+			checkoutHostname: 'okazzo.eu'
+		})
+		expect(result.useSiloBranding).toBe(true)
+		expect(result.merchant).toBe(merchant)
+		expect(result.channel).toBeUndefined()
+	})
+
+	it('returns silo channel + branding when hostname matches', () => {
 		const merchant = {
 			_id: 'merchant_123',
 			siloSettings: {
@@ -100,11 +115,12 @@ describe('siloCheckoutEmail', () => {
 
 		const result = buildSiloTicketEmailOptionsFromPaymentData(merchant, paymentData)
 		expect(result.channel).toBe('silo')
+		expect(result.useSiloBranding).toBe(true)
 		expect(result.merchant).toBe(merchant)
 		expect(result.checkoutHostname).toBe('raagrevolution.okazzo.eu')
 	})
 
-	it('returns base options when checkoutHostname missing from payment data', () => {
+	it('returns branding without channel when checkoutHostname missing but silo enabled', () => {
 		const merchant = {
 			_id: 'merchant_123',
 			siloSettings: {
@@ -127,7 +143,8 @@ describe('siloCheckoutEmail', () => {
 
 		const result = buildSiloTicketEmailOptionsFromPaymentData(merchant, paymentData)
 		expect(result.channel).toBeUndefined()
-		expect(result.merchant).toBeUndefined()
+		expect(result.useSiloBranding).toBe(true)
+		expect(result.merchant).toBe(merchant)
 		expect(result.marketCountryCode).toBe(null)
 	})
 
@@ -139,10 +156,11 @@ describe('siloCheckoutEmail', () => {
 
 		const result = buildSiloTicketEmailOptionsFromPaymentData(null, paymentData)
 		expect(result.channel).toBeUndefined()
+		expect(result.useSiloBranding).toBeUndefined()
 		expect(result.marketCountryCode).toBe(null)
 	})
 
-	it('returns base options when hostname does not match silo domain', () => {
+	it('returns branding without silo channel when hostname does not match silo domain', () => {
 		const merchant = {
 			_id: 'merchant_123',
 			siloSettings: {
@@ -165,6 +183,8 @@ describe('siloCheckoutEmail', () => {
 
 		const result = buildSiloTicketEmailOptionsFromPaymentData(merchant, paymentData)
 		expect(result.channel).toBeUndefined()
+		expect(result.useSiloBranding).toBe(true)
+		expect(result.merchant).toBe(merchant)
 		expect(result.marketCountryCode).toBe(null)
 	})
 })
