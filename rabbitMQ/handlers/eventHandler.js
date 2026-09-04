@@ -94,6 +94,12 @@ function resolveIsSeatedEvent({ message, existingEvent, venue }) {
     return false;
 }
 
+function resolveFeaturedOnStorefront({ message, existingEvent }) {
+    if (typeof message?.featured_on_storefront === 'boolean') return message.featured_on_storefront;
+    if (typeof existingEvent?.featuredOnStorefront === 'boolean') return existingEvent.featuredOnStorefront;
+    return false;
+}
+
 function sanitizeVenuePatchForManifestGuard(venuePatch = {}) {
     if (!venuePatch || typeof venuePatch !== 'object') return venuePatch;
     const sanitized = { ...venuePatch };
@@ -253,6 +259,7 @@ async function handleEventCreated(message) {
     const waitlistConfig = message?.waitlist_config ?? undefined;
     const event_end_date = resolveEventEndDate({ message });
     const isSeatedEvent = resolveIsSeatedEvent({ message, venue });
+    const featuredOnStorefront = resolveFeaturedOnStorefront({ message });
 
     const publishPolicy = await resolvePublishPolicy(merchant, externalMerchantId, {
         eventEndDate: event_end_date,
@@ -288,9 +295,10 @@ async function handleEventCreated(message) {
         await cacheShortCodeMapping(shortCode, savedEvent._id.toString());
     }
 
-    if (savedEvent?._id && publishPolicy.featured) {
+    if (savedEvent?._id && (featuredOnStorefront || publishPolicy.featured)) {
         savedEvent = await Event.updateEventById(savedEvent._id, {
-            featured: publishPolicy.featured,
+            ...(featuredOnStorefront ? { featuredOnStorefront: true } : {}),
+            ...(publishPolicy.featured ? { featured: publishPolicy.featured } : {}),
         });
     }
 
@@ -388,6 +396,7 @@ async function handleEventUpdated(message) {
     const waitlistConfig = message?.waitlist_config ?? undefined;
     const event_end_date = resolveEventEndDate({ message, existingEvent });
     const isSeatedEvent = resolveIsSeatedEvent({ message, existingEvent, venue });
+    const featuredOnStorefront = resolveFeaturedOnStorefront({ message, existingEvent });
 
     if (!existingEvent) {
         console.log(`Event with ID ${externalEventId} not found, creating new event instead`);
@@ -406,9 +415,10 @@ async function handleEventUpdated(message) {
         if (createdEvent?._id && shortCode) {
             await cacheShortCodeMapping(shortCode, createdEvent._id.toString());
         }
-        if (createdEvent?._id && publishPolicy.featured) {
+        if (createdEvent?._id && (featuredOnStorefront || publishPolicy.featured)) {
             createdEvent = await Event.updateEventById(createdEvent._id, {
-                featured: publishPolicy.featured,
+                ...(featuredOnStorefront ? { featuredOnStorefront: true } : {}),
+                ...(publishPolicy.featured ? { featured: publishPolicy.featured } : {}),
             });
         }
         if (createdEvent?._id && publishPolicy.active === true) {
@@ -421,6 +431,7 @@ async function handleEventUpdated(message) {
         }
     } else {
         // Content sync from EMS must not clobber FEB publish state (active/featured).
+        // Storefront featuring is merchant-owned and must sync from EMS.
         const updatePayload = {
             eventTitle, eventDescription, eventDate, occupancy,
             ticketInfo, eventPromotionPhoto, eventPhoto, eventLocationAddress,
@@ -428,6 +439,7 @@ async function handleEventUpdated(message) {
             eventName, videoUrl, otherInfo, eventTimezone,
             city, country, venueInfo, venue,
             waitlistConfig, event_end_date, isSeatedEvent,
+            featuredOnStorefront,
             ...(stripeCurrency ? { stripeCurrency } : {}),
         };
         // Sync pre-sale waitlist cap so client has it before any join; count comes only from waitlist.status_updated (on each join)

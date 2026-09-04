@@ -52,8 +52,9 @@ describe('siloEmailSettings util', () => {
 
 		expect(stripped.configured).toBe(true)
 		expect(stripped.smtp.passwordConfigured).toBe(true)
-		expect(stripped.smtp.user).toBeUndefined()
+		expect(stripped.smtp.user).toBe('user')
 		expect(stripped.smtp.password).toBeUndefined()
+		expect(stripped.smtp.host).toBe('smtp.example.com')
 	})
 
 	it('resolves merchant business id and social links for silo branding', () => {

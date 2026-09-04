@@ -86,6 +86,7 @@ export function stripSiloEmailSecrets(emailSettings) {
 			host: smtp.host || '',
 			port: smtp.port ?? 587,
 			secure: Boolean(smtp.secure),
+			user: typeof smtp.user === 'string' ? smtp.user : '',
 			fromEmail: smtp.fromEmail || '',
 			fromName: smtp.fromName || '',
 			passwordConfigured: hasEncryptedSiloSmtpPassword(smtp.password)

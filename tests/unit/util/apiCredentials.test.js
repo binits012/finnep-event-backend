@@ -93,7 +93,7 @@ describe('apiCredentials util', () => {
 		}
 		const sanitized = sanitizeMerchantForAdmin(merchant)
 		expect(sanitized.siloSettings.email.smtp.password).toBeUndefined()
-		expect(sanitized.siloSettings.email.smtp.user).toBeUndefined()
+		expect(sanitized.siloSettings.email.smtp.user).toBe('smtp-user')
 		expect(sanitized.siloSettings.email.smtp.passwordConfigured).toBe(true)
 		expect(sanitized.siloSettings.email.smtp.host).toBe('smtp.example.com')
 		expect(sanitized.siloSettings.email.configured).toBe(true)

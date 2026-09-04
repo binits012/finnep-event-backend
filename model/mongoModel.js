@@ -401,6 +401,8 @@ const eventSchema = new mongoose.Schema({
 	// Synced from event-merchant-service via RabbitMQ (event.created / event.updated / waitlist.status_updated)
 	waitlistConfig: { type: mongoose.Schema.Types.Mixed },
 	isSeatedEvent: { type: Boolean, default: false },
+	/** Merchant silo/storefront pin — synced from EMS; independent of marketplace `featured`. */
+	featuredOnStorefront: { type: Boolean, default: false },
 	event_end_date: { type: Date },
 	pre_sale_waitlist_count: { type: Number },
 	pre_sale_waitlist_cap: { type: Number },
