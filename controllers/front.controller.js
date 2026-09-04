@@ -1181,12 +1181,44 @@ const resolveSeatCountFromMetadata = (metadata = {}) => {
 
 /**
  * Apply pack-size × order-quantity to ticketInfo.quantity (admission headcount).
+ * Deep-convert Mongoose Maps so nested values (e.g. registrationAnswers) JSON-serialize.
  */
 const ticketInfoToPlainObjectForPublish = (ticketInfo) => {
     if (!ticketInfo) return {};
-    if (ticketInfo instanceof Map) return Object.fromEntries(ticketInfo);
-    if (typeof ticketInfo === 'object') return { ...ticketInfo };
-    return {};
+    const entries =
+        ticketInfo instanceof Map
+            ? [...ticketInfo.entries()]
+            : typeof ticketInfo === 'object'
+              ? Object.entries(ticketInfo)
+              : [];
+    const out = {};
+    for (const [key, value] of entries) {
+        if (value instanceof Map) {
+            out[key] = ticketInfoToPlainObjectForPublish(value);
+        } else if (
+            value &&
+            typeof value === 'object' &&
+            !Array.isArray(value) &&
+            typeof value.toObject === 'function'
+        ) {
+            out[key] = ticketInfoToPlainObjectForPublish(value.toObject());
+        } else {
+            out[key] = value;
+        }
+    }
+    return out;
+};
+
+const asPlainAnswerRecord = (value) => {
+    if (!value) return null;
+    let plain = value;
+    if (value instanceof Map) {
+        plain = Object.fromEntries(value);
+    } else if (typeof value?.toObject === 'function') {
+        plain = value.toObject();
+    }
+    if (!plain || typeof plain !== 'object' || Array.isArray(plain)) return null;
+    return Object.keys(plain).length > 0 ? plain : null;
 };
 
 const validateMerchantAndEvent = async (metadata) => {
@@ -5076,23 +5108,11 @@ export const publishTicketCreationEvent = async (ticket, event, metadata, paymen
 
         // Re-attach registration answers if Map/toObject round-trip dropped them.
         const publishedTicketInfo = ticketInfoToPlainObjectForPublish(cleanTicket.ticketInfo);
-        const registrationAnswersFromTicket = publishedTicketInfo.registrationAnswers;
-        const registrationAnswersFromMeta =
-            metadata?.registrationAnswers &&
-            typeof metadata.registrationAnswers === 'object' &&
-            !Array.isArray(metadata.registrationAnswers)
-                ? metadata.registrationAnswers
-                : null;
         const registrationAnswers =
-            (registrationAnswersFromTicket &&
-            typeof registrationAnswersFromTicket === 'object' &&
-            !Array.isArray(registrationAnswersFromTicket) &&
-            Object.keys(registrationAnswersFromTicket).length > 0
-                ? registrationAnswersFromTicket
-                : null) ||
-            (registrationAnswersFromMeta && Object.keys(registrationAnswersFromMeta).length > 0
-                ? registrationAnswersFromMeta
-                : null);
+            asPlainAnswerRecord(publishedTicketInfo.registrationAnswers) ||
+            asPlainAnswerRecord(publishedTicketInfo.registration_answers) ||
+            asPlainAnswerRecord(metadata?.registrationAnswers) ||
+            asPlainAnswerRecord(metadata?.registration_answers);
         if (registrationAnswers) {
             publishedTicketInfo.registrationAnswers = registrationAnswers;
         }

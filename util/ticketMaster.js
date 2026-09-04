@@ -144,9 +144,28 @@ const buildVenueMapLink = (venue, geoCode = null) => {
 
 const ticketInfoToPlainObject = (ticketInfo) => {
     if (!ticketInfo) return {};
-    if (ticketInfo instanceof Map) return Object.fromEntries(ticketInfo);
-    if (typeof ticketInfo === 'object') return { ...ticketInfo };
-    return {};
+    const entries =
+        ticketInfo instanceof Map
+            ? [...ticketInfo.entries()]
+            : typeof ticketInfo === 'object'
+              ? Object.entries(ticketInfo)
+              : [];
+    const out = {};
+    for (const [key, value] of entries) {
+        if (value instanceof Map) {
+            out[key] = ticketInfoToPlainObject(value);
+        } else if (
+            value &&
+            typeof value === 'object' &&
+            !Array.isArray(value) &&
+            typeof value.toObject === 'function'
+        ) {
+            out[key] = ticketInfoToPlainObject(value.toObject());
+        } else {
+            out[key] = value;
+        }
+    }
+    return out;
 };
 
 const toFiniteNumber = (value, fallback = 0) => {
