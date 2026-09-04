@@ -4,6 +4,8 @@ import { resolveSiloEmailBranding } from './siloEmailSettings.js'
 import * as Ticket from '../model/ticket.js'
 import { error, warn } from '../model/logger.js'
 import { forward } from './sendMail.js'
+import { recordOutboundMailAttempt } from './outboundMailLog.js'
+import { publishTicketEmailStatusToEms } from './ticketEmailStatusPublish.js'
 import dotenv from 'dotenv'
 import moment from 'moment-timezone'
 dotenv.config()
@@ -799,39 +801,150 @@ export const createEmailPayload = async (event, ticket, ticketFor, otp, locale =
     }
 }
 
+function resolveMerchantIds(merchant, options = {}) {
+    const obj = merchant && typeof merchant.toObject === 'function' ? merchant.toObject() : merchant
+    return {
+        merchantObjectId: obj?._id || obj?.id || options.merchantObjectId || null,
+        externalMerchantId:
+            obj?.merchantId
+            || options.externalMerchantId
+            || '',
+    }
+}
+
 /**
  * Send ticket email without blocking the caller (e.g. checkout response).
- * Failed sends are persisted by sendMail.forward for scheduler retry.
+ * Failed platform sends are persisted by sendMail.forward for scheduler retry.
+ * All attempts are written to OutboundMailLog (masked recipient).
  */
 async function deliverTicketEmailPayload(ticketId, emailPayload, options = {}) {
-    if (options.channel === 'silo' && options.merchant) {
-        const { sendSiloEmail, resolveSiloSmtpConfig } = await import('./siloMail.js');
-        let merchant = options.merchant;
-        if (!resolveSiloSmtpConfig(merchant)) {
-            const Merchant = await import('../model/merchant.js');
-            const merchantId = merchant?._id || merchant?.id;
-            if (merchantId) {
-                const fresh = await Merchant.getMerchantById(merchantId);
-                if (fresh) merchant = fresh;
+    const triggeredBy = options.triggeredBy || 'checkout'
+    const initiatedBy = options.initiatedBy || ''
+    let transport = 'platform_smtp'
+    let channel = options.channel === 'silo' ? 'silo' : 'marketplace'
+    let merchantForLog = options.merchant || null
+    let sendResult = null
+
+    try {
+        if (options.channel === 'silo' && options.merchant) {
+            const { sendSiloEmail, resolveSiloSmtpConfig } = await import('./siloMail.js');
+            let merchant = options.merchant;
+            if (!resolveSiloSmtpConfig(merchant)) {
+                const Merchant = await import('../model/merchant.js');
+                const merchantId = merchant?._id || merchant?.id;
+                if (merchantId) {
+                    const fresh = await Merchant.getMerchantById(merchantId);
+                    if (fresh) merchant = fresh;
+                }
             }
-        }
-        if (resolveSiloSmtpConfig(merchant)) {
-            await sendSiloEmail(merchant, emailPayload);
+            merchantForLog = merchant
+            if (resolveSiloSmtpConfig(merchant)) {
+                transport = 'silo_smtp'
+                channel = 'silo'
+                sendResult = await sendSiloEmail(merchant, emailPayload);
+            } else {
+                warn('[ticketMaster] Silo checkout ticket email but merchant SMTP is not configured; using platform mail', {
+                    merchantId: String(merchant?._id || merchant?.id || ''),
+                    checkoutHostname: options.checkoutHostname || null,
+                });
+                if (!emailPayload.from && process.env.EMAIL_USERNAME) {
+                    emailPayload.from = process.env.EMAIL_USERNAME;
+                }
+                transport = 'platform_smtp'
+                sendResult = await forward(emailPayload);
+            }
         } else {
-            warn('[ticketMaster] Silo checkout ticket email but merchant SMTP is not configured; using platform mail', {
-                merchantId: String(merchant?._id || merchant?.id || ''),
-                checkoutHostname: options.checkoutHostname || null,
-            });
-            if (!emailPayload.from && process.env.EMAIL_USERNAME) {
-                emailPayload.from = process.env.EMAIL_USERNAME;
-            }
-            await forward(emailPayload);
+            sendResult = await forward(emailPayload);
         }
-    } else {
-        await forward(emailPayload);
-    }
-    if (ticketId) {
-        await Ticket.updateTicketById(ticketId, { isSend: true });
+
+        const { merchantObjectId, externalMerchantId } = resolveMerchantIds(merchantForLog, options)
+        await recordOutboundMailAttempt({
+            merchantId: merchantObjectId,
+            externalMerchantId,
+            ticketId,
+            mailType: 'ticket',
+            to: emailPayload?.to,
+            transport,
+            channel,
+            status: 'accepted',
+            providerMessageId: sendResult?.messageId || '',
+            triggeredBy,
+            initiatedBy,
+        })
+
+        if (ticketId) {
+            await Ticket.updateTicketById(ticketId, { isSend: true });
+            let emsMerchantId = externalMerchantId || options.externalMerchantId || ''
+            if (!emsMerchantId) {
+                try {
+                    const t = await Ticket.getTicketById(ticketId, false)
+                    emsMerchantId = t?.externalMerchantId || ''
+                } catch {
+                    /* ignore */
+                }
+            }
+            // Inform EMS so merchant CMS reflects delivery status
+            void publishTicketEmailStatusToEms({
+                ticketId,
+                externalMerchantId: emsMerchantId,
+                isSend: true,
+                emailStatus: 'accepted',
+                transport,
+                channel,
+                initiatedBy: initiatedBy || triggeredBy || 'system',
+            }).catch((publishErr) => {
+                warn(
+                    '[ticketMaster] failed to publish email status to EMS for ticket %s: %s',
+                    ticketId,
+                    publishErr?.message || publishErr
+                )
+            })
+        }
+        return { transport, channel, messageId: sendResult?.messageId || null }
+    } catch (err) {
+        const { merchantObjectId, externalMerchantId } = resolveMerchantIds(merchantForLog, options)
+        await recordOutboundMailAttempt({
+            merchantId: merchantObjectId,
+            externalMerchantId,
+            ticketId,
+            mailType: 'ticket',
+            to: emailPayload?.to,
+            transport,
+            channel,
+            status: 'failed',
+            error: err,
+            errorCode: err?.code || err?.responseCode || '',
+            triggeredBy,
+            initiatedBy,
+        })
+        if (ticketId) {
+            let emsMerchantId = externalMerchantId || options.externalMerchantId || ''
+            if (!emsMerchantId) {
+                try {
+                    const t = await Ticket.getTicketById(ticketId, false)
+                    emsMerchantId = t?.externalMerchantId || ''
+                } catch {
+                    /* ignore */
+                }
+            }
+            void publishTicketEmailStatusToEms({
+                ticketId,
+                externalMerchantId: emsMerchantId,
+                isSend: false,
+                emailStatus: 'failed',
+                transport,
+                channel,
+                errorMessage: err?.message || 'send_failed',
+                initiatedBy: initiatedBy || triggeredBy || 'system',
+            }).catch((publishErr) => {
+                warn(
+                    '[ticketMaster] failed to publish email failure to EMS for ticket %s: %s',
+                    ticketId,
+                    publishErr?.message || publishErr
+                )
+            })
+        }
+        throw err
     }
 }
 
@@ -860,3 +973,139 @@ export const sendTicketEmailInBackground = (event, ticket, ticketForEmail, otp, 
 export const queueTicketEmailDelivery = async (ticketId, emailPayload, options = {}) => {
     await deliverTicketEmailPayload(ticketId, emailPayload, options);
 };
+
+async function resolveTicketHolderEmail(ticket) {
+    const info = ticketInfoToPlainObject(ticket?.ticketInfo)
+    const fromInfo = typeof info.email === 'string' ? info.email.trim() : ''
+    if (fromInfo.includes('@')) return fromInfo
+
+    const cryptoId = ticket?.ticketFor?._id || ticket?.ticketFor
+    if (!cryptoId) return null
+    try {
+        const hash = await import('./createHash.js')
+        const decrypted = await hash.readHash(cryptoId)
+        const data = typeof decrypted?.data === 'string' ? decrypted.data.trim() : ''
+        return data.includes('@') ? data : null
+    } catch (err) {
+        warn('[resendTicketEmail] failed to decrypt ticketFor: %s', err?.message || err)
+        return null
+    }
+}
+
+/**
+ * Rebuild and resend a ticket email (CMS / EMS internal).
+ * Uses silo SMTP when configured; otherwise platform mail. Always rebuilds from live ticket+event.
+ */
+export async function resendTicketEmail(ticketId, {
+    externalMerchantId,
+    initiatedBy = 'ems',
+    locale: localeOverride = null,
+} = {}) {
+    if (!process.env.SEND_MAIL) {
+        const err = new Error('Email sending is disabled on this environment')
+        err.statusCode = 503
+        err.code = 'EMAIL_SEND_DISABLED'
+        throw err
+    }
+
+    const ticket = await Ticket.getTicketById(ticketId, false)
+    if (!ticket) {
+        const err = new Error('Ticket not found')
+        err.statusCode = 404
+        err.code = 'TICKET_NOT_FOUND'
+        throw err
+    }
+
+    if (ticket.active === false) {
+        const err = new Error('Ticket is not active')
+        err.statusCode = 409
+        err.code = 'TICKET_INACTIVE'
+        throw err
+    }
+
+    if (externalMerchantId) {
+        const ticketMerchantId = String(ticket.externalMerchantId || '')
+        if (ticketMerchantId && ticketMerchantId !== String(externalMerchantId)) {
+            const err = new Error('Ticket does not belong to the specified merchant')
+            err.statusCode = 403
+            err.code = 'TICKET_MERCHANT_MISMATCH'
+            throw err
+        }
+    }
+
+    const event = ticket.event
+    if (!event) {
+        const err = new Error('Event not found for ticket')
+        err.statusCode = 404
+        err.code = 'EVENT_NOT_FOUND'
+        throw err
+    }
+
+    const Merchant = await import('../model/merchant.js')
+    const merchant = ticket.merchant
+        ? await Merchant.getMerchantById(ticket.merchant)
+        : await Merchant.getMerchantByMerchantId(ticket.externalMerchantId)
+
+    if (!merchant) {
+        const err = new Error('Merchant not found for ticket')
+        err.statusCode = 404
+        err.code = 'MERCHANT_NOT_FOUND'
+        throw err
+    }
+
+    const recipientEmail = await resolveTicketHolderEmail(ticket)
+    if (!recipientEmail) {
+        const err = new Error('Ticket has no deliverable email address')
+        err.statusCode = 400
+        err.code = 'MISSING_RECIPIENT'
+        throw err
+    }
+
+    const otp = ticket.otp
+    if (!otp) {
+        const err = new Error('Ticket OTP is missing')
+        err.statusCode = 400
+        err.code = 'MISSING_OTP'
+        throw err
+    }
+
+    const info = ticketInfoToPlainObject(ticket.ticketInfo)
+    const locale =
+        localeOverride
+        || (typeof info.locale === 'string' && info.locale.trim() ? info.locale.trim() : null)
+        || 'en-US'
+
+    const { shouldUseSiloEmailBranding } = await import('./siloCheckoutEmail.js')
+    const { resolveSiloSmtpConfig } = await import('./siloMail.js')
+    const useSiloBranding = shouldUseSiloEmailBranding(merchant)
+    const hasSiloSmtp = Boolean(resolveSiloSmtpConfig(merchant))
+
+    const emailOptions = {
+        merchant,
+        useSiloBranding: useSiloBranding || hasSiloSmtp,
+        ...(hasSiloSmtp ? { channel: 'silo' } : {}),
+        externalMerchantId: ticket.externalMerchantId || merchant.merchantId,
+        triggeredBy: 'resend',
+        initiatedBy,
+    }
+
+    const emailPayload = await createEmailPayload(event, ticket, recipientEmail, otp, locale, emailOptions)
+    if (!emailPayload?.to) {
+        const err = new Error('Failed to build ticket email payload')
+        err.statusCode = 500
+        err.code = 'PAYLOAD_BUILD_FAILED'
+        throw err
+    }
+
+    const delivery = await deliverTicketEmailPayload(ticket._id || ticket.id, emailPayload, emailOptions)
+
+    return {
+        success: true,
+        ticketId: String(ticket._id || ticket.id),
+        externalMerchantId: String(ticket.externalMerchantId || externalMerchantId || ''),
+        isSend: true,
+        transport: delivery.transport,
+        channel: delivery.channel,
+        messageId: delivery.messageId,
+    }
+}

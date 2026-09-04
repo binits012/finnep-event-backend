@@ -2,7 +2,9 @@ const ALLOWED_SILO_THEME_PRESETS = new Set([
 	'cinematic',
 	'gallery',
 	'festival',
-	'minimal_luxury'
+	'minimal_luxury',
+	'civic',
+	'nonprofit'
 ])
 
 import {
@@ -14,12 +16,15 @@ import {
 	SILO_ANNOUNCEMENT_TYPES
 } from './sanitizeLegalHtml.js'
 import { normalizeSiloEmail } from './siloEmailSettings.js'
+import { normalizeLocale } from './emailTranslations.js'
 
 const STRIPE_PAYMENT_METHOD_TYPE_PATTERN = /^[a-z][a-z0-9_]*$/
 
 const DEFAULT_SILO_SETTINGS = {
 	enabled: false,
 	domain: '',
+	/** BCP-47 locale for first-time storefront visitors (CMS-controlled). */
+	defaultLocale: 'en-US',
 	themePreset: 'cinematic',
 	brandConfig: {
 		primaryColor: '#f5b700',
@@ -135,6 +140,16 @@ function normalizeCheckoutPaymentMethodTypes(value, fallback = []) {
 	return ['card', ...withoutCard]
 }
 
+function normalizeSiloDefaultLocale(value, fallback = DEFAULT_SILO_SETTINGS.defaultLocale) {
+	if (typeof value === 'string' && value.trim()) {
+		return normalizeLocale(value)
+	}
+	if (typeof fallback === 'string' && fallback.trim()) {
+		return normalizeLocale(fallback)
+	}
+	return DEFAULT_SILO_SETTINGS.defaultLocale
+}
+
 export function normalizeSiloSettings(value = {}, existing = {}) {
 	const settings = value && typeof value === 'object' && !Array.isArray(value) ? value : {}
 	const prev = existing && typeof existing === 'object' && !Array.isArray(existing) ? existing : {}
@@ -148,6 +163,9 @@ export function normalizeSiloSettings(value = {}, existing = {}) {
 		domain: typeof settings.domain === 'string'
 			? settings.domain.trim().toLowerCase()
 			: (prev.domain || ''),
+		defaultLocale: settings.defaultLocale !== undefined
+			? normalizeSiloDefaultLocale(settings.defaultLocale)
+			: normalizeSiloDefaultLocale(prev.defaultLocale),
 		themePreset: ALLOWED_SILO_THEME_PRESETS.has(settings.themePreset)
 			? settings.themePreset
 			: (prev.themePreset || DEFAULT_SILO_SETTINGS.themePreset),
@@ -165,7 +183,7 @@ export function normalizeSiloSettings(value = {}, existing = {}) {
 			logoUrl: typeof brandConfig.logoUrl === 'string'
 				? brandConfig.logoUrl.trim()
 				: (prev.brandConfig?.logoUrl || ''),
-			fontProfile: ['editorial', 'modern', 'classic'].includes(brandConfig.fontProfile)
+			fontProfile: ['editorial', 'modern', 'classic', 'rounded', 'mono'].includes(brandConfig.fontProfile)
 				? brandConfig.fontProfile
 				: (prev.brandConfig?.fontProfile || DEFAULT_SILO_SETTINGS.brandConfig.fontProfile),
 			heroStyle: ['poster', 'split', 'immersive'].includes(brandConfig.heroStyle)
@@ -317,6 +335,7 @@ export function toPartnerThemePayload(merchant) {
 		},
 		enabled: silo.enabled,
 		domain: silo.domain,
+		defaultLocale: silo.defaultLocale,
 		galleryPhotos: silo.enabled ? silo.galleryPhotos : [],
 		galleryIncludeEventPhotos: silo.enabled ? Boolean(silo.galleryIncludeEventPhotos) : false,
 		partners: silo.enabled && silo.partnersEnabled ? silo.partners : []

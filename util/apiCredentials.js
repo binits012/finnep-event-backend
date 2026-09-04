@@ -1,5 +1,6 @@
 import crypto from 'crypto'
 import { normalizeHostname } from './publicSiteConfig.js'
+import { stripSiloEmailSecrets } from './siloEmailSettings.js'
 
 const DEFAULT_SCOPES = ['events:read', 'merchant:read', 'waitlist:write']
 const KEY_PREFIX = 'febk_live_'
@@ -79,6 +80,15 @@ function plainOtherInfo(otherInfo) {
 	return otherInfo
 }
 
+function stripSiloSecretsFromMerchant(obj) {
+	if (!obj?.siloSettings?.email) return obj
+	obj.siloSettings = {
+		...obj.siloSettings,
+		email: stripSiloEmailSecrets(obj.siloSettings.email),
+	}
+	return obj
+}
+
 export function sanitizeMerchantForAdmin(merchant) {
 	if (!merchant) return merchant
 	const obj = typeof merchant.toObject === 'function'
@@ -90,7 +100,7 @@ export function sanitizeMerchantForAdmin(merchant) {
 	if (Array.isArray(obj.apiCredentials)) {
 		obj.apiCredentials = obj.apiCredentials.map(sanitizeCredentialForResponse)
 	}
-	return obj
+	return stripSiloSecretsFromMerchant(obj)
 }
 
 export function getDefaultScopes(requestedScopes) {

@@ -806,16 +806,17 @@ const merchantSchema = new mongoose.Schema({
 	siloSettings: {
 		enabled: { type: Boolean, default: false },
 		domain: { type: String, default: '' },
+		defaultLocale: { type: String, default: 'en-US' },
 		themePreset: {
 			type: String,
-			enum: ['cinematic', 'gallery', 'festival', 'minimal_luxury'],
+			enum: ['cinematic', 'gallery', 'festival', 'minimal_luxury', 'civic', 'nonprofit'],
 			default: 'cinematic'
 		},
 		brandConfig: {
 			primaryColor: { type: String, default: '#f5b700' },
 			darkColor: { type: String, default: '#050505' },
 			logoUrl: { type: String, default: '' },
-			fontProfile: { type: String, enum: ['editorial', 'modern', 'classic'], default: 'editorial' },
+			fontProfile: { type: String, enum: ['editorial', 'modern', 'classic', 'rounded', 'mono'], default: 'editorial' },
 			heroStyle: { type: String, enum: ['poster', 'split', 'immersive'], default: 'poster' }
 		},
 		deployment: {

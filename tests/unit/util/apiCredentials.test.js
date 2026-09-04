@@ -70,6 +70,35 @@ describe('apiCredentials util', () => {
 		expect(sanitized.apiCredentials[0].secretHash).toBeUndefined()
 	})
 
+	it('strips silo SMTP password ciphertext from admin responses', () => {
+		const merchant = {
+			_id: 'm1',
+			name: 'Test',
+			siloSettings: {
+				enabled: true,
+				email: {
+					replyTo: 'ops@example.com',
+					smtp: {
+						host: 'smtp.example.com',
+						port: 587,
+						secure: false,
+						user: 'smtp-user',
+						fromEmail: 'tickets@example.com',
+						fromName: 'Tickets',
+						password: { iv: 'aabb', encryptedData: 'deadbeef' },
+					},
+				},
+			},
+			apiCredentials: [],
+		}
+		const sanitized = sanitizeMerchantForAdmin(merchant)
+		expect(sanitized.siloSettings.email.smtp.password).toBeUndefined()
+		expect(sanitized.siloSettings.email.smtp.user).toBeUndefined()
+		expect(sanitized.siloSettings.email.smtp.passwordConfigured).toBe(true)
+		expect(sanitized.siloSettings.email.smtp.host).toBe('smtp.example.com')
+		expect(sanitized.siloSettings.email.configured).toBe(true)
+	})
+
 	it('flattens otherInfo maps for admin responses', () => {
 		const merchant = {
 			_id: 'm1',

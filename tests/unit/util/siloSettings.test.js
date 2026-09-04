@@ -37,6 +37,16 @@ describe('siloSettings util', () => {
 		expect(result.brandConfig.darkColor).toBe('#050505')
 	})
 
+	it('accepts civic and nonprofit presets', () => {
+		expect(normalizeSiloSettings({ themePreset: 'civic' }).themePreset).toBe('civic')
+		expect(normalizeSiloSettings({ themePreset: 'nonprofit' }).themePreset).toBe('nonprofit')
+	})
+
+	it('accepts extended font profiles', () => {
+		expect(normalizeSiloSettings({ brandConfig: { fontProfile: 'rounded' } }).brandConfig.fontProfile).toBe('rounded')
+		expect(normalizeSiloSettings({ brandConfig: { fontProfile: 'mono' } }).brandConfig.fontProfile).toBe('mono')
+	})
+
 	it('normalizes email settings defaults', () => {
 		const result = normalizeSiloSettings({ enabled: true })
 		expect(result.email.smtp.host).toBe('')
@@ -131,6 +141,20 @@ describe('siloSettings util', () => {
 		expect(omittedAfterDeleteAll.galleryPhotos).toEqual([])
 	})
 
+	it('normalizes defaultLocale and exposes it on theme payload', () => {
+		expect(normalizeSiloSettings({}).defaultLocale).toBe('en-US')
+		expect(normalizeSiloSettings({ defaultLocale: 'da' }).defaultLocale).toBe('da-DK')
+		expect(normalizeSiloSettings({ defaultLocale: 'nope' }).defaultLocale).toBe('en-US')
+
+		const theme = toPartnerThemePayload({
+			siloSettings: {
+				enabled: true,
+				defaultLocale: 'da-DK'
+			}
+		})
+		expect(theme.defaultLocale).toBe('da-DK')
+	})
+
 	it('builds partner theme payload with merchant logo fallback', () => {
 		const theme = toPartnerThemePayload({
 			logo: 'https://cdn.example.com/logo.png',
@@ -153,6 +177,7 @@ describe('siloSettings util', () => {
 		expect(theme.enabled).toBe(true)
 		expect(theme.domain).toBe('tickets.example.com')
 		expect(theme.galleryIncludeEventPhotos).toBe(true)
+		expect(theme.defaultLocale).toBe('en-US')
 	})
 
 	it('defaults galleryIncludeEventPhotos to false', () => {

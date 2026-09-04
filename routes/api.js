@@ -9,6 +9,7 @@ const router = express.Router()
 import * as api  from '../controllers/api.controller.js'
 import * as report from '../controllers/report.controller.js'
 import * as audit from '../controllers/audit.controller.js'
+import * as outboundMail from '../controllers/outboundMail.controller.js'
 import * as monitor from '../controllers/monitor.controller.js'
 import * as dashboard from '../controllers/dashboard.controller.js'
 import { authenticate, requireAdmin, authenticateSuperAdmin, authenticateAdmin } from '../middleware/auth.middleware.js'
@@ -66,15 +67,16 @@ router.route('/notification/:id')
     .patch(api.updateNotificationById)
     .delete(api.deleteNotificationById)
 
-// Queue service configuration endpoints (no auth needed - internal service communication)
+// Queue service configuration — internal service token required (never public)
 router.route('/queue/config/email')
-    .get(api.getEmailConfig)
+    .get(authenticateInternalService, api.getEmailConfig)
 
 router.route('/queue/config/metrics')
-    .get(api.getSystemMetrics)
+    .get(authenticateInternalService, api.getSystemMetrics)
 
 router.get('/admin/monitor-kpis', authenticate, requireAdmin, monitor.getMonitorKpis)
 router.get('/admin/audit', authenticate, requireAdmin, audit.getAuditLogs)
+router.get('/admin/outbound-mail-logs', authenticate, requireAdmin, outboundMail.getOutboundMailLogs)
 
 router.route('/event')
     .post(api.createEvent)

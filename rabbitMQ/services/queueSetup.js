@@ -10,6 +10,7 @@ import { handleWaitlistStatusUpdated } from '../handlers/waitlistStatusHandler.j
 import { handleDiscountCodesUpdated } from '../handlers/discountCodesSyncHandler.js';
 import { handleCustomerMessage } from '../handlers/customerHandler.js';
 import { handleSiloDeploymentRequest } from '../handlers/siloDeploymentHandler.js';
+import { handleTicketEmailResend } from '../handlers/ticketEmailResendHandler.js';
 import { info, error, warn } from '../../model/logger.js';
 
 // Track if queues have been set up to prevent duplicate setup
@@ -185,6 +186,23 @@ const setupQueues = async (force = false) => {
         await messageConsumer.consumeQueue('silo-deployment-queue', async (message) => {
             await handleSiloDeploymentRequest(message);
         }, siloDeploymentQueueOptions);
+
+        // EMS → FEB ticket email resend (outbox routing key: external.event.ticket.email.resend)
+        const ticketEmailResendQueueOptions = {
+            prefetch: 5,
+            deadLetterExchange: 'event-merchant-dlx',
+            deadLetterRoutingKey: 'dlq.external.event.ticket.email.retry-1',
+            topicExchangeBindings: [
+                {
+                    exchange: process.env.RABBITMQ_EXCHANGE || 'event-merchant-exchange',
+                    routingKey: 'external.event.ticket.email.resend'
+                }
+            ]
+        };
+        info('Setting up external.event.ticket.email queue with options:', ticketEmailResendQueueOptions);
+        await messageConsumer.consumeQueue('external.event.ticket.email', async (message) => {
+            await handleTicketEmailResend(message);
+        }, ticketEmailResendQueueOptions);
 
         isSetupComplete = true;
         info('All queues set up and consuming messages');

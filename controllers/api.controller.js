@@ -825,16 +825,15 @@ export const importVenue = async (req, res, next) => {
 	await venueController.importVenue(req, res, next)
 }
 
-/** Queue Service Configuration */
+/** Queue Service Configuration — requires authenticateInternalService */
 export const getEmailConfig = async (req, res, next) => {
 	try {
-		const port = parseInt(process.env.EMAIL_PORT) || 587;
+		const port = parseInt(process.env.EMAIL_PORT, 10) || 587;
 
-		// Only expose necessary email configuration for queue service alerts
 		const emailConfig = {
 			host: process.env.EMAIL_SERVER,
-			port: port,
-			secure: port === 465, // SSL for port 465, STARTTLS for others
+			port,
+			secure: port === 465,
 			auth: {
 				user: process.env.EMAIL_USERNAME,
 				pass: process.env.EMAIL_PASSWORD
@@ -848,8 +847,8 @@ export const getEmailConfig = async (req, res, next) => {
 			success: true,
 			emailConfig
 		});
-	} catch (error) {
-		error('Error getting email configuration:', error);
+	} catch (err) {
+		error('Error getting email configuration: %s', err?.message || err);
 		res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({
 			success: false,
 			message: 'Failed to retrieve email configuration',
