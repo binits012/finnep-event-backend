@@ -4981,6 +4981,11 @@ export const handlePaymentSuccess = async (req, res, next) => {
             await publishTicketCreationEvent(ticketForPublish || ticket, event, {
                 ...sanitizedMetadata,
                 registrationFileUploads,
+                ...(fulfillment?.registrationAnswers &&
+                typeof fulfillment.registrationAnswers === 'object' &&
+                Object.keys(fulfillment.registrationAnswers).length > 0
+                    ? { registrationAnswers: fulfillment.registrationAnswers }
+                    : {}),
             }, paymentIntentId);
         } catch (publishError) {
             console.error('Failed to publish ticket creation event:', publishError);
@@ -5069,6 +5074,30 @@ export const publishTicketCreationEvent = async (ticket, event, metadata, paymen
             error('Failed to populate childQRCodes in publishTicketCreationEvent:', childQrError?.message || childQrError);
         }
 
+        // Re-attach registration answers if Map/toObject round-trip dropped them.
+        const publishedTicketInfo = ticketInfoToPlainObjectForPublish(cleanTicket.ticketInfo);
+        const registrationAnswersFromTicket = publishedTicketInfo.registrationAnswers;
+        const registrationAnswersFromMeta =
+            metadata?.registrationAnswers &&
+            typeof metadata.registrationAnswers === 'object' &&
+            !Array.isArray(metadata.registrationAnswers)
+                ? metadata.registrationAnswers
+                : null;
+        const registrationAnswers =
+            (registrationAnswersFromTicket &&
+            typeof registrationAnswersFromTicket === 'object' &&
+            !Array.isArray(registrationAnswersFromTicket) &&
+            Object.keys(registrationAnswersFromTicket).length > 0
+                ? registrationAnswersFromTicket
+                : null) ||
+            (registrationAnswersFromMeta && Object.keys(registrationAnswersFromMeta).length > 0
+                ? registrationAnswersFromMeta
+                : null);
+        if (registrationAnswers) {
+            publishedTicketInfo.registrationAnswers = registrationAnswers;
+        }
+        cleanTicket.ticketInfo = publishedTicketInfo;
+
         const ticketTypeIdForInventory =
             cleanTicket?.ticketInfo?.ticketId ?? metadata?.ticketId ?? null;
         const ticketTypeConfigForInventory = findTicketTypeConfig(event, ticketTypeIdForInventory);
@@ -5108,6 +5137,8 @@ export const publishTicketCreationEvent = async (ticket, event, metadata, paymen
                 androidFcmToken: metadata?.androidFcmToken ?? null,
                 iosApnsToken: metadata?.iosApnsToken ?? null,
                 registrationFileUploads: metadata?.registrationFileUploads ?? [],
+                // Explicit top-level copy so EMS can persist even if ticket.ticketInfo Map lost nesting.
+                ...(registrationAnswers ? { registrationAnswers } : {}),
                 // Timestamps
                 createdAt: new Date(),
                 eventCreatedAt: event.createdAt
@@ -5881,6 +5912,10 @@ export const handleFreeEventRegistration = async (req, res, next) => {
         }
         const mergedRegistrationAnswers = registrationResolution.mergedAnswers;
         sanitizedData.registrationFileUploads = registrationResolution.registrationFileUploads;
+        // Carry answers on publish metadata — do not rely only on Mongoose Map ticketInfo round-trip.
+        if (mergedRegistrationAnswers && Object.keys(mergedRegistrationAnswers).length > 0) {
+            sanitizedData.registrationAnswers = mergedRegistrationAnswers;
+        }
 
         // Validate and check if ticket exists in the event (if ticketId is provided)
         if (sanitizedData.ticketId) {
