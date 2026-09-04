@@ -1,6 +1,6 @@
 /** Event registration form schema + answer validation (free or paid checkout). */
 
-export const REGISTRATION_FIELD_TYPES = ['text', 'phone', 'textarea', 'select', 'radio', 'checkbox', 'number', 'file'];
+export const REGISTRATION_FIELD_TYPES = ['text', 'phone', 'textarea', 'select', 'radio', 'multiselect', 'checkbox', 'number', 'file'];
 
 export const REGISTRATION_FORM_LIMITS = {
     maxFields: 20,
@@ -104,7 +104,7 @@ export function normalizeRegistrationForm(raw) {
         const placeholder = String(field.placeholder || '').trim().slice(0, REGISTRATION_FORM_LIMITS.maxPlaceholderLength);
         if (placeholder) normalized.placeholder = placeholder;
 
-        if (type === 'select' || type === 'radio') {
+        if (type === 'select' || type === 'radio' || type === 'multiselect') {
             const options = normalizeOptions(field.options);
             if (options.length === 0) continue;
             normalized.options = options;
@@ -127,9 +127,28 @@ export function normalizeRegistrationForm(raw) {
 
 function isEmptyAnswer(value) {
     if (value === null || value === undefined) return true;
+    if (Array.isArray(value)) return value.length === 0;
     if (typeof value === 'string') return value.trim() === '';
     if (typeof value === 'boolean') return value !== true;
     return false;
+}
+
+function sanitizeMultiselectAnswer(raw, options) {
+    const optionSet = new Set(options || []);
+    const list = Array.isArray(raw)
+        ? raw
+        : typeof raw === 'string' && raw.trim()
+          ? raw.split(',').map((part) => part.trim())
+          : [];
+    const selected = [];
+    const seen = new Set();
+    for (const item of list) {
+        const value = String(item ?? '').trim();
+        if (!value || seen.has(value) || !optionSet.has(value)) continue;
+        seen.add(value);
+        selected.push(value);
+    }
+    return selected;
 }
 
 function sanitizeTextAnswer(value, maxLength = REGISTRATION_FORM_LIMITS.maxTextAnswerLength) {
@@ -145,7 +164,7 @@ function isValidPhone(value) {
 
 /**
  * Validate registrationAnswers against the event form schema.
- * @returns {{ valid: boolean, errors: string[], sanitizedAnswers: Record<string, string|boolean|number|null> }}
+ * @returns {{ valid: boolean, errors: string[], sanitizedAnswers: Record<string, string|boolean|number|string[]|null> }}
  */
 export function validateRegistrationAnswers(form, answers) {
     const sanitizedAnswers = {};
@@ -177,6 +196,26 @@ export function validateRegistrationAnswers(form, answers) {
                 errors.push(`${field.label} is required`);
             }
             sanitizedAnswers[field.id] = checked;
+            continue;
+        }
+
+        if (field.type === 'multiselect') {
+            const selected = sanitizeMultiselectAnswer(raw, field.options || []);
+            if (field.required && selected.length === 0) {
+                errors.push(`${field.label} is required`);
+            }
+            if (Array.isArray(raw) || (typeof raw === 'string' && raw.trim())) {
+                const rawList = Array.isArray(raw) ? raw : String(raw).split(',');
+                const invalid = rawList
+                    .map((item) => String(item ?? '').trim())
+                    .filter(Boolean)
+                    .some((item) => !(field.options || []).includes(item));
+                if (invalid) {
+                    errors.push(`${field.label} has an invalid selection`);
+                    continue;
+                }
+            }
+            sanitizedAnswers[field.id] = selected;
             continue;
         }
 

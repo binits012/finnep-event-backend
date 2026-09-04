@@ -58,6 +58,27 @@ describe('registrationForm', () => {
         expect(ok.sanitizedAnswers.size).toBe('M');
     });
 
+    it('validates multiselect answers against options', () => {
+        const form = normalizeRegistrationForm({
+            fields: [{
+                id: 'sessions',
+                type: 'multiselect',
+                label: 'Sessions',
+                required: true,
+                options: ['Reading club', 'Writing club'],
+            }],
+        });
+        expect(form.fields).toHaveLength(1);
+        expect(validateRegistrationAnswers(form, {}).valid).toBe(false);
+        expect(validateRegistrationAnswers(form, { sessions: [] }).valid).toBe(false);
+        expect(validateRegistrationAnswers(form, { sessions: ['Yoga'] }).valid).toBe(false);
+        const ok = validateRegistrationAnswers(form, {
+            sessions: ['Reading club', 'Writing club'],
+        });
+        expect(ok.valid).toBe(true);
+        expect(ok.sanitizedAnswers.sessions).toEqual(['Reading club', 'Writing club']);
+    });
+
     it('reads form from event.otherInfo', () => {
         const event = {
             otherInfo: {
