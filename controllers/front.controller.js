@@ -105,7 +105,7 @@ import {
     resolveMergedPlatformSettings,
     pickDefaultPlatformDoc,
 } from '../util/platformSettings.js'
-import { resolveTicketEmailOptions, extractCheckoutHostname, shouldUseSiloTicketEmail, resolveSiloCheckoutChannel } from '../util/siloCheckoutEmail.js'
+import { resolveTicketEmailOptions, extractCheckoutHostname, shouldUseSiloTicketEmail, resolveSiloCheckoutChannel, resolveSiloBrowserCheckoutReturnUrl } from '../util/siloCheckoutEmail.js'
 import { normalizeCountryCode, expandCountryAliases } from '../util/regionalAccess.js'
 import {
     assertDualPaymentV1Allowed,
@@ -2989,6 +2989,17 @@ const _createPaytrailPaymentInternal = async (req, res, next, { redirectSuccessU
         };
         if (redirectSuccessUrl) paymentOptions.redirectSuccessUrl = redirectSuccessUrl;
         if (redirectCancelUrl) paymentOptions.redirectCancelUrl = redirectCancelUrl;
+        if (!paymentOptions.redirectSuccessUrl || !paymentOptions.redirectCancelUrl) {
+            const siloReturnUrl = resolveSiloBrowserCheckoutReturnUrl({
+                merchant,
+                checkoutHostname: extractCheckoutHostname({ req, metadata: parsedMetadata }),
+                requestedUrl: req.body?.redirectSuccessUrl || req.body?.redirectCancelUrl
+            });
+            if (siloReturnUrl) {
+                if (!paymentOptions.redirectSuccessUrl) paymentOptions.redirectSuccessUrl = siloReturnUrl;
+                if (!paymentOptions.redirectCancelUrl) paymentOptions.redirectCancelUrl = siloReturnUrl;
+            }
+        }
         if (isShopInShopEnabled) {
             paytrailPayment = await paytrailService.createShopInShopPayment({
                 ...paymentOptions,

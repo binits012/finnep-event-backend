@@ -3,7 +3,8 @@ import {
 	extractCheckoutHostname,
 	hostnameMatchesSiloDomain,
 	shouldUseSiloTicketEmail,
-	buildSiloTicketEmailOptionsFromPaymentData
+	buildSiloTicketEmailOptionsFromPaymentData,
+	resolveSiloBrowserCheckoutReturnUrl
 } from '../../../util/siloCheckoutEmail.js'
 
 describe('siloCheckoutEmail', () => {
@@ -186,5 +187,36 @@ describe('siloCheckoutEmail', () => {
 		expect(result.useSiloBranding).toBe(true)
 		expect(result.merchant).toBe(merchant)
 		expect(result.marketCountryCode).toBe(null)
+	})
+
+	it('builds a same-origin silo checkout return URL for Paytrail/MobilePay', () => {
+		const merchant = {
+			siloSettings: {
+				enabled: true,
+				domain: 'tickets.merchant.com'
+			}
+		}
+		expect(resolveSiloBrowserCheckoutReturnUrl({
+			merchant,
+			checkoutHostname: 'tickets.merchant.com'
+		})).toBe('https://tickets.merchant.com/checkout')
+		expect(resolveSiloBrowserCheckoutReturnUrl({
+			merchant,
+			checkoutHostname: 'tickets.merchant.com',
+			requestedUrl: 'https://tickets.merchant.com/events/abc/seats'
+		})).toBe('https://tickets.merchant.com/checkout')
+		expect(resolveSiloBrowserCheckoutReturnUrl({
+			merchant,
+			checkoutHostname: 'tickets.merchant.com',
+			requestedUrl: 'https://evil.example/phish'
+		})).toBe('https://tickets.merchant.com/checkout')
+		expect(resolveSiloBrowserCheckoutReturnUrl({
+			merchant,
+			checkoutHostname: 'okazzo.eu'
+		})).toBe(null)
+		expect(resolveSiloBrowserCheckoutReturnUrl({
+			merchant,
+			checkoutHostname: 'localhost'
+		})).toBe(null)
 	})
 })

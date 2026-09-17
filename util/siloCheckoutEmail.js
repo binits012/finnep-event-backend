@@ -110,6 +110,28 @@ export function resolveSiloCheckoutChannel(merchant, checkoutHostname) {
 	return shouldUseSiloTicketEmail(merchant, checkoutHostname) ? 'silo' : 'marketplace'
 }
 
+/**
+ * Browser return URL after Paytrail / MobilePay on a silo storefront.
+ * MobilePay only auto-resumes the tab that started payment. The platform default
+ * (PAYTRAIL_CALLBACK_SUCCESS_URL → okazzo.eu/checkout) is a different origin, so
+ * the buyer is stuck on MobilePay/Paytrail until they tap through.
+ * Always lands on `/checkout`, which already verifies Paytrail query params.
+ */
+export function resolveSiloBrowserCheckoutReturnUrl({ merchant, checkoutHostname, requestedUrl } = {}) {
+	const requestedHost = parseHostnameFromUrlish(requestedUrl)
+	if (
+		requestedHost &&
+		!isLocalSiloDevHostname(requestedHost) &&
+		shouldUseSiloTicketEmail(merchant, requestedHost)
+	) {
+		return `https://${requestedHost}/checkout`
+	}
+	const host = sanitizeCheckoutHostname(checkoutHostname)
+	if (!host || isLocalSiloDevHostname(host)) return null
+	if (!shouldUseSiloTicketEmail(merchant, host)) return null
+	return `https://${host}/checkout`
+}
+
 function buildTicketEmailOptions(merchantDoc, checkoutHostname, marketCountryCode = null) {
 	const base = { marketCountryCode: marketCountryCode ?? null }
 	if (!merchantDoc) return base
