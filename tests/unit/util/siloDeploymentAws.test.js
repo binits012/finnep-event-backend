@@ -1,6 +1,9 @@
 import { describe, expect, it, beforeEach, afterEach } from '@jest/globals';
 import {
 	API_CACHE_FORWARDED_HEADERS,
+	buildSiloDistributionComment,
+	distributionServesSiloBucket,
+	originDomainMatchesSiloBucket,
 	resolveSiloBucketNameForProvision,
 } from '../../../util/siloDeploymentAws.js';
 
@@ -42,6 +45,48 @@ describe('siloDeploymentAws', () => {
 				cloudfrontDistributionId: 'E123',
 			});
 			expect(bucket).toBe('okazzo-aus-1000000000000000004');
+		});
+	});
+
+	describe('distributionServesSiloBucket', () => {
+		const raagEu = {
+			Id: 'E166WVR5H31BU4',
+			Comment: 'silo-merchant-1000000000000000004',
+			Origins: {
+				Items: [{
+					Id: 'silo-s3-1000000000000000004',
+					DomainName: 'okazzo-eu-1000000000000000004.s3.eu-central-1.amazonaws.com',
+				}],
+			},
+		};
+
+		it('matches regional and global S3 origin hostnames for the same bucket', () => {
+			expect(originDomainMatchesSiloBucket(
+				'okazzo-aus-1000000000000000004.s3.eu-central-1.amazonaws.com',
+				'okazzo-aus-1000000000000000004'
+			)).toBe(true);
+			expect(originDomainMatchesSiloBucket(
+				'okazzo-aus-1000000000000000004.s3.amazonaws.com',
+				'okazzo-aus-1000000000000000004'
+			)).toBe(true);
+		});
+
+		it('does not treat another region prefix bucket as a match', () => {
+			expect(distributionServesSiloBucket(raagEu, 'okazzo-aus-1000000000000000004')).toBe(false);
+			expect(distributionServesSiloBucket(raagEu, 'okazzo-eu-1000000000000000004')).toBe(true);
+		});
+
+		it('reads GetDistribution nested config shape', () => {
+			expect(distributionServesSiloBucket({
+				Distribution: { DistributionConfig: raagEu },
+			}, 'okazzo-eu-1000000000000000004')).toBe(true);
+		});
+
+		it('uses the S3 bucket name as the CloudFront comment so merchant IDs can collide across regions', () => {
+			expect(buildSiloDistributionComment('okazzo-aus-1000000000000000004'))
+				.toBe('silo-okazzo-aus-1000000000000000004');
+			expect(buildSiloDistributionComment('okazzo-eu-1000000000000000004'))
+				.toBe('silo-okazzo-eu-1000000000000000004');
 		});
 	});
 });

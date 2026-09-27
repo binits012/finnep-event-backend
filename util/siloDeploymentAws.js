@@ -125,6 +125,34 @@ export function resolveSiloBucketNameForProvision(merchantId, existingDeployment
 	return planned
 }
 
+/** CloudFront comment unique per S3 bucket (merchant IDs are reused across regional platforms). */
+export function buildSiloDistributionComment(bucketName) {
+	return `silo-${sanitizeBucketName(String(bucketName || ''))}`
+}
+
+export function originDomainMatchesSiloBucket(domainName, bucketName) {
+	const domain = String(domainName || '').trim().toLowerCase()
+	const bucket = String(bucketName || '').trim().toLowerCase()
+	if (!domain || !bucket) return false
+	return domain === `${bucket}.s3.amazonaws.com`
+		|| domain.startsWith(`${bucket}.s3.`)
+		|| domain.startsWith(`${bucket}.s3-`)
+}
+
+function collectCloudFrontOriginDomains(source) {
+	const origins =
+		source?.Origins?.Items
+		|| source?.DistributionConfig?.Origins?.Items
+		|| source?.Distribution?.DistributionConfig?.Origins?.Items
+		|| source?.Distribution?.Origins?.Items
+		|| []
+	return origins.map((item) => String(item?.DomainName || '')).filter(Boolean)
+}
+
+export function distributionServesSiloBucket(source, bucketName) {
+	return collectCloudFrontOriginDomains(source).some((domain) => originDomainMatchesSiloBucket(domain, bucketName))
+}
+
 function buildOacName(merchantId) {
 	return sanitizeOacName(`silo-oac-${merchantId}`)
 }
@@ -237,6 +265,7 @@ async function applyCloudFrontBucketPolicy(bucketName, distributionArn) {
 }
 
 async function findDistributionByComment(comment) {
+	if (!comment) return null
 	let marker
 	while (true) {
 		const response = await cloudFrontClient.send(
@@ -248,6 +277,62 @@ async function findDistributionByComment(comment) {
 		if (match) return match
 		if (!list?.IsTruncated || !list?.NextMarker) break
 		marker = list.NextMarker
+	}
+	return null
+}
+
+async function findReusableSiloDistribution({ bucketName, merchantId, existingDistributionId }) {
+	if (existingDistributionId) {
+		try {
+			const existing = await cloudFrontClient.send(
+				new GetDistributionCommand({ Id: existingDistributionId })
+			)
+			if (distributionServesSiloBucket(existing, bucketName)) {
+				return {
+					id: existingDistributionId,
+					domainName: existing?.Distribution?.DomainName || '',
+					arn: existing?.Distribution?.ARN || ''
+				}
+			}
+			warn('[siloDeploymentAws] Ignoring stored CloudFront id — origin is not this silo bucket', {
+				existingDistributionId,
+				bucketName,
+				merchantId
+			})
+		} catch (err) {
+			warn('[siloDeploymentAws] Stored CloudFront id is not readable; will create a new distribution', {
+				existingDistributionId,
+				bucketName,
+				merchantId,
+				error: err?.message
+			})
+		}
+	}
+
+	const comments = [
+		buildSiloDistributionComment(bucketName),
+		`silo-merchant-${merchantId}`
+	]
+	const seen = new Set()
+	for (const comment of comments) {
+		if (!comment || seen.has(comment)) continue
+		seen.add(comment)
+		const found = await findDistributionByComment(comment)
+		if (!found?.Id) continue
+		if (!distributionServesSiloBucket(found, bucketName)) {
+			warn('[siloDeploymentAws] Skipping CloudFront with colliding merchant comment but a different S3 origin', {
+				distributionId: found.Id,
+				comment,
+				bucketName,
+				merchantId
+			})
+			continue
+		}
+		return {
+			id: found.Id,
+			domainName: found.DomainName || '',
+			arn: found.ARN || ''
+		}
 	}
 	return null
 }
@@ -471,41 +556,21 @@ async function ensureDistributionDynamicRoutesFunction(distributionId) {
 
 async function ensureDistribution({ bucketName, bucketRegion, merchantId, existingDistributionId, oacId }) {
 	const bffOrigin = buildBffOrigin(merchantId)
-
-	if (existingDistributionId) {
-		const existing = await cloudFrontClient.send(
-			new GetDistributionCommand({ Id: existingDistributionId })
-		)
+	const reusable = await findReusableSiloDistribution({
+		bucketName,
+		merchantId,
+		existingDistributionId
+	})
+	if (reusable?.id) {
 		await ensureDistributionApiBehavior({
-			distributionId: existingDistributionId,
+			distributionId: reusable.id,
 			merchantId
 		})
-		await ensureDistributionDynamicRoutesFunction(existingDistributionId)
-		return {
-			id: existingDistributionId,
-			domainName: existing?.Distribution?.DomainName || '',
-			arn: existing?.Distribution?.ARN || ''
-		}
+		await ensureDistributionDynamicRoutesFunction(reusable.id)
+		return reusable
 	}
 
-	const comment = `silo-merchant-${merchantId}`
-	const existingByComment = await findDistributionByComment(comment)
-	if (existingByComment?.Id) {
-		const existing = await cloudFrontClient.send(
-			new GetDistributionCommand({ Id: existingByComment.Id })
-		)
-		await ensureDistributionApiBehavior({
-			distributionId: existingByComment.Id,
-			merchantId
-		})
-		await ensureDistributionDynamicRoutesFunction(existingByComment.Id)
-		return {
-			id: existingByComment.Id,
-			domainName: existingByComment.DomainName || existing?.Distribution?.DomainName || '',
-			arn: existing?.Distribution?.ARN || ''
-		}
-	}
-
+	const comment = buildSiloDistributionComment(bucketName)
 	const functionArn = await ensurePublishedDynamicRoutesFunctionArn()
 	const originId = `silo-s3-${merchantId}`
 	const originDomain = buildS3OriginDomain(bucketName, bucketRegion)
@@ -657,6 +722,11 @@ export async function inspectSiloDeploymentAws({ merchantId, existingDeployment 
 			if (!distributionEnabled) {
 				issues.push(`CloudFront distribution is not deployed/enabled: ${distributionId}`)
 			}
+			if (bucketName && !distributionServesSiloBucket(described, bucketName)) {
+				issues.push(
+					`CloudFront ${distributionId} does not serve S3 bucket ${bucketName} — do not reuse another region's distribution`
+				)
+			}
 		} catch {
 			issues.push(`CloudFront distribution not found: ${distributionId}`)
 		}
@@ -732,8 +802,34 @@ export async function provisionSiloDeploymentAws({ merchantId, existingDeploymen
 
 export async function deprovisionSiloDeploymentAws({ merchantId, existingDeployment = {} }) {
 	assertAwsCredentials()
-	if (existingDeployment.cloudfrontDistributionId) {
-		await disableDistribution(existingDeployment.cloudfrontDistributionId)
+	const distributionId = existingDeployment.cloudfrontDistributionId || ''
+	const bucketName = String(existingDeployment.s3Bucket || '').trim()
+	if (distributionId) {
+		let servesThisBucket = false
+		if (bucketName) {
+			try {
+				const existing = await cloudFrontClient.send(
+					new GetDistributionCommand({ Id: distributionId })
+				)
+				servesThisBucket = distributionServesSiloBucket(existing, bucketName)
+			} catch (err) {
+				warn('[siloDeploymentAws] Could not read CloudFront before deprovision; refusing to disable it', {
+					distributionId,
+					bucketName,
+					merchantId,
+					error: err?.message
+				})
+			}
+		}
+		if (servesThisBucket) {
+			await disableDistribution(distributionId)
+		} else {
+			warn('[siloDeploymentAws] Refusing to disable CloudFront that does not serve this silo bucket', {
+				distributionId,
+				bucketName,
+				merchantId
+			})
+		}
 	}
 
 	info('Silo AWS deprovision requested', {
