@@ -818,8 +818,12 @@ const merchantSchema = new mongoose.Schema({
 			primaryColor: { type: String, default: '#f5b700' },
 			darkColor: { type: String, default: '#050505' },
 			logoUrl: { type: String, default: '' },
-			fontProfile: { type: String, enum: ['editorial', 'modern', 'classic', 'rounded', 'mono'], default: 'editorial' },
-			heroStyle: { type: String, enum: ['poster', 'split', 'immersive'], default: 'poster' }
+			fontProfile: { type: String, enum: ['editorial', 'modern', 'classic', 'rounded', 'mono', 'bricolage', 'playfair', 'cormorant', 'grotesk', 'poster'], default: 'editorial' },
+			heroStyle: { type: String, enum: ['poster', 'split', 'immersive'], default: 'poster' },
+			radius: { type: String, enum: ['sharp', 'soft', 'pill'] },
+			headingCase: { type: String, enum: ['upper', 'sentence'] },
+			buttonStyle: { type: String, enum: ['solid', 'outline'] },
+			density: { type: String, enum: ['compact', 'regular', 'airy'] }
 		},
 		deployment: {
 			mode: { type: String, default: 'per_merchant' },

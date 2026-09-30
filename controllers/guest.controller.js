@@ -28,6 +28,136 @@ const toDisplayFinalAmount = (value) => {
     return Math.ceil((roundedThree * 100) - Number.EPSILON) / 100;
 }
 
+const firstDefined = (...values) => {
+    for (const value of values) {
+        if (value !== undefined && value !== null && value !== '') return value
+    }
+    return null
+}
+
+const sanitizeSeatTickets = (seatTicketsRaw) => {
+    if (!Array.isArray(seatTicketsRaw)) return null
+    const seatTickets = seatTicketsRaw
+        .map(st => {
+            const pricing = st?.pricing && typeof st.pricing === 'object' ? st.pricing : null
+            return {
+                placeId: st?.placeId ?? null,
+                ticketName: st?.ticketName ?? null,
+                pricing: pricing ? {
+                    basePrice: pricing.basePrice ?? pricing.unitPrice ?? null,
+                    tax: pricing.tax ?? pricing.vat ?? null,
+                    serviceFee: pricing.serviceFee ?? null,
+                    serviceTax: pricing.serviceTax ?? null,
+                    orderFee: pricing.orderFee ?? null,
+                    currency: pricing.currency ?? null
+                } : null
+            }
+        })
+        .filter(x => x.ticketName || x.placeId || x.pricing)
+    return seatTickets.length ? seatTickets : null
+}
+
+/**
+ * Sanitize ticketInfo for guest My Tickets (list + detail).
+ * - `price` remains BASE (backward compat for Flutter/Okazzo).
+ * - Explicit base/total/fee/tax fields for full breakdown UIs.
+ * - Do NOT include PII: email, fullName, paymentIntentId, merchantId, etc.
+ */
+const sanitizeGuestTicketInfo = (ticketInfoPlain, {
+    fallbackTicketName = null,
+    paymentCurrency = null,
+    derivedPurchaseDate = null,
+    pricingModel = null
+} = {}) => {
+    if (!ticketInfoPlain || typeof ticketInfoPlain !== 'object') return null
+
+    const seatTickets = sanitizeSeatTickets(ticketInfoPlain.seatTickets)
+
+    const basePrice = firstDefined(
+        ticketInfoPlain.basePrice,
+        ticketInfoPlain.perUnitSubtotal,
+        ticketInfoPlain.unitPrice
+    )
+    const totalBasePrice = firstDefined(
+        ticketInfoPlain.totalBasePrice,
+        // if only unit base exists, leave totalBasePrice null — clients multiply by qty
+        null
+    )
+
+    // Compat: `price` = best available BASE (not paid total)
+    const price = firstDefined(
+        ticketInfoPlain.basePrice,
+        ticketInfoPlain.totalBasePrice,
+        ticketInfoPlain.perUnitSubtotal,
+        ticketInfoPlain.unitPrice,
+        // Only fall back to price/totalPrice if no dedicated base fields exist
+        ticketInfoPlain.price,
+        ticketInfoPlain.totalPrice
+    )
+
+    const serviceFee = firstDefined(
+        ticketInfoPlain.serviceFee,
+        ticketInfoPlain.ticketServiceFee
+    )
+    const totalServiceFee = firstDefined(
+        ticketInfoPlain.totalServiceFee,
+        ticketInfoPlain.serviceFeeTotal,
+        ticketInfoPlain.serviceFee // clients may treat as total when totalServiceFee absent
+    )
+
+    const vatAmount = firstDefined(
+        ticketInfoPlain.vatAmount,
+        ticketInfoPlain.totalVatAmount,
+        ticketInfoPlain.taxAmount,
+        ticketInfoPlain.entertainmentTaxAmount
+    )
+    const vatRate = firstDefined(
+        ticketInfoPlain.vatRate,
+        ticketInfoPlain.entertainmentTax,
+        ticketInfoPlain.tax
+    )
+
+    const totalAmount = toDisplayFinalAmount(firstDefined(
+        ticketInfoPlain.totalAmount,
+        ticketInfoPlain.total,
+        ticketInfoPlain.amount,
+        ticketInfoPlain.totalPrice,
+        ticketInfoPlain.totalPaid,
+        ticketInfoPlain.grandTotal,
+        // last resort paid-ish: do NOT use base-only here if we already have dedicated total fields missing —
+        // still allow price as last resort for free/legacy tickets
+        ticketInfoPlain.price,
+        ticketInfoPlain.basePrice
+    ))
+
+    return {
+        ticketName: ticketInfoPlain.ticketName || fallbackTicketName || ticketInfoPlain.ticketType || null,
+        quantity: ticketInfoPlain.quantity ?? ticketInfoPlain.qty ?? null,
+        price,
+        basePrice,
+        totalBasePrice,
+        serviceFee,
+        totalServiceFee,
+        vatAmount,
+        vatRate,
+        entertainmentTax: firstDefined(ticketInfoPlain.entertainmentTax, null),
+        entertainmentTaxAmount: firstDefined(ticketInfoPlain.entertainmentTaxAmount, null),
+        serviceTax: firstDefined(ticketInfoPlain.serviceTax, null),
+        serviceTaxAmount: firstDefined(ticketInfoPlain.serviceTaxAmount, null),
+        orderFee: firstDefined(ticketInfoPlain.orderFee, null),
+        orderFeeServiceTax: firstDefined(ticketInfoPlain.orderFeeServiceTax, null),
+        totalAmount,
+        pricingModel: ticketInfoPlain.pricingModel ?? pricingModel ?? null,
+        currency: ticketInfoPlain.currency || paymentCurrency,
+        purchaseDate: derivedPurchaseDate,
+        childQRCodes: Array.isArray(ticketInfoPlain.childQRCodes) ? ticketInfoPlain.childQRCodes : [],
+        couponCode: ticketInfoPlain.couponCode ?? null,
+        couponDiscountAmount: ticketInfoPlain.couponDiscountAmount ?? null,
+        catalogTotalBasePrice: ticketInfoPlain.catalogTotalBasePrice ?? null,
+        ...(seatTickets ? { seatTickets } : {})
+    }
+}
+
 async function resolveSiloMerchantFromRequest(req) {
     const objectId = String(req.headers['x-silo-merchant-object-id'] || '').trim();
     const merchantId = String(req.headers['x-silo-merchant-id'] || '').trim();
@@ -328,71 +458,12 @@ export const getTickets = async (req, res, next) => {
                             ticketInfoPlain?.purchaseDate ||
                             (t.createdAt ? new Date(t.createdAt).toISOString() : null);
 
-                        let seatTickets = null;
-                        if (Array.isArray(ticketInfoPlain?.seatTickets)) {
-                            seatTickets = ticketInfoPlain.seatTickets
-                                .map(st => {
-                                    const pricing = st?.pricing && typeof st.pricing === 'object' ? st.pricing : null;
-                                    return {
-                                        placeId: st?.placeId ?? null,
-                                        ticketName: st?.ticketName ?? null,
-                                        pricing: pricing ? {
-                                            basePrice: pricing.basePrice ?? pricing.unitPrice ?? null,
-                                            tax: pricing.tax ?? pricing.vat ?? null,
-                                            serviceFee: pricing.serviceFee ?? null,
-                                            serviceTax: pricing.serviceTax ?? null,
-                                            orderFee: pricing.orderFee ?? null,
-                                            currency: pricing.currency ?? null
-                                        } : null
-                                    };
-                                })
-                                .filter(x => x.ticketName || x.placeId || x.pricing);
-                        }
-
-                        const sanitizedTicketInfo = ticketInfoPlain ? {
-                            ticketName: ticketInfoPlain.ticketName || t.type || ticketInfoPlain.ticketType || null,
-                            quantity: ticketInfoPlain.quantity ?? ticketInfoPlain.qty ?? null,
-                            // Base price should prefer pre-tax fields.
-                            price: ticketInfoPlain.basePrice ??
-                                ticketInfoPlain.totalBasePrice ??
-                                ticketInfoPlain.perUnitSubtotal ??
-                                ticketInfoPlain.price ??
-                                ticketInfoPlain.unitPrice ??
-                                ticketInfoPlain.totalPrice ??
-                                null,
-                            serviceFee: ticketInfoPlain.serviceFee ??
-                                ticketInfoPlain.serviceFeeTotal ??
-                                ticketInfoPlain.totalServiceFee ??
-                                ticketInfoPlain.ticketServiceFee ??
-                                null,
-                            vatAmount: ticketInfoPlain.vatAmount ??
-                                ticketInfoPlain.totalVatAmount ??
-                                ticketInfoPlain.taxAmount ??
-                                ticketInfoPlain.entertainmentTaxAmount ??
-                                null,
-                            vatRate: ticketInfoPlain.vatRate ??
-                                ticketInfoPlain.entertainmentTax ??
-                                ticketInfoPlain.tax ??
-                                null,
-                            totalAmount: toDisplayFinalAmount(ticketInfoPlain.totalAmount ??
-                                ticketInfoPlain.total ??
-                                ticketInfoPlain.amount ??
-                                ticketInfoPlain.totalPrice ??
-                                ticketInfoPlain.totalPaid ??
-                                ticketInfoPlain.grandTotal ??
-                                (ticketInfoPlain.price ?? ticketInfoPlain.basePrice ?? null)),
-                            pricingModel: ticketInfoPlain.pricingModel ??
-                                t.event?.venue?.pricingModel ??
-                                null,
-                            currency: ticketInfoPlain.currency || paymentCurrency,
-                            purchaseDate: derivedPurchaseDate,
-                            childQRCodes: Array.isArray(ticketInfoPlain.childQRCodes) ? ticketInfoPlain.childQRCodes : [],
-                            couponCode: ticketInfoPlain.couponCode ?? null,
-                            couponDiscountAmount: ticketInfoPlain.couponDiscountAmount ?? null,
-                            catalogTotalBasePrice: ticketInfoPlain.catalogTotalBasePrice ?? null,
-                            ...(seatTickets ? { seatTickets } : {})
-                            // Exclude sensitive fields: paymentIntentId, email, merchantId, eventId, ticketId, eventName
-                        } : null;
+                        const sanitizedTicketInfo = sanitizeGuestTicketInfo(ticketInfoPlain, {
+                            fallbackTicketName: t.type,
+                            paymentCurrency,
+                            derivedPurchaseDate,
+                            pricingModel: t.event?.venue?.pricingModel ?? null
+                        });
 
                         const resolvedEventEndDate = t.event?.eventEndDate || t.event?.event_end_date || t.event?.eventDate || null;
 
@@ -546,68 +617,12 @@ export const getTicketById = async (req, res, next) => {
                         .filter(Boolean);
                 }
 
-                // Seat ticket breakdown (optional; used by the mobile UI).
-                // Keep it display-focused: seat ticket name + pricing.
-                let seatTickets = null;
-                if (Array.isArray(ticketInfoPlain?.seatTickets)) {
-                    seatTickets = ticketInfoPlain.seatTickets
-                        .map(st => {
-                            const pricing = st?.pricing && typeof st.pricing === 'object' ? st.pricing : null;
-                            return {
-                                placeId: st?.placeId ?? null,
-                                ticketName: st?.ticketName ?? null,
-                                pricing: pricing
-                                    ? {
-                                          basePrice: pricing.basePrice ?? pricing.unitPrice ?? null,
-                                          tax: pricing.tax ?? pricing.vat ?? null,
-                                          serviceFee: pricing.serviceFee ?? null,
-                                          serviceTax: pricing.serviceTax ?? null,
-                                          orderFee: pricing.orderFee ?? null,
-                                          currency: pricing.currency ?? null
-                                      }
-                                    : null
-                            };
-                        })
-                        .filter(x => x.ticketName || x.placeId || x.pricing);
-                }
-
-                const sanitizedTicketInfo = ticketInfoPlain ? {
-                    // Prefer ticketInfo.ticketName; fall back to the ticket's `type` (often the display name).
-                    ticketName: ticketInfoPlain.ticketName || ticket.type || ticketInfoPlain.ticketType || null,
-                    quantity: ticketInfoPlain.quantity ?? ticketInfoPlain.qty ?? null,
-                    // Some flows store `price`, others store `basePrice` / `totalBasePrice`.
-                    // Keep it flexible so free/unseated/priced-seat events still show something.
-                    // Base price should prefer pre-tax fields.
-                    price: ticketInfoPlain.basePrice ??
-                        ticketInfoPlain.totalBasePrice ??
-                        ticketInfoPlain.perUnitSubtotal ??
-                        ticketInfoPlain.price ??
-                        ticketInfoPlain.unitPrice ??
-                        ticketInfoPlain.totalPrice ??
-                        null,
-                    // Service + totals are optional; include them when available so clients can render a breakdown.
-                    serviceFee: ticketInfoPlain.serviceFee ??
-                        ticketInfoPlain.serviceFeeTotal ??
-                        ticketInfoPlain.totalServiceFee ??
-                        ticketInfoPlain.ticketServiceFee ??
-                        null,
-                    totalAmount: toDisplayFinalAmount(ticketInfoPlain.totalAmount ??
-                        ticketInfoPlain.total ??
-                        ticketInfoPlain.amount ??
-                        ticketInfoPlain.totalPrice ??
-                        ticketInfoPlain.totalPaid ??
-                        ticketInfoPlain.grandTotal ??
-                        // Last resort: if we don't have the grand total, show the best-available price.
-                        (ticketInfoPlain.price ?? ticketInfoPlain.basePrice ?? null)),
-                    currency: ticketInfoPlain.currency || paymentCurrency,
-                    purchaseDate: derivedPurchaseDate,
-                    childQRCodes: Array.isArray(ticketInfoPlain.childQRCodes) ? ticketInfoPlain.childQRCodes : [],
-                    couponCode: ticketInfoPlain.couponCode ?? null,
-                    couponDiscountAmount: ticketInfoPlain.couponDiscountAmount ?? null,
-                    catalogTotalBasePrice: ticketInfoPlain.catalogTotalBasePrice ?? null,
-                    ...(seatTickets ? { seatTickets } : {})
-                    // Exclude sensitive fields: paymentIntentId, email, merchantId, eventId, ticketId, eventName
-                } : null;
+                const sanitizedTicketInfo = sanitizeGuestTicketInfo(ticketInfoPlain, {
+                    fallbackTicketName: ticket.type,
+                    paymentCurrency,
+                    derivedPurchaseDate,
+                    pricingModel: event?.venue?.pricingModel ?? null
+                });
 
                 const platformConsent = await PlatformMarketingConsent.getOrCreatePlatformConsent(emailCryptoId);
 

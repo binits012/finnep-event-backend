@@ -45,6 +45,34 @@ describe('siloSettings util', () => {
 	it('accepts extended font profiles', () => {
 		expect(normalizeSiloSettings({ brandConfig: { fontProfile: 'rounded' } }).brandConfig.fontProfile).toBe('rounded')
 		expect(normalizeSiloSettings({ brandConfig: { fontProfile: 'mono' } }).brandConfig.fontProfile).toBe('mono')
+		expect(normalizeSiloSettings({ brandConfig: { fontProfile: 'bricolage' } }).brandConfig.fontProfile).toBe('bricolage')
+		expect(normalizeSiloSettings({ brandConfig: { fontProfile: 'playfair' } }).brandConfig.fontProfile).toBe('playfair')
+		expect(normalizeSiloSettings({ brandConfig: { fontProfile: 'cormorant' } }).brandConfig.fontProfile).toBe('cormorant')
+		expect(normalizeSiloSettings({ brandConfig: { fontProfile: 'grotesk' } }).brandConfig.fontProfile).toBe('grotesk')
+		expect(normalizeSiloSettings({ brandConfig: { fontProfile: 'poster' } }).brandConfig.fontProfile).toBe('poster')
+	})
+
+	it('accepts presentation controls and rejects invalid values', () => {
+		expect(normalizeSiloSettings({ brandConfig: { radius: 'sharp' } }).brandConfig.radius).toBe('sharp')
+		expect(normalizeSiloSettings({ brandConfig: { radius: 'bevel' } }).brandConfig.radius).toBeUndefined()
+
+		expect(normalizeSiloSettings({ brandConfig: { headingCase: 'sentence' } }).brandConfig.headingCase).toBe('sentence')
+		expect(normalizeSiloSettings({ brandConfig: { headingCase: 'title' } }).brandConfig.headingCase).toBeUndefined()
+
+		expect(normalizeSiloSettings({ brandConfig: { buttonStyle: 'outline' } }).brandConfig.buttonStyle).toBe('outline')
+		expect(normalizeSiloSettings({ brandConfig: { buttonStyle: 'ghost' } }).brandConfig.buttonStyle).toBeUndefined()
+
+		expect(normalizeSiloSettings({ brandConfig: { density: 'airy' } }).brandConfig.density).toBe('airy')
+		expect(normalizeSiloSettings({ brandConfig: { density: 'loose' } }).brandConfig.density).toBeUndefined()
+	})
+
+	it('preserves previous presentation controls when incoming value is invalid', () => {
+		const result = normalizeSiloSettings(
+			{ brandConfig: { radius: 'bevel', density: 'loose' } },
+			{ brandConfig: { radius: 'pill', density: 'compact' } }
+		)
+		expect(result.brandConfig.radius).toBe('pill')
+		expect(result.brandConfig.density).toBe('compact')
 	})
 
 	it('normalizes email settings defaults', () => {

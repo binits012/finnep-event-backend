@@ -101,6 +101,17 @@ function normalizePartners(value, fallback = []) {
 		.sort((a, b) => a.position - b.position)
 }
 
+const ALLOWED_BRAND_RADIUS = new Set(['sharp', 'soft', 'pill'])
+const ALLOWED_BRAND_HEADING_CASE = new Set(['upper', 'sentence'])
+const ALLOWED_BRAND_BUTTON_STYLE = new Set(['solid', 'outline'])
+const ALLOWED_BRAND_DENSITY = new Set(['compact', 'regular', 'airy'])
+
+function pickOptionalBrandEnum(value, previous, allowed) {
+	if (allowed.has(value)) return value
+	if (allowed.has(previous)) return previous
+	return undefined
+}
+
 function normalizeHexColor(value, fallback) {
 	if (typeof value !== 'string') return fallback
 	const trimmed = value.trim()
@@ -169,27 +180,42 @@ export function normalizeSiloSettings(value = {}, existing = {}) {
 		themePreset: ALLOWED_SILO_THEME_PRESETS.has(settings.themePreset)
 			? settings.themePreset
 			: (prev.themePreset || DEFAULT_SILO_SETTINGS.themePreset),
-		brandConfig: {
-			...DEFAULT_SILO_SETTINGS.brandConfig,
-			...(prev.brandConfig || {}),
-			primaryColor: normalizeHexColor(
-				brandConfig.primaryColor,
-				prev.brandConfig?.primaryColor || DEFAULT_SILO_SETTINGS.brandConfig.primaryColor
-			),
-			darkColor: normalizeHexColor(
-				brandConfig.darkColor,
-				prev.brandConfig?.darkColor || DEFAULT_SILO_SETTINGS.brandConfig.darkColor
-			),
-			logoUrl: typeof brandConfig.logoUrl === 'string'
-				? brandConfig.logoUrl.trim()
-				: (prev.brandConfig?.logoUrl || ''),
-			fontProfile: ['editorial', 'modern', 'classic', 'rounded', 'mono'].includes(brandConfig.fontProfile)
-				? brandConfig.fontProfile
-				: (prev.brandConfig?.fontProfile || DEFAULT_SILO_SETTINGS.brandConfig.fontProfile),
-			heroStyle: ['poster', 'split', 'immersive'].includes(brandConfig.heroStyle)
-				? brandConfig.heroStyle
-				: (prev.brandConfig?.heroStyle || DEFAULT_SILO_SETTINGS.brandConfig.heroStyle)
-		},
+		brandConfig: (() => {
+			const nextBrand = {
+				...DEFAULT_SILO_SETTINGS.brandConfig,
+				...(prev.brandConfig || {}),
+				primaryColor: normalizeHexColor(
+					brandConfig.primaryColor,
+					prev.brandConfig?.primaryColor || DEFAULT_SILO_SETTINGS.brandConfig.primaryColor
+				),
+				darkColor: normalizeHexColor(
+					brandConfig.darkColor,
+					prev.brandConfig?.darkColor || DEFAULT_SILO_SETTINGS.brandConfig.darkColor
+				),
+				logoUrl: typeof brandConfig.logoUrl === 'string'
+					? brandConfig.logoUrl.trim()
+					: (prev.brandConfig?.logoUrl || ''),
+				fontProfile: ['editorial', 'modern', 'classic', 'rounded', 'mono', 'bricolage', 'playfair', 'cormorant', 'grotesk', 'poster'].includes(brandConfig.fontProfile)
+					? brandConfig.fontProfile
+					: (prev.brandConfig?.fontProfile || DEFAULT_SILO_SETTINGS.brandConfig.fontProfile),
+				heroStyle: ['poster', 'split', 'immersive'].includes(brandConfig.heroStyle)
+					? brandConfig.heroStyle
+					: (prev.brandConfig?.heroStyle || DEFAULT_SILO_SETTINGS.brandConfig.heroStyle)
+			}
+			const radius = pickOptionalBrandEnum(brandConfig.radius, prev.brandConfig?.radius, ALLOWED_BRAND_RADIUS)
+			const headingCase = pickOptionalBrandEnum(brandConfig.headingCase, prev.brandConfig?.headingCase, ALLOWED_BRAND_HEADING_CASE)
+			const buttonStyle = pickOptionalBrandEnum(brandConfig.buttonStyle, prev.brandConfig?.buttonStyle, ALLOWED_BRAND_BUTTON_STYLE)
+			const density = pickOptionalBrandEnum(brandConfig.density, prev.brandConfig?.density, ALLOWED_BRAND_DENSITY)
+			delete nextBrand.radius
+			delete nextBrand.headingCase
+			delete nextBrand.buttonStyle
+			delete nextBrand.density
+			if (radius) nextBrand.radius = radius
+			if (headingCase) nextBrand.headingCase = headingCase
+			if (buttonStyle) nextBrand.buttonStyle = buttonStyle
+			if (density) nextBrand.density = density
+			return nextBrand
+		})(),
 		deployment: {
 			...DEFAULT_SILO_SETTINGS.deployment,
 			...(prev.deployment || {}),
