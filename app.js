@@ -407,11 +407,16 @@ try {
             }
 
             const zeroConsumerQueues = [];
+            const missingLocalConsumers = [];
             for (const queueName of rabbitConsumerWatchQueues) {
                 try {
                     const queueInfo = await channel.checkQueue(queueName);
                     if ((queueInfo?.consumerCount || 0) === 0) {
                         zeroConsumerQueues.push(queueName);
+                    }
+                    // Broker count can stay >0 with another FEB process; still recover THIS process.
+                    if (!messageConsumer.activeConsumers?.has(queueName)) {
+                        missingLocalConsumers.push(queueName);
                     }
                 } catch (checkError) {
                     if (checkError.message?.includes('Channel closed') || checkError.message?.includes('closed')) {
@@ -424,6 +429,8 @@ try {
 
             if (zeroConsumerQueues.length > 0) {
                 await recoverQueueConsumers(`missing consumers: ${zeroConsumerQueues.join(', ')}`);
+            } else if (missingLocalConsumers.length > 0) {
+                await recoverQueueConsumers(`missing local consumers: ${missingLocalConsumers.join(', ')}`);
             }
         } catch (watchdogError) {
             console.error('Queue watchdog error:', watchdogError.message || watchdogError, {
