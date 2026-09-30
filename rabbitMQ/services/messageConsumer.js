@@ -26,15 +26,26 @@ class MessageConsumer {
                 throw new Error('Failed to get RabbitMQ channels');
             }
 
-            // Set up error handlers on channels to detect disconnections
+            // Set up error/close handlers on channels to detect disconnections
             this.publishChannel.on('error', (err) => {
                 error('Publish channel error:', { message: err.message, stack: err.stack });
+                this.isInitialized = false;
+                this.publishChannel = null;
+            });
+            this.publishChannel.on('close', () => {
+                warn('Publish channel closed');
                 this.isInitialized = false;
                 this.publishChannel = null;
             });
 
             this.consumeChannel.on('error', (err) => {
                 error('Consume channel error:', { message: err.message, stack: err.stack });
+                this.isInitialized = false;
+                this.activeConsumers.clear();
+                this.consumeChannel = null;
+            });
+            this.consumeChannel.on('close', () => {
+                warn('Consume channel closed');
                 this.isInitialized = false;
                 this.activeConsumers.clear();
                 this.consumeChannel = null;
@@ -51,6 +62,29 @@ class MessageConsumer {
             this.publishChannel = null;
             this.consumeChannel = null;
             throw err;
+        }
+    }
+
+    /**
+     * Drop channel + consumer tracking so force re-setup can re-register consumers.
+     * Without this, setupQueues(true) no-ops when activeConsumers still holds queue names
+     * after the broker already lost those consumers (zombie / half-open connection).
+     */
+    async resetForForceSetup() {
+        this.activeConsumers.clear();
+        this.isInitialized = false;
+        const channels = [this.publishChannel, this.consumeChannel];
+        this.publishChannel = null;
+        this.consumeChannel = null;
+        for (const channel of channels) {
+            if (!channel || channel.closed) {
+                continue;
+            }
+            try {
+                await channel.close();
+            } catch (err) {
+                warn('Error closing channel during force reset', { error: err.message });
+            }
         }
     }
 

@@ -27,6 +27,7 @@ class RabbitMQConnection {
             username: this.config.username,
             vhost: this.config.vhost,
             protocol: this.config.protocol,
+            heartbeat: this.config.heartbeat,
             ssl: !!this.config.ssl
         });
         this.isConnecting = false;
@@ -40,7 +41,11 @@ class RabbitMQConnection {
 
         this.isConnecting = true;
         try {
-            info('Attempting to connect to RabbitMQ', { hostname: this.config.hostname, port: this.config.port });
+            info('Attempting to connect to RabbitMQ', {
+                hostname: this.config.hostname,
+                port: this.config.port,
+                heartbeat: this.config.heartbeat
+            });
             this.connection = await amqp.connect({
                 hostname: this.config.hostname,
                 port: this.config.port,
@@ -48,6 +53,7 @@ class RabbitMQConnection {
                 password: this.config.password,
                 vhost: this.config.vhost,
                 protocol: this.config.protocol,
+                heartbeat: this.config.heartbeat,
                 ...(this.config.ssl ? { ssl: this.config.ssl } : {})
             });
 

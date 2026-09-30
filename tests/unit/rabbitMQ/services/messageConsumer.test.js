@@ -68,10 +68,12 @@ describe('Message Consumer', () => {
     it('should initialize publish and consume channels', async () => {
       // Arrange
       const mockPublishChannel = {
-        connection: { closed: false }
+        connection: { closed: false },
+        on: jest.fn()
       };
       const mockConsumeChannel = {
-        connection: { closed: false }
+        connection: { closed: false },
+        on: jest.fn()
       };
 
       mockRabbitMQ.getChannel
@@ -89,10 +91,12 @@ describe('Message Consumer', () => {
     it('should not re-initialize if already initialized', async () => {
       // Arrange
       const mockPublishChannel = {
-        connection: { closed: false }
+        connection: { closed: false },
+        on: jest.fn()
       };
       const mockConsumeChannel = {
-        connection: { closed: false }
+        connection: { closed: false },
+        on: jest.fn()
       };
 
       messageConsumer.messageConsumer.isInitialized = true;
@@ -123,14 +127,43 @@ describe('Message Consumer', () => {
     });
   });
 
+  describe('resetForForceSetup', () => {
+    it('should clear consumers and close channels', async () => {
+      const mockPublishChannel = {
+        closed: false,
+        close: jest.fn().mockResolvedValue(undefined)
+      };
+      const mockConsumeChannel = {
+        closed: false,
+        close: jest.fn().mockResolvedValue(undefined)
+      };
+
+      messageConsumer.messageConsumer.isInitialized = true;
+      messageConsumer.messageConsumer.publishChannel = mockPublishChannel;
+      messageConsumer.messageConsumer.consumeChannel = mockConsumeChannel;
+      messageConsumer.messageConsumer.activeConsumers.add('merchant-events-queue');
+
+      await messageConsumer.messageConsumer.resetForForceSetup();
+
+      expect(messageConsumer.messageConsumer.isInitialized).toBe(false);
+      expect(messageConsumer.messageConsumer.publishChannel).toBeNull();
+      expect(messageConsumer.messageConsumer.consumeChannel).toBeNull();
+      expect(messageConsumer.messageConsumer.activeConsumers.size).toBe(0);
+      expect(mockPublishChannel.close).toHaveBeenCalled();
+      expect(mockConsumeChannel.close).toHaveBeenCalled();
+    });
+  });
+
   describe('ensureChannelsReady', () => {
     it('should re-initialize if channels are closed', async () => {
       // Arrange
       const mockPublishChannel = {
-        connection: { closed: true }
+        connection: { closed: true },
+        on: jest.fn()
       };
       const mockConsumeChannel = {
-        connection: { closed: true }
+        connection: { closed: true },
+        on: jest.fn()
       };
 
       messageConsumer.messageConsumer.publishChannel = mockPublishChannel;
@@ -138,10 +171,12 @@ describe('Message Consumer', () => {
       messageConsumer.messageConsumer.isInitialized = true;
 
       const newPublishChannel = {
-        connection: { closed: false }
+        connection: { closed: false },
+        on: jest.fn()
       };
       const newConsumeChannel = {
-        connection: { closed: false }
+        connection: { closed: false },
+        on: jest.fn()
       };
 
       mockRabbitMQ.getChannel

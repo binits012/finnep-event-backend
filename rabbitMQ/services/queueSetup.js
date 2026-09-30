@@ -29,6 +29,8 @@ const setupQueues = async (force = false) => {
     try {
         if (force) {
             warn('Force queue setup requested - reinitializing queue consumers');
+            // Clear stale consumer tracking and channels so consumeQueue re-registers.
+            await messageConsumer.resetForForceSetup();
         }
         info('Starting queue setup...');
         await messageConsumer.initialize();

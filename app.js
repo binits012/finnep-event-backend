@@ -378,6 +378,17 @@ try {
         console.log('RabbitMQ reconnected, forcing queue consumer re-setup...');
         await setupQueues(true);
     });
+    const recoverQueueConsumers = async (reason) => {
+        console.warn(`Queue watchdog: recovering consumers (${reason})`);
+        try {
+            await rabbitMQ.getConnection();
+            await setupQueues(true);
+        } catch (recoverError) {
+            console.error('Queue watchdog recovery failed:', recoverError.message || recoverError);
+            // Kick connection layer; onReconnect will call setupQueues(true)
+            await rabbitMQ.reconnect();
+        }
+    };
     const queueWatchdogMs = parseInt(process.env.RABBITMQ_QUEUE_WATCHDOG_MS || '30000', 10);
     queueWatchdogInterval = setInterval(async () => {
         if (queueWatchdogRunning) return;
@@ -385,13 +396,13 @@ try {
         try {
             const channel = messageConsumer.consumeChannel;
             if (!channel) {
-                console.warn('Queue watchdog: consume channel not available, skipping check');
+                await recoverQueueConsumers('consume channel not available');
                 return;
             }
 
             // Check if channel connection is valid before attempting operations
             if (channel.connection?.closed || channel.connection?.destroyed) {
-                console.warn('Queue watchdog: consume channel connection is closed, will trigger reconnection on next operation');
+                await recoverQueueConsumers('consume channel connection closed');
                 return;
             }
 
@@ -404,16 +415,15 @@ try {
                     }
                 } catch (checkError) {
                     if (checkError.message?.includes('Channel closed') || checkError.message?.includes('closed')) {
-                        console.warn(`Queue watchdog: channel closed while checking ${queueName}, will reconnect`);
-                        return; // Exit watchdog, let reconnect handler deal with it
+                        await recoverQueueConsumers(`channel closed while checking ${queueName}`);
+                        return;
                     }
                     throw checkError; // Re-throw non-channel-closed errors
                 }
             }
 
             if (zeroConsumerQueues.length > 0) {
-                console.warn('Queue watchdog detected missing consumers, forcing queue setup:', zeroConsumerQueues.join(', '));
-                await setupQueues(true);
+                await recoverQueueConsumers(`missing consumers: ${zeroConsumerQueues.join(', ')}`);
             }
         } catch (watchdogError) {
             console.error('Queue watchdog error:', watchdogError.message || watchdogError, {
