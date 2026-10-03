@@ -6,7 +6,8 @@ import { refreshPartnerCorsOriginsFromMerchants } from '../util/corsAllowlist.js
 import {
 	publishMerchantSiloProvisionedSafe,
 	publishMerchantSiloDeploymentRequestedSafe,
-	publishMerchantSiloDeploymentStatusChangedSafe
+	publishMerchantSiloDeploymentStatusChangedSafe,
+	publishMerchantSiloChromeScaleUpdatedSafe
 } from '../util/merchantEventPublisher.js'
 import { normalizeSiloSettings, getSiloHostingSummaryForAdmin } from '../util/siloSettings.js'
 import * as model from '../model/mongoModel.js'
@@ -216,6 +217,32 @@ export const retrySiloDeployment = async (req, res) => {
 			reconcileIssues: reconcile.issues || []
 		})
 	} catch (err) {
+		error(err)
+		return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({ error: INTERNAL_SERVER_ERROR })
+	}
+}
+
+export const updateSiloChromeScale = async (req, res) => {
+	try {
+		const chromeScale = req.body?.chromeScale
+		const updated = await Merchant.updateSiloChromeScale(req.params.id, chromeScale)
+		if (!updated) {
+			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({ error: RESOURCE_NOT_FOUND })
+		}
+		await publishMerchantSiloChromeScaleUpdatedSafe({
+			merchant: updated,
+			chromeScale,
+			updatedBy: req.user?.email || 'cms-silo-chrome-scale'
+		})
+		const siloHosting = await loadSiloHostingSummary(req.params.id)
+		return res.status(consts.HTTP_STATUS_OK).json({ siloHosting })
+	} catch (err) {
+		if (err?.code === 'INVALID_CHROME_SCALE') {
+			return res.status(consts.HTTP_STATUS_BAD_REQUEST).json({
+				message: 'chromeScale must be small, regular, or large',
+				error: 'INVALID_CHROME_SCALE'
+			})
+		}
 		error(err)
 		return res.status(consts.HTTP_STATUS_INTERNAL_SERVER_ERROR).json({ error: INTERNAL_SERVER_ERROR })
 	}

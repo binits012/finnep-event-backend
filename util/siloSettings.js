@@ -105,10 +105,18 @@ const ALLOWED_BRAND_RADIUS = new Set(['sharp', 'soft', 'pill'])
 const ALLOWED_BRAND_HEADING_CASE = new Set(['upper', 'sentence'])
 const ALLOWED_BRAND_BUTTON_STYLE = new Set(['solid', 'outline'])
 const ALLOWED_BRAND_DENSITY = new Set(['compact', 'regular', 'airy'])
+const ALLOWED_BRAND_CHROME_SCALE = new Set(['small', 'regular', 'large'])
+const ALLOWED_BRAND_HOME_LAYOUT = new Set(['carousel', 'list', 'grid', 'featured'])
 
 function pickOptionalBrandEnum(value, previous, allowed) {
 	if (allowed.has(value)) return value
 	if (allowed.has(previous)) return previous
+	return undefined
+}
+
+function normalizeHomeLayoutValue(value) {
+	if (value === 'agenda') return 'featured'
+	if (ALLOWED_BRAND_HOME_LAYOUT.has(value)) return value
 	return undefined
 }
 
@@ -202,18 +210,25 @@ export function normalizeSiloSettings(value = {}, existing = {}) {
 					? brandConfig.heroStyle
 					: (prev.brandConfig?.heroStyle || DEFAULT_SILO_SETTINGS.brandConfig.heroStyle)
 			}
+			const homeLayout = normalizeHomeLayoutValue(brandConfig.homeLayout)
+				|| normalizeHomeLayoutValue(prev.brandConfig?.homeLayout)
 			const radius = pickOptionalBrandEnum(brandConfig.radius, prev.brandConfig?.radius, ALLOWED_BRAND_RADIUS)
 			const headingCase = pickOptionalBrandEnum(brandConfig.headingCase, prev.brandConfig?.headingCase, ALLOWED_BRAND_HEADING_CASE)
 			const buttonStyle = pickOptionalBrandEnum(brandConfig.buttonStyle, prev.brandConfig?.buttonStyle, ALLOWED_BRAND_BUTTON_STYLE)
 			const density = pickOptionalBrandEnum(brandConfig.density, prev.brandConfig?.density, ALLOWED_BRAND_DENSITY)
+			const chromeScale = pickOptionalBrandEnum(brandConfig.chromeScale, prev.brandConfig?.chromeScale, ALLOWED_BRAND_CHROME_SCALE)
+			delete nextBrand.homeLayout
 			delete nextBrand.radius
 			delete nextBrand.headingCase
 			delete nextBrand.buttonStyle
 			delete nextBrand.density
+			delete nextBrand.chromeScale
+			if (homeLayout) nextBrand.homeLayout = homeLayout
 			if (radius) nextBrand.radius = radius
 			if (headingCase) nextBrand.headingCase = headingCase
 			if (buttonStyle) nextBrand.buttonStyle = buttonStyle
 			if (density) nextBrand.density = density
+			if (chromeScale) nextBrand.chromeScale = chromeScale
 			return nextBrand
 		})(),
 		deployment: {
@@ -328,6 +343,7 @@ export function getSiloHostingSummaryForAdmin(siloSettings, apiCredentials = [])
 
 	return {
 		enabled: silo.enabled,
+		chromeScale: silo.brandConfig.chromeScale || 'regular',
 		activeApiKeyIds,
 		deployment: {
 			mode: deployment.mode || 'per_merchant',

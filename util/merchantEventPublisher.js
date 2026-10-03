@@ -282,6 +282,75 @@ export async function publishMerchantNabilToggled({ merchant, nabilEnabled, upda
 	info('Merchant Nabil toggle event published: merchantId=%s enabled=%s', merchant.merchantId, nabilEnabled)
 }
 
+/**
+ * Notify EMS when CMS changes the storefront bar and footer size.
+ */
+export async function publishMerchantSiloChromeScaleUpdated({ merchant, chromeScale, updatedBy }) {
+	const correlationId = uuidv4()
+	const messageId = uuidv4()
+	const routingKey = 'external.merchant.status.updated'
+	const eventType = 'MerchantSiloChromeScaleUpdated'
+
+	const outboxMessageData = {
+		messageId,
+		exchange: 'event-merchant-exchange',
+		routingKey,
+		messageBody: {
+			eventType,
+			aggregateId: merchant._id.toString(),
+			data: {
+				merchantId: merchant.merchantId,
+				chromeScale,
+				updatedBy,
+				updatedAt: new Date()
+			},
+			metadata: {
+				correlationId,
+				causationId: messageId,
+				timestamp: new Date().toISOString(),
+				version: 1
+			}
+		},
+		headers: {
+			'content-type': 'application/json',
+			'message-type': eventType,
+			'correlation-id': correlationId
+		},
+		correlationId,
+		eventType,
+		aggregateId: merchant._id.toString(),
+		status: 'pending',
+		exchangeType: 'topic'
+	}
+
+	await OutboxMessage.createOutboxMessage(outboxMessageData)
+
+	await messageConsumer.publishToExchange(
+		outboxMessageData.exchange,
+		outboxMessageData.routingKey,
+		outboxMessageData.messageBody,
+		{
+			exchangeType: 'topic',
+			publishOptions: {
+				correlationId: outboxMessageData.correlationId,
+				contentType: 'application/json',
+				persistent: true,
+				headers: outboxMessageData.headers
+			}
+		}
+	)
+
+	info('Merchant silo chrome scale event published: merchantId=%s scale=%s', merchant.merchantId, chromeScale)
+}
+
+export async function publishMerchantSiloChromeScaleUpdatedSafe(options) {
+	try {
+		await publishMerchantSiloChromeScaleUpdated(options)
+	} catch (publishError) {
+		error('Failed to publish merchant silo chrome scale event:', publishError)
+	}
+}
+
 export async function publishMerchantNabilToggledSafe(options) {
 	try {
 		await publishMerchantNabilToggled(options)

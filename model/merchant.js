@@ -397,6 +397,29 @@ export async function updateMerchantById(id, updateData) {
   }
 }
 
+const ALLOWED_SILO_CHROME_SCALE = new Set(['small', 'regular', 'large'])
+
+export async function updateSiloChromeScale(merchantId, chromeScale) {
+  if (!ALLOWED_SILO_CHROME_SCALE.has(chromeScale)) {
+    const invalid = new Error('INVALID_CHROME_SCALE')
+    invalid.code = 'INVALID_CHROME_SCALE'
+    throw invalid
+  }
+  const merchant = await model.Merchant.findById(merchantId)
+  if (!merchant) return null
+  const current = merchant.siloSettings?.toObject?.() || merchant.siloSettings || {}
+  const next = normalizeSiloSettings(
+    {
+      brandConfig: {
+        ...(current.brandConfig || {}),
+        chromeScale
+      }
+    },
+    current
+  )
+  return updateMerchantById(merchantId, { siloSettings: next })
+}
+
 export async function deleteMerchantById(id) {
   try {
     const deletedMerchant = await model.Merchant.findByIdAndDelete(id);

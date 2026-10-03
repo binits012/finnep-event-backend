@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals'
-import { normalizeSiloSettings, toPartnerThemePayload, mergeSiloSettingsFromEmsSync } from '../../../util/siloSettings.js'
+import { normalizeSiloSettings, toPartnerThemePayload, mergeSiloSettingsFromEmsSync, getSiloHostingSummaryForAdmin } from '../../../util/siloSettings.js'
 
 describe('siloSettings util', () => {
 	it('normalizes partial settings with defaults', () => {
@@ -64,6 +64,13 @@ describe('siloSettings util', () => {
 
 		expect(normalizeSiloSettings({ brandConfig: { density: 'airy' } }).brandConfig.density).toBe('airy')
 		expect(normalizeSiloSettings({ brandConfig: { density: 'loose' } }).brandConfig.density).toBeUndefined()
+		expect(normalizeSiloSettings({ brandConfig: { chromeScale: 'large' } }).brandConfig.chromeScale).toBe('large')
+		expect(normalizeSiloSettings({ brandConfig: { chromeScale: 'huge' } }).brandConfig.chromeScale).toBeUndefined()
+		expect(getSiloHostingSummaryForAdmin({ brandConfig: { chromeScale: 'small' } }).chromeScale).toBe('small')
+		expect(getSiloHostingSummaryForAdmin({}).chromeScale).toBe('regular')
+		expect(normalizeSiloSettings({ brandConfig: { homeLayout: 'list' } }).brandConfig.homeLayout).toBe('list')
+		expect(normalizeSiloSettings({ brandConfig: { homeLayout: 'agenda' } }).brandConfig.homeLayout).toBe('featured')
+		expect(normalizeSiloSettings({ brandConfig: { homeLayout: 'tiles' } }).brandConfig.homeLayout).toBeUndefined()
 	})
 
 	it('preserves previous presentation controls when incoming value is invalid', () => {

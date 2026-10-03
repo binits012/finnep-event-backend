@@ -170,6 +170,9 @@ router.route('/merchant/:id/api-credentials/:keyId')
 router.route('/merchant/:id/silo-deployment/retry')
     .post(authenticateAdmin, apiCredential.retrySiloDeployment)
 
+router.route('/merchant/:id/silo-chrome-scale')
+    .patch(authenticateAdmin, apiCredential.updateSiloChromeScale)
+
 // Paytrail admin routes (admin only)
 router.route('/admin/paytrail/create-submerchant')
     .post(authenticate, requireAdmin, createPaytrailSubMerchant)
