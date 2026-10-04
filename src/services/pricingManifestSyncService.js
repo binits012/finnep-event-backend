@@ -3,6 +3,7 @@ import { manifestEncoderService } from './manifestEncoderService.js';
 import { downloadPricingFromS3 } from '../../util/aws.js';
 import { error, info } from '../../model/logger.js';
 import * as Event from '../../model/event.js';
+import { loadVenueSectionContext } from './venueSectionContextService.js';
 const mongoose = await import('mongoose');
 
 const getAreaSoldTotal = (areaSoldCounts) => {
@@ -164,6 +165,55 @@ export class PricingManifestSyncService {
 			});
 			throw err;
 		}
+	}
+
+	/**
+	 * Build the storefront EventManifest from the venue map when one was never synced.
+	 * Ticket-model events do not go through the pricing-configuration S3 sync, but the
+	 * public seat page still looks up this document.
+	 * @param {string} eventMongoId
+	 * @param {string} externalEventId
+	 * @param {string} venueId
+	 * @returns {Promise<Object>}
+	 */
+	async ensureEventManifestFromVenue(eventMongoId, externalEventId, venueId) {
+		const existing = await EventManifest.findOne({ eventId: String(eventMongoId) }).lean();
+		if (existing) return existing;
+		if (!venueId) {
+			throw new Error('Cannot build event manifest without a venue id');
+		}
+
+		const { places } = await loadVenueSectionContext({ venueId });
+		if (!Array.isArray(places) || places.length === 0) {
+			throw new Error(`Venue manifest not found or has no places for venue ${venueId}`);
+		}
+
+		const fullManifest = {
+			venue: venueId,
+			eventId: String(eventMongoId),
+			places,
+		};
+		const encodedManifest = manifestEncoderService.encodeManifest(fullManifest, {});
+		const sortedPlaces = this._sortPlacesForEncoding(places);
+		const { pricingZones } = manifestEncoderService.calculatePartitions(sortedPlaces, {});
+		encodedManifest.pricingZones = pricingZones;
+
+		info(`[PricingManifestSyncService] Building event manifest from venue map`, {
+			eventMongoId,
+			externalEventId,
+			venueId,
+			placesCount: places.length,
+		});
+
+		return this.getOrCreateEventManifest(
+			eventMongoId,
+			externalEventId,
+			venueId,
+			encodedManifest,
+			null,
+			null,
+			{ places }
+		);
 	}
 
 	/**

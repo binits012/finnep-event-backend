@@ -121,6 +121,53 @@ function getAreaSoldTotal(areaSoldCounts) {
     return Object.values(areaSoldCounts).reduce((sum, value) => sum + (Number(value || 0) || 0), 0);
 }
 
+async function ensureStorefrontEventManifest({
+    eventId,
+    externalEventId,
+    venue,
+    pricingConfiguration,
+    pricingModel,
+    hasSeatSelection,
+    manifestHasSales,
+}) {
+    if (!eventId || hasSeatSelection !== true) return;
+    const venueId = venue?.venueId || pricingConfiguration?.venueId;
+    if (!venueId) return;
+
+    const shouldSyncPricing =
+        !manifestHasSales &&
+        pricingModel === 'pricing_configuration' &&
+        Boolean(pricingConfiguration?.s3Key) &&
+        (pricingConfiguration?.needsSync === true ||
+            !(await EventManifest.findOne({ eventId: String(eventId) }).select('_id').lean()));
+
+    if (shouldSyncPricing) {
+        info(`[ensureStorefrontEventManifest] Syncing pricing manifest for event ${externalEventId}`, {
+            eventId,
+            pricingConfigurationId: pricingConfiguration.pricingConfigurationId,
+            venueId: pricingConfiguration.venueId || venueId,
+            s3Key: pricingConfiguration.s3Key,
+        });
+        await pricingManifestSyncService.syncPricingManifest(eventId, externalEventId, {
+            s3Key: pricingConfiguration.s3Key,
+            venueId: pricingConfiguration.venueId || venueId,
+            pricingConfigurationId: pricingConfiguration.pricingConfigurationId,
+        });
+        return;
+    }
+
+    if (manifestHasSales) return;
+    const existing = await EventManifest.findOne({ eventId: String(eventId) }).select('_id').lean();
+    if (existing) return;
+
+    info(`[ensureStorefrontEventManifest] Building event manifest from venue map for event ${externalEventId}`, {
+        eventId,
+        venueId,
+        pricingModel: pricingModel || 'ticket_info',
+    });
+    await pricingManifestSyncService.ensureEventManifestFromVenue(eventId, externalEventId, venueId);
+}
+
 async function hasManifestSalesForEvent(eventMongoId) {
     if (!eventMongoId) return false;
     const manifest = await EventManifest.findOne({ eventId: String(eventMongoId) }).lean();
@@ -311,6 +358,26 @@ async function handleEventCreated(message) {
         });
     }
 
+    if (savedEvent?._id) {
+        try {
+            await ensureStorefrontEventManifest({
+                eventId: savedEvent._id,
+                externalEventId,
+                venue: savedEvent.venue || venue,
+                pricingConfiguration: message?.pricingConfiguration,
+                pricingModel: venue?.pricingModel || savedEvent.venue?.pricingModel,
+                hasSeatSelection: isSeatedEvent === true || venue?.hasSeatSelection === true,
+                manifestHasSales: false,
+            });
+        } catch (syncError) {
+            error(`[handleEventCreated] Failed to build storefront event manifest for ${externalEventId}:`, {
+                error: syncError.message,
+                stack: syncError.stack,
+                eventId: savedEvent._id,
+            });
+        }
+    }
+
     await inboxModel.markProcessed(message?.metaData?.causationId);
     console.log('[handleEventCreated] Successfully created event and marked inbox message processed', {
         externalEventId,
@@ -397,6 +464,7 @@ async function handleEventUpdated(message) {
     const event_end_date = resolveEventEndDate({ message, existingEvent });
     const isSeatedEvent = resolveIsSeatedEvent({ message, existingEvent, venue });
     const featuredOnStorefront = resolveFeaturedOnStorefront({ message, existingEvent });
+    let manifestEventId = existingEvent?._id;
 
     if (!existingEvent) {
         console.log(`Event with ID ${externalEventId} not found, creating new event instead`);
@@ -429,6 +497,7 @@ async function handleEventUpdated(message) {
                 updatedBy: 'system-trust-policy',
             });
         }
+        manifestEventId = createdEvent?._id;
     } else {
         // Content sync from EMS must not clobber FEB publish state (active/featured).
         // Storefront featuring is merchant-owned and must sync from EMS.
@@ -449,8 +518,6 @@ async function handleEventUpdated(message) {
         await Event.updateEventById(existingEvent._id, updatePayload);
     }
 
-    // Handle pricing manifest sync if needed
-    // Check if pricing configuration needs to be synced and event has seat selection
     const pricingConfiguration = message?.pricingConfiguration;
     const hasSeatSelection =
         isSeatedEvent === true ||
@@ -459,54 +526,33 @@ async function handleEventUpdated(message) {
         existingEvent?.venue?.hasSeatSelection === true;
     const pricingModel = venue?.pricingModel || existingEvent?.venue?.pricingModel;
 
-    // Only sync pricing manifest if:
-    // 1. hasSeatSelection is true
-    // 2. pricingModel is 'pricing_configuration' (not 'ticket_info')
-    // 3. pricingConfiguration.needsSync is true
-    if (pricingConfiguration?.needsSync === true && hasSeatSelection === true && pricingModel === 'pricing_configuration') {
+    if (manifestEventId) {
         try {
-            if (manifestHasSales) {
-                info(`[handleEventUpdated] Skipping pricing manifest sync because manifest has sold seats`, {
-                    eventId: existingEvent?._id,
-                    externalEventId
-                });
-                await inboxModel.markProcessed(message?.metaData?.causationId);
-                return;
-            }
-
-            info(`[handleEventUpdated] Starting pricing manifest sync for event ${externalEventId}`, {
-                eventId: existingEvent?._id,
-                pricingConfigurationId: pricingConfiguration.pricingConfigurationId,
-                venueId: pricingConfiguration.venueId,
-                s3Key: pricingConfiguration.s3Key
+            await ensureStorefrontEventManifest({
+                eventId: manifestEventId,
+                externalEventId,
+                venue,
+                pricingConfiguration,
+                pricingModel,
+                hasSeatSelection,
+                manifestHasSales,
             });
-
-            await pricingManifestSyncService.syncPricingManifest(existingEvent._id, externalEventId, {
-                s3Key: pricingConfiguration.s3Key,
-                venueId: pricingConfiguration.venueId,
-                pricingConfigurationId: pricingConfiguration.pricingConfigurationId
-            });
-
-            info(`[handleEventUpdated] Pricing manifest sync completed successfully for event ${externalEventId}`);
         } catch (syncError) {
-            // Log error and send email notification, but don't fail the event update
-            error(`[handleEventUpdated] Error syncing pricing manifest for event ${externalEventId}:`, {
+            error(`[handleEventUpdated] Error syncing storefront event manifest for event ${externalEventId}:`, {
                 error: syncError.message,
                 stack: syncError.stack,
-                eventId: existingEvent?._id,
+                eventId: manifestEventId,
                 pricingConfiguration
             });
 
-            // Send email notification to merchant
             try {
                 const merchantEmail = process.env.REPORTING_EMAIL || 'binits09@gmail.com';
-                const eventTitle = message?.title || existingEvent?.eventTitle || 'Unknown Event';
+                const eventTitleForMail = message?.title || existingEvent?.eventTitle || 'Unknown Event';
                 const errorMessage = syncError?.message || String(syncError) || 'Unknown error';
-
                 await sendPricingSyncErrorEmail(
                     merchantEmail,
                     externalEventId,
-                    eventTitle,
+                    eventTitleForMail,
                     errorMessage
                 );
             } catch (emailError) {

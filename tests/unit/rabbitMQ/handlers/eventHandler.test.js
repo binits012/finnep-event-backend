@@ -116,6 +116,14 @@ beforeAll(async () => {
     publishEventStatusUpdates: jest.fn().mockResolvedValue({ published: 0, failed: 0 }),
   }));
 
+  const pricingSyncPath = resolve(__dirname, '../../../../src/services/pricingManifestSyncService.js');
+  jest.unstable_mockModule(pricingSyncPath, () => ({
+    pricingManifestSyncService: {
+      syncPricingManifest: jest.fn().mockResolvedValue(null),
+      ensureEventManifestFromVenue: jest.fn().mockResolvedValue(null),
+    },
+  }));
+
   eventHandler = await import('../../../../rabbitMQ/handlers/eventHandler.js');
   Event = await import('../../../../model/event.js');
   inboxModel = (await import('../../../../model/inboxMessage.js')).inboxModel;

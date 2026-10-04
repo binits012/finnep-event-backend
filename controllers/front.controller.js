@@ -70,6 +70,7 @@ import { downloadPricingFromS3 } from '../util/aws.js'
 import { loadVenueSectionContext, deriveSectionsFromPlaces } from '../src/services/venueSectionContextService.js'
 import * as seatController from './seat.controller.js'
 import { EventManifest, Manifest, PlatformMarketingConsent, Survey, SurveyResponse } from '../model/mongoModel.js';
+import { pricingManifestSyncService } from '../src/services/pricingManifestSyncService.js';
 import { Venue } from '../model/mongoModel.js'
 import { PersonalDataRequest } from '../model/personalDataRequest.js'
 import { getPresalePayload, consumePresaleToken } from '../util/presaleToken.js'
@@ -6366,7 +6367,27 @@ export const getEventSeatsPublic = async (req, res, next) => {
 		// Do not populate venue here — missing Venue docs would null out the ref id we need.
 		const eventMongoId = String(event._id);
 
-		const encodedManifest = await EventManifest.findOne({ eventId: eventMongoId }).lean();
+		let encodedManifest = await EventManifest.findOne({ eventId: eventMongoId }).lean();
+
+		if (!encodedManifest && event.venue?.venueId) {
+			try {
+				if (event.venue?.pricingModel === 'pricing_configuration' && event.venue?.manifestS3Key) {
+					await pricingManifestSyncService.syncPricingManifest(eventMongoId, String(event.externalEventId || ''), {
+						s3Key: event.venue.manifestS3Key,
+						venueId: String(event.venue.venueId),
+					});
+				} else {
+					await pricingManifestSyncService.ensureEventManifestFromVenue(
+						eventMongoId,
+						String(event.externalEventId || ''),
+						String(event.venue.venueId)
+					);
+				}
+				encodedManifest = await EventManifest.findOne({ eventId: eventMongoId }).lean();
+			} catch (manifestErr) {
+				error('[getEventSeatsPublic] Could not build missing event manifest', manifestErr?.message || manifestErr);
+			}
+		}
 
 		if (!encodedManifest) {
 			return res.status(consts.HTTP_STATUS_RESOURCE_NOT_FOUND).json({
